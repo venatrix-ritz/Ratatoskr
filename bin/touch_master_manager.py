@@ -33,7 +33,6 @@ DEFAULT_CONFIG = {
     "glide": False,
     "friction": 7,
     "scroll_speed": 3,
-    "edge_scroll": False,
     "tap_to_click": True,
     "long_press_right_click": False,
     "long_press_delay_ms": 450,
@@ -211,13 +210,6 @@ def launch_gui() -> None:
             self.sens_scale.connect("value-changed", self.on_sensitivity_changed)
             sens_box.pack_end(self.sens_scale, False, False, 0)
 
-            # Scroll mode toggle
-            self.edge_scroll_switch = Gtk.Switch()
-            self.edge_scroll_switch.set_active(self.cfg.get("edge_scroll", False))
-            self.edge_scroll_switch.connect("notify::active", self.on_edge_scroll_toggled)
-            edge_row = self._make_switch_row("Edge Scrollbar (instead of Two-Finger)", self.edge_scroll_switch)
-            dyn_box.pack_start(edge_row, False, False, 0)
-
             # Tap to click
             self.tap_click_switch = Gtk.Switch()
             self.tap_click_switch.set_active(self.cfg.get("tap_to_click", True))
@@ -362,14 +354,6 @@ def launch_gui() -> None:
             self.cfg["sensitivity"] = val
             save_config(self.cfg)
             send_ipc({"action": "set_settings", "settings": {"sensitivity": val}})
-
-        def on_edge_scroll_toggled(self, switch, _param):
-            if self.updating_ui:
-                return
-            active = switch.get_active()
-            self.cfg["edge_scroll"] = active
-            save_config(self.cfg)
-            send_ipc({"action": "set_settings", "settings": {"edge_scroll": active}})
 
         def on_cfg_switch(self, switch, key: str):
             if self.updating_ui:

@@ -304,23 +304,6 @@ class TouchGestureProcessor:
         self.glide_enabled = True
         self.friction = 5  # 1 (slickest) to 10 (most friction)
         self.scroll_speed = 3  # 1 (precision) to 5 (fast)
-        self.edge_scroll_enabled = False  # Edge scroll instead of 2-finger scroll
-        # Ergonomic right thumb vertical scroll zone: inset 50px from right/top/bottom of trackpad
-        self.edge_scroll_x_min = 1080.0
-        self.edge_scroll_x_max = 1170.0
-        self.edge_scroll_y_min = 162.0
-        self.edge_scroll_y_max = 1010.0
-        # Ergonomic bottom thumb horizontal scroll zone:
-        # Meets vertical bar with 50px margin, 50px margin on left, aligns at bottom y=1010.0
-        self.edge_scroll_h_x_min = 70.0
-        self.edge_scroll_h_x_max = 1030.0
-        self.edge_scroll_h_y_min = 940.0
-        self.edge_scroll_h_y_max = 1010.0
-
-        self.active_edge_scroll_tid: int | None = None
-        self.active_edge_scroll_axis: str | None = None  # "v" or "h"
-        self.scroll_rest_x = 0.0
-        self.scroll_rest_y = 0.0
         self.tap_to_click = True
         self.long_press_right_click = False  # Ven: press to hold or 2-finger, not both (default: 2-finger)
         self.long_press_delay_ms = 450  # 250 to 900 ms
@@ -369,7 +352,6 @@ class TouchGestureProcessor:
         glide: bool | None = None,
         friction: int | float | None = None,
         scroll_speed: int | float | None = None,
-        edge_scroll: bool | None = None,
         tap_to_click: bool | None = None,
         long_press_right_click: bool | None = None,
         long_press_delay_ms: int | float | None = None,
@@ -388,8 +370,6 @@ class TouchGestureProcessor:
             self.friction = max(1, min(10, int(round(float(friction)))))
         if scroll_speed is not None:
             self.scroll_speed = max(1, min(5, int(round(float(scroll_speed)))))
-        if edge_scroll is not None:
-            self.edge_scroll_enabled = bool(edge_scroll)
         if tap_to_click is not None:
             self.tap_to_click = bool(tap_to_click)
         # Ven's rule: Press to hold OR two finger right click, not both
@@ -413,7 +393,7 @@ class TouchGestureProcessor:
             self.drag_lock_enabled = bool(drag_lock_enabled)
         self.logger.log(
             DebugCode.SETTINGS_UPDATED,
-            f"sens={self.sensitivity}, friction={self.friction}, edge_scroll={self.edge_scroll_enabled}, 2f_right={self.two_finger_right_click}",
+            f"sens={self.sensitivity}, friction={self.friction}, 2f_right={self.two_finger_right_click}",
         )
 
     def get_settings(self) -> dict[str, Any]:
@@ -422,7 +402,6 @@ class TouchGestureProcessor:
             "glide": self.glide_enabled,
             "friction": self.friction,
             "scroll_speed": self.scroll_speed,
-            "edge_scroll": self.edge_scroll_enabled,
             "tap_to_click": self.tap_to_click,
             "long_press_right_click": self.long_press_right_click,
             "long_press_delay_ms": self.long_press_delay_ms,
@@ -437,10 +416,6 @@ class TouchGestureProcessor:
         """Reset all active tracking state and cancel timers cleanly."""
         self._cancel_long_press()
         self.active_contacts.clear()
-        self.active_edge_scroll_tid = None
-        self.active_edge_scroll_axis = None
-        self.scroll_rest_x = 0.0
-        self.scroll_rest_y = 0.0
         self.max_fingers = 0
         self.is_dragging = False
         self.accum_dist = 0.0
@@ -472,36 +447,6 @@ class TouchGestureProcessor:
         self.last_state_label = f"DOWN ({count} finger{'s' if count > 1 else ''})"
 
         if count == 1:
-            if self.edge_scroll_enabled:
-                if (
-                    (self.edge_scroll_x_min <= x <= self.edge_scroll_x_max)
-                    and (self.edge_scroll_y_min <= y <= self.edge_scroll_y_max)
-                ):
-                    self.active_edge_scroll_tid = tid
-                    self.active_edge_scroll_axis = "v"
-                    self.scroll_rest_x = 0.0
-                    self.scroll_rest_y = 0.0
-                    self.start_time = now
-                    self.last_move_time = now
-                    self.accum_dist = 0.0
-                    self.last_state_label = "EDGE SCROLL V"
-                    self.logger.log(DebugCode.STATUS_EDGE_SCROLL, f"vertical start x={x:.1f}, y={y:.1f}")
-                    return
-                elif (
-                    (self.edge_scroll_h_x_min <= x <= self.edge_scroll_h_x_max)
-                    and (self.edge_scroll_h_y_min <= y <= self.edge_scroll_h_y_max)
-                ):
-                    self.active_edge_scroll_tid = tid
-                    self.active_edge_scroll_axis = "h"
-                    self.scroll_rest_x = 0.0
-                    self.scroll_rest_y = 0.0
-                    self.start_time = now
-                    self.last_move_time = now
-                    self.accum_dist = 0.0
-                    self.last_state_label = "EDGE SCROLL H"
-                    self.logger.log(DebugCode.STATUS_EDGE_SCROLL, f"horizontal start x={x:.1f}, y={y:.1f}")
-                    return
-
             self.start_time = now
             self.last_move_time = now
             self.accum_dist = 0.0
@@ -527,37 +472,6 @@ class TouchGestureProcessor:
         dy = y - contact["last_y"]
         contact["last_x"] = x
         contact["last_y"] = y
-
-        # 1. Edge scroll handling with watchdog desync protection
-        if self.edge_scroll_enabled and self.active_edge_scroll_tid is not None:
-            if self.active_edge_scroll_tid not in self.active_contacts:
-                self.active_edge_scroll_tid = None
-                self.active_edge_scroll_axis = None
-                self.scroll_rest_x = 0.0
-                self.scroll_rest_y = 0.0
-            elif tid == self.active_edge_scroll_tid:
-                self.last_coords = (x, y)
-                scroll_divisor = max(4.0, 22.0 - (self.scroll_speed * 4.0))
-                if self.active_edge_scroll_axis == "v":
-                    self.last_state_label = "EDGE SCROLL V"
-                    target_dy = -dy * (HI_RES_NOTCH / scroll_divisor) + self.scroll_rest_y
-                    units_y = int(target_dy)
-                    self.scroll_rest_y = target_dy - units_y
-                    if units_y != 0:
-                        self.bridge.emit_scroll(0, units_y)
-                elif self.active_edge_scroll_axis == "h":
-                    self.last_state_label = "EDGE SCROLL H"
-                    target_dx = dx * (HI_RES_NOTCH / scroll_divisor) + self.scroll_rest_x
-                    units_x = int(target_dx)
-                    self.scroll_rest_x = target_dx - units_x
-                    if units_x != 0:
-                        self.bridge.emit_scroll(units_x, 0)
-                return
-            else:
-                return
-
-        if self.active_edge_scroll_tid is not None:
-            return
 
         self.accum_dist += math.hypot(dx, dy)
         self.last_coords = (x, y)
@@ -589,13 +503,12 @@ class TouchGestureProcessor:
 
         elif count == 2:
             self._cancel_long_press()
-            if not self.edge_scroll_enabled:
-                scroll_divisor = max(4.0, 22.0 - (self.scroll_speed * 4.0))
-                scroll_dy = int(-dy * (HI_RES_NOTCH / scroll_divisor))
-                scroll_dx = int(dx * (HI_RES_NOTCH / scroll_divisor))
-                if scroll_dx or scroll_dy:
-                    self.bridge.emit_scroll(scroll_dx, scroll_dy)
-                    self.last_state_label = "SCROLL 2-FINGER"
+            scroll_divisor = max(4.0, 22.0 - (self.scroll_speed * 4.0))
+            scroll_dy = int(-dy * (HI_RES_NOTCH / scroll_divisor))
+            scroll_dx = int(dx * (HI_RES_NOTCH / scroll_divisor))
+            if scroll_dx or scroll_dy:
+                self.bridge.emit_scroll(scroll_dx, scroll_dy)
+                self.last_state_label = "SCROLL 2-FINGER"
 
         elif count >= 3:
             self._cancel_long_press()
@@ -624,25 +537,11 @@ class TouchGestureProcessor:
 
     def touch_up(self, tid: int, now: float) -> None:
         self._cancel_long_press()
-        if self.edge_scroll_enabled and tid == self.active_edge_scroll_tid:
-            self.active_edge_scroll_tid = None
-            self.active_edge_scroll_axis = None
-            self.scroll_rest_x = 0.0
-            self.scroll_rest_y = 0.0
-            self.active_contacts.pop(tid, None)
-            self.last_state_label = "IDLE"
-            return
-
         contact = self.active_contacts.pop(tid, None)
         if not contact:
             return
 
         if len(self.active_contacts) == 0:
-            # Guarantee edge scroll reset whenever trackpad is clear
-            self.active_edge_scroll_tid = None
-            self.active_edge_scroll_axis = None
-            self.scroll_rest_x = 0.0
-            self.scroll_rest_y = 0.0
 
             duration = now - self.start_time
 

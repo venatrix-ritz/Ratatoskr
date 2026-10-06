@@ -107,7 +107,7 @@ def create_qwerty_rows() -> list[list[Key]]:
             Key("0", KEY_0, 1.0, ")"),
             Key("-", KEY_MINUS, 1.0, "_"),
             Key("=", KEY_EQUAL, 1.0, "+"),
-            Key("⌫", KEY_BACKSPACE, 1.5),
+            Key("Bksp", KEY_BACKSPACE, 1.5),
         ],
         [
             Key("Tab", KEY_TAB, 1.3),
@@ -141,7 +141,7 @@ def create_qwerty_rows() -> list[list[Key]]:
             Key("Enter", KEY_ENTER, 2.3),
         ],
         [
-            Key("⇧", KEY_LEFTSHIFT, 1.8, is_modifier=True, special="shift"),
+            Key("Shift", KEY_LEFTSHIFT, 1.8, is_modifier=True, special="shift"),
             Key("z", KEY_Z, 1.0),
             Key("x", KEY_X, 1.0),
             Key("c", KEY_C, 1.0),
@@ -152,17 +152,17 @@ def create_qwerty_rows() -> list[list[Key]]:
             Key(",", KEY_COMMA, 1.0, "<"),
             Key(".", KEY_DOT, 1.0, ">"),
             Key("/", KEY_SLASH, 1.0, "?"),
-            Key("⇧", KEY_RIGHTSHIFT, 1.7, is_modifier=True, special="shift"),
+            Key("Shift", KEY_RIGHTSHIFT, 1.7, is_modifier=True, special="shift"),
         ],
         [
             Key("Ctrl", KEY_LEFTCTRL, 1.2, is_modifier=True, special="ctrl"),
             Key("Alt", KEY_LEFTALT, 1.2, is_modifier=True, special="alt"),
             Key("Win", KEY_LEFTMETA, 1.1, is_modifier=True, special="super"),
             Key("Space", KEY_SPACE, 5.0),
-            Key("←", KEY_LEFT, 1.1),
-            Key("↑", KEY_UP, 1.1),
-            Key("↓", KEY_DOWN, 1.1),
-            Key("→", KEY_RIGHT, 1.1),
+            Key("Left", KEY_LEFT, 1.1),
+            Key("Up", KEY_UP, 1.1),
+            Key("Down", KEY_DOWN, 1.1),
+            Key("Right", KEY_RIGHT, 1.1),
         ],
     ]
 
@@ -177,6 +177,8 @@ class KeyboardLayout:
         self.height = height
         self.rows = create_qwerty_rows()
         self.shift_active = False
+        self.caps_lock = False
+        self.last_shift_time = 0.0
         self.ctrl_active = False
         self.alt_active = False
         self.layout_keys()

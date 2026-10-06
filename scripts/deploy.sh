@@ -24,9 +24,10 @@ ssh "${THOR_HOST}" "chmod +x '${APP_DIR}/bin/thor_app.py' '${APP_DIR}/bin/touch_
 echo "==> Syncing standalone app launcher & icon..."
 ssh "${THOR_HOST}" "mkdir -p ~/.local/share/applications ~/.local/share/icons/hicolor/scalable/apps"
 scp touch-master.desktop "${THOR_HOST}:~/.local/share/applications/touch-master.desktop"
+scp touch-master-stop.desktop "${THOR_HOST}:~/.local/share/applications/touch-master-stop.desktop"
 scp touch-master.svg "${THOR_HOST}:~/.local/share/icons/hicolor/scalable/apps/touch-master.svg"
 ssh "${THOR_HOST}" "
-    chmod +x ~/.local/share/applications/touch-master.desktop
+    chmod +x ~/.local/share/applications/touch-master.desktop ~/.local/share/applications/touch-master-stop.desktop
     update-desktop-database ~/.local/share/applications 2>/dev/null || true
     gtk-update-icon-cache -f ~/.local/share/icons/hicolor 2>/dev/null || true
     kbuildsycoca6 2>/dev/null || true

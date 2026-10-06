@@ -32,7 +32,6 @@ function Content() {
         glide: true,
         friction: 5,
         scroll_speed: 3,
-        edge_scroll: false,
         tap_to_click: true,
         long_press_right_click: true,
         long_press_delay_ms: 450,
@@ -316,19 +315,6 @@ function Content() {
                             step: 1,
                             showValue: true,
                             onChange: (val) => updateSetting("scroll_speed", Math.round(val))
-                        })
-                    })
-                ]
-            }),
-            status.enabled && status.mode !== "keyboard" && status.mode !== "settings" && SP_JSX.jsxs(DFL.PanelSection, {
-                title: "Scroll Mode",
-                children: [
-                    SP_JSX.jsx(DFL.PanelSectionRow, {
-                        children: SP_JSX.jsx(DFL.ToggleField, {
-                            label: "Edge Scroll instead of Two-Finger",
-                            description: "Draws an on-glass scrollbar on the right edge. Single finger drag in gutter scrolls; 2-finger scroll is disabled",
-                            checked: status.edge_scroll ?? false,
-                            onChange: (val) => updateSetting("edge_scroll", val)
                         })
                     })
                 ]
