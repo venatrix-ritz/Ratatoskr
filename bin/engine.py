@@ -1,4 +1,8 @@
-"""Thor Input Virtual Input Engine: UInput bridge & multi-touch gesture processor."""
+"""Thor Input Virtual Input Engine: UInput bridge & multi-touch gesture processor.
+
+Gesture mathematics, coordinate transforms, and physics calculations credit to:
+- Project Barry (https://github.com/project-barry/barry-launcher) by lavachemist.
+"""
 from __future__ import annotations
 
 import fcntl

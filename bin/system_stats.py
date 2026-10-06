@@ -1,4 +1,9 @@
-"""System metrics & hardware control for Thor Input on Ayn Thor."""
+"""System metrics & hardware control for Thor Input on Ayn Thor.
+
+Hardware sysfs discovery, thermal nodes, and sensor paths credit to:
+- Project Barry (https://github.com/project-barry/barry-launcher) by lavachemist.
+- Armada OS (https://armadaos.dev).
+"""
 from __future__ import annotations
 
 import glob

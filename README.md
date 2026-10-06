@@ -87,6 +87,23 @@ Or copy manually:
 
 ---
 
+## Credits & Acknowledgments
+
+Credit where credit is due: this utility is deeply indebted to and builds upon the pioneering work of:
+
+- **[Project Barry / Barry Launcher](https://github.com/project-barry/barry-launcher)** by **lavachemist** and the Project Barry community:
+  - Dual-display Gamescope architecture on the AYN Thor.
+  - Raw digitizer coordinate mapping (`raw_to_screen`) from the 90-degree rotated portrait AMOLED panel.
+  - Trackpad multi-touch gesture processing algorithms and momentum physics.
+  - Sensor discovery patterns in `/sys/class/thermal/`, `/sys/class/devfreq/`, and `/sys/class/power_supply/`.
+- **[Armada OS](https://armadaos.dev)** by the Armada Linux team:
+  - Dual-display Gamescope session runner (`/usr/bin/armada-run-bottom`).
+  - Qualcomm SM8550 device tree and backlight driver bindings (`ae94000.dsi.0` and `ae96000.dsi.0`).
+- **[Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader)** by the SteamDeckHomebrew community:
+  - The standard Decky plugin architecture, sandboxed Python backend, and React/DFL Quick Access Menu (QAM) framework.
+
+---
+
 ## License
 
-MIT
+MIT License. See [LICENSE](LICENSE) for details.
