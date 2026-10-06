@@ -289,7 +289,11 @@ class TouchGestureProcessor:
         self.friction = 5  # 1 (slickest) to 10 (most friction)
         self.scroll_speed = 3  # 1 (precision) to 5 (fast)
         self.edge_scroll_enabled = False  # Edge scroll instead of 2-finger scroll
-        self.edge_scroll_min_x = 1140.0  # Right 100px zone of screen (1240 width)
+        # Ergonomic right thumb scroll zone: inset from bezel and vertically centered
+        self.edge_scroll_x_min = 1080.0
+        self.edge_scroll_x_max = 1170.0
+        self.edge_scroll_y_min = 360.0
+        self.edge_scroll_y_max = 760.0
         self.active_edge_scroll_tid: int | None = None
         self.edge_scroll_thumb_y: float | None = None
         self.tap_to_click = True
@@ -423,11 +427,15 @@ class TouchGestureProcessor:
         self.last_state_label = f"DOWN ({count} finger{'s' if count > 1 else ''})"
 
         if count == 1:
-            if self.edge_scroll_enabled and x >= self.edge_scroll_min_x:
+            if (
+                self.edge_scroll_enabled
+                and (self.edge_scroll_x_min <= x <= self.edge_scroll_x_max)
+                and (self.edge_scroll_y_min <= y <= self.edge_scroll_y_max)
+            ):
                 self.active_edge_scroll_tid = tid
                 self.edge_scroll_thumb_y = y
                 self.last_state_label = "EDGE SCROLL"
-                self.logger.log(DebugCode.STATUS_EDGE_SCROLL, f"start y={y:.1f}")
+                self.logger.log(DebugCode.STATUS_EDGE_SCROLL, f"start x={x:.1f}, y={y:.1f}")
                 return
 
             self.start_time = now

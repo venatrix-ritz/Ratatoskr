@@ -697,10 +697,10 @@ class ThorApp:
 
         # If Edge Scroll is toggled on, draw a clean rectangle indicating the scroll area
         if self.gesture.edge_scroll_enabled:
-            zone_x = self.gesture.edge_scroll_min_x
-            zone_w = (pad_x + pad_w) - zone_x - 6.0
-            zone_y = pad_y + 8.0
-            zone_h = pad_h - 16.0
+            zone_x = self.gesture.edge_scroll_x_min
+            zone_y = self.gesture.edge_scroll_y_min
+            zone_w = self.gesture.edge_scroll_x_max - self.gesture.edge_scroll_x_min
+            zone_h = self.gesture.edge_scroll_y_max - self.gesture.edge_scroll_y_min
 
             is_active = self.gesture.edge_scroll_thumb_y is not None
 
