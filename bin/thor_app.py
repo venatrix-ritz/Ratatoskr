@@ -91,6 +91,8 @@ class ThorApp:
         # UI Window
         self.window = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
         self.window.set_title("Touch Master")
+        self.window.set_decorated(False)
+        self.window.set_resizable(False)
         self.window.set_default_size(SCREEN_WIDTH, SCREEN_HEIGHT)
         self.window.fullscreen()
         self.window.connect("destroy", self.on_destroy)
@@ -408,15 +410,17 @@ class ThorApp:
             GLib.idle_add(self.drawing_area.queue_draw)
             return
 
-        # Bottom Action Buttons (y = 850 .. 910)
-        if 850 <= y <= 910:
-            if 30 <= x <= 380:
-                # Diagnostics self-test
+        # Bottom Action Buttons (y = 840 .. 915)
+        if 840 <= y <= 915:
+            if 30 <= x <= 340:
+                self.gesture.edge_scroll_enabled = not self.gesture.edge_scroll_enabled
+                self.save_config()
+            elif 356 <= x <= 626:
                 run_self_diagnostics()
-            elif 400 <= x <= 650:
+            elif 642 <= x <= 902:
                 self.show_debug_hud = not self.show_debug_hud
                 self.save_config()
-            elif 670 <= x <= 920:
+            elif 918 <= x <= 1210:
                 self.set_mode("trackpad")
             GLib.idle_add(self.drawing_area.queue_draw)
 
@@ -695,87 +699,51 @@ class ThorApp:
         cr.stroke()
         cr.new_path()
 
-        # If Edge Scroll is toggled on, draw clean indicator rectangles for vertical and horizontal zones
+        # If Edge Scroll is toggled on, draw static indicator rectangles for vertical and horizontal zones
         if self.gesture.edge_scroll_enabled:
             # 1. Vertical Scroll Zone (Right edge)
             zone_x = self.gesture.edge_scroll_x_min
             zone_y = self.gesture.edge_scroll_y_min
             zone_w = self.gesture.edge_scroll_x_max - self.gesture.edge_scroll_x_min
             zone_h = self.gesture.edge_scroll_y_max - self.gesture.edge_scroll_y_min
-            is_v_active = (self.gesture.active_edge_scroll_axis == "v" and self.gesture.edge_scroll_thumb_y is not None)
 
             self._round_rect(cr, zone_x, zone_y, zone_w, zone_h, 12.0)
-            if is_v_active:
-                # Active touch highlight inside vertical scroll rectangle
-                cr.set_source_rgba(0.15, 0.45, 0.85, 0.22)
-                cr.fill_preserve()
-                cr.set_source_rgba(0.25, 0.75, 1.0, 0.85)
-                cr.set_line_width(1.5)
-                cr.stroke()
-                cr.new_path()
+            cr.set_source_rgba(0.06, 0.08, 0.12, 0.65)
+            cr.fill_preserve()
+            cr.set_source_rgba(0.22, 0.26, 0.35, 0.75)
+            cr.set_line_width(1.0)
+            cr.stroke()
+            cr.new_path()
 
-                # Subtle touch indicator pip at current drag position
-                ty = max(zone_y + 8.0, min(zone_y + zone_h - 28.0, self.gesture.edge_scroll_thumb_y - 10.0))
-                self._round_rect(cr, zone_x + 8.0, ty, zone_w - 16.0, 20.0, 6.0)
-                cr.set_source_rgba(0.30, 0.80, 1.0, 0.90)
-                cr.fill()
-                cr.new_path()
-            else:
-                # Resting vertical indicator rectangle
-                cr.set_source_rgba(0.06, 0.08, 0.12, 0.65)
-                cr.fill_preserve()
-                cr.set_source_rgba(0.22, 0.26, 0.35, 0.75)
-                cr.set_line_width(1.0)
-                cr.stroke()
-                cr.new_path()
-
-                cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-                cr.set_font_size(18.0)
-                cr.set_source_rgba(0.35, 0.40, 0.52, 0.75)
-                ext = cr.text_extents("↕")
-                cr.move_to(zone_x + (zone_w - ext.width) / 2.0, zone_y + zone_h / 2.0 + ext.height / 2.0)
-                cr.show_text("↕")
-                cr.new_path()
+            cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+            cr.set_font_size(18.0)
+            cr.set_source_rgba(0.35, 0.40, 0.52, 0.75)
+            ext = cr.text_extents("↕")
+            cr.move_to(zone_x + (zone_w - ext.width) / 2.0, zone_y + zone_h / 2.0 + ext.height / 2.0)
+            cr.show_text("↕")
+            cr.new_path()
 
             # 2. Horizontal Scroll Zone (Bottom edge)
             h_zone_x = self.gesture.edge_scroll_h_x_min
             h_zone_y = self.gesture.edge_scroll_h_y_min
             h_zone_w = self.gesture.edge_scroll_h_x_max - self.gesture.edge_scroll_h_x_min
             h_zone_h = self.gesture.edge_scroll_h_y_max - self.gesture.edge_scroll_h_y_min
-            is_h_active = (self.gesture.active_edge_scroll_axis == "h" and self.gesture.edge_scroll_thumb_x is not None)
 
             self._round_rect(cr, h_zone_x, h_zone_y, h_zone_w, h_zone_h, 12.0)
-            if is_h_active:
-                # Active touch highlight inside horizontal scroll rectangle
-                cr.set_source_rgba(0.15, 0.45, 0.85, 0.22)
-                cr.fill_preserve()
-                cr.set_source_rgba(0.25, 0.75, 1.0, 0.85)
-                cr.set_line_width(1.5)
-                cr.stroke()
-                cr.new_path()
+            cr.set_source_rgba(0.06, 0.08, 0.12, 0.65)
+            cr.fill_preserve()
+            cr.set_source_rgba(0.22, 0.26, 0.35, 0.75)
+            cr.set_line_width(1.0)
+            cr.stroke()
+            cr.new_path()
 
-                # Subtle touch indicator pip at current drag position
-                tx = max(h_zone_x + 8.0, min(h_zone_x + h_zone_w - 28.0, self.gesture.edge_scroll_thumb_x - 10.0))
-                self._round_rect(cr, tx, h_zone_y + 8.0, 20.0, h_zone_h - 16.0, 6.0)
-                cr.set_source_rgba(0.30, 0.80, 1.0, 0.90)
-                cr.fill()
-                cr.new_path()
-            else:
-                # Resting horizontal indicator rectangle
-                cr.set_source_rgba(0.06, 0.08, 0.12, 0.65)
-                cr.fill_preserve()
-                cr.set_source_rgba(0.22, 0.26, 0.35, 0.75)
-                cr.set_line_width(1.0)
-                cr.stroke()
-                cr.new_path()
-
-                cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-                cr.set_font_size(18.0)
-                cr.set_source_rgba(0.35, 0.40, 0.52, 0.75)
-                ext = cr.text_extents("↔")
-                cr.move_to(h_zone_x + (h_zone_w - ext.width) / 2.0, h_zone_y + h_zone_h / 2.0 + ext.height / 2.0)
-                cr.show_text("↔")
-                cr.new_path()
+            cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+            cr.set_font_size(18.0)
+            cr.set_source_rgba(0.35, 0.40, 0.52, 0.75)
+            ext = cr.text_extents("↔")
+            cr.move_to(h_zone_x + (h_zone_w - ext.width) / 2.0, h_zone_y + h_zone_h / 2.0 + ext.height / 2.0)
+            cr.show_text("↔")
+            cr.new_path()
 
         # Center prompt hint
         cr.set_source_rgb(0.30, 0.34, 0.42)
@@ -956,9 +924,12 @@ class ThorApp:
             cr.show_text(val)
 
         # Action Buttons
-        self._draw_button(cr, 30, 850, 350, 60, "Run Self-Test Diagnostics", False, accent_color=(0.2, 0.55, 0.9))
-        self._draw_button(cr, 400, 850, 250, 60, "Toggle Glass HUD", self.show_debug_hud, accent_color=(0.2, 0.65, 0.4))
-        self._draw_button(cr, 670, 850, 250, 60, "Back to Trackpad", False)
+        edge_active = self.gesture.edge_scroll_enabled
+        scroll_label = "Scroll: Edge Bars" if edge_active else "Scroll: 2-Finger"
+        self._draw_button(cr, 30, 846, 310, 64, scroll_label, edge_active, accent_color=(0.15, 0.55, 0.95))
+        self._draw_button(cr, 356, 846, 270, 64, "Run Self-Test Diag", False, accent_color=(0.2, 0.55, 0.9))
+        self._draw_button(cr, 642, 846, 260, 64, "Toggle Glass HUD", self.show_debug_hud, accent_color=(0.2, 0.65, 0.4))
+        self._draw_button(cr, 918, 846, 290, 64, "Back to Trackpad", False, accent_color=(0.38, 0.25, 0.85))
 
     def _draw_slider_card(
         self,
