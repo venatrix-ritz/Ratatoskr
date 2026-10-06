@@ -84,6 +84,36 @@ class Plugin:
     def __init__(self) -> None:
         self.logger = DebugLogger("plugin")
 
+    async def _main(self) -> None:
+        """Called automatically by Decky Loader on startup."""
+        self.logger.log(DebugCode.DAEMON_STARTING, "Decky initialized Touch Master plugin")
+        cfg = _read_config()
+        if cfg.get("enabled", True) and not _is_running():
+            self._start_service()
+
+    def _start_service(self) -> None:
+        try:
+            subprocess.run(
+                ["chmod", "666", "/sys/class/backlight/ae94000.dsi.0/brightness", "/sys/class/backlight/ae96000.dsi.0/brightness"],
+                check=False,
+                timeout=1.0,
+            )
+        except Exception:
+            pass
+
+        if os.getuid() == 0:
+            cmd = ["runuser", "-u", "armada", "--", "systemctl", "--user", "start", "touch-master.service"]
+        else:
+            cmd = ["systemctl", "--user", "start", "touch-master.service"]
+        subprocess.run(cmd, check=False)
+
+    def _stop_service(self) -> None:
+        if os.getuid() == 0:
+            cmd = ["runuser", "-u", "armada", "--", "systemctl", "--user", "stop", "touch-master.service"]
+        else:
+            cmd = ["systemctl", "--user", "stop", "touch-master.service"]
+        subprocess.run(cmd, check=False)
+
     async def get_status(self) -> dict:
         def _get():
             running = _is_running()
@@ -131,44 +161,12 @@ class Plugin:
         def _set():
             running = _is_running()
             if enabled and not running:
-                self.logger.log(DebugCode.DAEMON_STARTING, "Spawning thor_app under armada-run-bottom")
-                # Ensure backlight permissions
-                try:
-                    subprocess.run(
-                        ["chmod", "666", "/sys/class/backlight/ae94000.dsi.0/brightness", "/sys/class/backlight/ae96000.dsi.0/brightness"],
-                        check=False,
-                        timeout=1.0,
-                    )
-                except Exception:
-                    pass
-
-                if os.getuid() == 0:
-                    cmd = [
-                        "runuser",
-                        "-u",
-                        "armada",
-                        "--",
-                        "/usr/bin/armada-run-bottom",
-                        "--",
-                        "/usr/bin/python3",
-                        APP_PATH,
-                    ]
-                else:
-                    cmd = [
-                        "/usr/bin/armada-run-bottom",
-                        "--",
-                        "/usr/bin/python3",
-                        APP_PATH,
-                    ]
-                subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    start_new_session=True,
-                )
+                self.logger.log(DebugCode.DAEMON_STARTING, "Starting touch-master.service via systemd")
+                self._start_service()
             elif not enabled and running:
-                self.logger.log(DebugCode.DAEMON_STOPPING, "Sending quit signal to thor-input-app")
+                self.logger.log(DebugCode.DAEMON_STOPPING, "Stopping touch-master.service via systemd")
                 _send_ipc({"action": "quit"})
+                self._stop_service()
             return {"ok": True, "enabled": enabled}
 
         await asyncio.to_thread(_set)
