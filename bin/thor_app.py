@@ -695,18 +695,18 @@ class ThorApp:
         cr.stroke()
         cr.new_path()
 
-        # If Edge Scroll is toggled on, draw a clean rectangle indicating the scroll area
+        # If Edge Scroll is toggled on, draw clean indicator rectangles for vertical and horizontal zones
         if self.gesture.edge_scroll_enabled:
+            # 1. Vertical Scroll Zone (Right edge)
             zone_x = self.gesture.edge_scroll_x_min
             zone_y = self.gesture.edge_scroll_y_min
             zone_w = self.gesture.edge_scroll_x_max - self.gesture.edge_scroll_x_min
             zone_h = self.gesture.edge_scroll_y_max - self.gesture.edge_scroll_y_min
-
-            is_active = self.gesture.edge_scroll_thumb_y is not None
+            is_v_active = (self.gesture.active_edge_scroll_axis == "v" and self.gesture.edge_scroll_thumb_y is not None)
 
             self._round_rect(cr, zone_x, zone_y, zone_w, zone_h, 12.0)
-            if is_active:
-                # Active touch highlight inside scroll rectangle
+            if is_v_active:
+                # Active touch highlight inside vertical scroll rectangle
                 cr.set_source_rgba(0.15, 0.45, 0.85, 0.22)
                 cr.fill_preserve()
                 cr.set_source_rgba(0.25, 0.75, 1.0, 0.85)
@@ -721,7 +721,7 @@ class ThorApp:
                 cr.fill()
                 cr.new_path()
             else:
-                # Resting indicator rectangle defining the scroll zone
+                # Resting vertical indicator rectangle
                 cr.set_source_rgba(0.06, 0.08, 0.12, 0.65)
                 cr.fill_preserve()
                 cr.set_source_rgba(0.22, 0.26, 0.35, 0.75)
@@ -729,7 +729,6 @@ class ThorApp:
                 cr.stroke()
                 cr.new_path()
 
-                # Subtle vertical indicator
                 cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
                 cr.set_font_size(18.0)
                 cr.set_source_rgba(0.35, 0.40, 0.52, 0.75)
@@ -738,12 +737,52 @@ class ThorApp:
                 cr.show_text("↕")
                 cr.new_path()
 
+            # 2. Horizontal Scroll Zone (Bottom edge)
+            h_zone_x = self.gesture.edge_scroll_h_x_min
+            h_zone_y = self.gesture.edge_scroll_h_y_min
+            h_zone_w = self.gesture.edge_scroll_h_x_max - self.gesture.edge_scroll_h_x_min
+            h_zone_h = self.gesture.edge_scroll_h_y_max - self.gesture.edge_scroll_h_y_min
+            is_h_active = (self.gesture.active_edge_scroll_axis == "h" and self.gesture.edge_scroll_thumb_x is not None)
+
+            self._round_rect(cr, h_zone_x, h_zone_y, h_zone_w, h_zone_h, 12.0)
+            if is_h_active:
+                # Active touch highlight inside horizontal scroll rectangle
+                cr.set_source_rgba(0.15, 0.45, 0.85, 0.22)
+                cr.fill_preserve()
+                cr.set_source_rgba(0.25, 0.75, 1.0, 0.85)
+                cr.set_line_width(1.5)
+                cr.stroke()
+                cr.new_path()
+
+                # Subtle touch indicator pip at current drag position
+                tx = max(h_zone_x + 8.0, min(h_zone_x + h_zone_w - 28.0, self.gesture.edge_scroll_thumb_x - 10.0))
+                self._round_rect(cr, tx, h_zone_y + 8.0, 20.0, h_zone_h - 16.0, 6.0)
+                cr.set_source_rgba(0.30, 0.80, 1.0, 0.90)
+                cr.fill()
+                cr.new_path()
+            else:
+                # Resting horizontal indicator rectangle
+                cr.set_source_rgba(0.06, 0.08, 0.12, 0.65)
+                cr.fill_preserve()
+                cr.set_source_rgba(0.22, 0.26, 0.35, 0.75)
+                cr.set_line_width(1.0)
+                cr.stroke()
+                cr.new_path()
+
+                cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+                cr.set_font_size(18.0)
+                cr.set_source_rgba(0.35, 0.40, 0.52, 0.75)
+                ext = cr.text_extents("↔")
+                cr.move_to(h_zone_x + (h_zone_w - ext.width) / 2.0, h_zone_y + h_zone_h / 2.0 + ext.height / 2.0)
+                cr.show_text("↔")
+                cr.new_path()
+
         # Center prompt hint
         cr.set_source_rgb(0.30, 0.34, 0.42)
         cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
         cr.set_font_size(20.0)
         if self.gesture.edge_scroll_enabled:
-            hint = "Touch Master: 1 finger moves · Right edge scrolls · Tap clicks · Flick glides"
+            hint = "Touch Master: 1 finger moves · Right/bottom edges scroll · Tap clicks · Flick glides"
         else:
             hint = "Touch Master: 1 finger moves · Tap clicks · 2 fingers scroll · Flick glides"
         extents = cr.text_extents(hint)
