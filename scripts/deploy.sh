@@ -23,12 +23,13 @@ ssh "${THOR_HOST}" "chmod +x '${APP_DIR}/bin/thor_app.py'"
 # 3. Sync Decky plugin files
 echo "==> Syncing Decky plugin files..."
 scp plugin.json "${THOR_HOST}:/tmp/plugin.json"
+scp package.json "${THOR_HOST}:/tmp/package.json"
 scp debug_codes.py "${THOR_HOST}:/tmp/debug_codes.py"
 scp main.py "${THOR_HOST}:/tmp/main.py"
 scp dist/index.js "${THOR_HOST}:/tmp/index.js"
 
 ssh "${THOR_HOST}" "
-    sudo mv /tmp/plugin.json /tmp/main.py /tmp/debug_codes.py '${PLUGIN_DIR}/'
+    sudo mv /tmp/plugin.json /tmp/package.json /tmp/main.py /tmp/debug_codes.py '${PLUGIN_DIR}/'
     sudo mv /tmp/index.js '${PLUGIN_DIR}/dist/index.js'
     sudo chown -R root:root '${PLUGIN_DIR}'
     sudo chmod -R 755 '${PLUGIN_DIR}'
