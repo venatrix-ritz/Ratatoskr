@@ -96,31 +96,37 @@ class Plugin:
             if _is_running():
                 self._stop_service()
 
+    def _run_systemctl(self, action: str) -> None:
+        env = dict(os.environ)
+        env["XDG_RUNTIME_DIR"] = "/run/user/1000"
+        env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/run/user/1000/bus"
+
+        cmds = [
+            ["systemctl", "--machine=armada@.host", "--user", action, "touch-master.service"],
+            ["systemctl", "--user", action, "touch-master.service"],
+        ]
+        success = False
+        for cmd in cmds:
+            try:
+                res = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=5.0)
+                if res.returncode == 0:
+                    success = True
+                    break
+            except Exception:
+                pass
+        if not success:
+            self.logger.log(
+                DebugCode.ERR_SERVICE_STOP if "stop" in action else DebugCode.ERR_SERVICE_START,
+                f"systemctl {action} failed",
+            )
+
     def _start_service(self) -> None:
-        if os.getuid() == 0:
-            cmd_start = ["systemctl", "--machine=armada@.host", "--user", "start", "touch-master.service"]
-            cmd_enable = ["systemctl", "--machine=armada@.host", "--user", "enable", "touch-master.service"]
-        else:
-            cmd_start = ["systemctl", "--user", "start", "touch-master.service"]
-            cmd_enable = ["systemctl", "--user", "enable", "touch-master.service"]
-        try:
-            subprocess.run(cmd_enable, check=False, timeout=5.0)
-            subprocess.run(cmd_start, check=False, timeout=5.0)
-        except Exception as e:
-            self.logger.log(DebugCode.ERR_SERVICE_START, f"Failed starting service: {e}")
+        self._run_systemctl("enable")
+        self._run_systemctl("start")
 
     def _stop_service(self) -> None:
-        if os.getuid() == 0:
-            cmd_stop = ["systemctl", "--machine=armada@.host", "--user", "stop", "touch-master.service"]
-            cmd_disable = ["systemctl", "--machine=armada@.host", "--user", "disable", "touch-master.service"]
-        else:
-            cmd_stop = ["systemctl", "--user", "stop", "touch-master.service"]
-            cmd_disable = ["systemctl", "--user", "disable", "touch-master.service"]
-        try:
-            subprocess.run(cmd_stop, check=False, timeout=5.0)
-            subprocess.run(cmd_disable, check=False, timeout=5.0)
-        except Exception as e:
-            self.logger.log(DebugCode.ERR_SERVICE_STOP, f"Failed stopping service: {e}")
+        self._run_systemctl("stop")
+        self._run_systemctl("disable")
 
     async def get_status(self) -> dict:
         def _get():
@@ -177,8 +183,6 @@ class Plugin:
                 self._start_service()
             else:
                 self.logger.log(DebugCode.DAEMON_STOPPING, "Stopping touch-master.service via systemd")
-                if running:
-                    _send_ipc({"action": "quit"})
                 self._stop_service()
             return {"ok": True, "enabled": enabled}
 
