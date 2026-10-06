@@ -90,7 +90,7 @@ class ThorApp:
 
         # UI Window
         self.window = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
-        self.window.set_title("Thor Input")
+        self.window.set_title("Touch Master")
         self.window.set_default_size(SCREEN_WIDTH, SCREEN_HEIGHT)
         self.window.fullscreen()
         self.window.connect("destroy", self.on_destroy)
@@ -109,10 +109,7 @@ class ThorApp:
                     cfg = json.load(f)
                     self.mode = cfg.get("mode", self.mode)
                     self.show_debug_hud = cfg.get("debug_hud", self.show_debug_hud)
-                    self.gesture.set_settings(
-                        cfg.get("sensitivity", 1.5),
-                        cfg.get("glide", True),
-                    )
+                    self.gesture.set_settings(**cfg)
             except Exception as err:
                 self.logger.log(DebugCode.ERR_SOCKET_PROTOCOL, f"load_config: {err}")
 
@@ -121,9 +118,8 @@ class ThorApp:
         try:
             cfg = {
                 "mode": self.mode,
-                "sensitivity": self.gesture.sensitivity,
-                "glide": self.gesture.glide_enabled,
                 "debug_hud": self.show_debug_hud,
+                **self.gesture.get_settings(),
             }
             with open(CONFIG_PATH, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, indent=2)
@@ -473,10 +469,9 @@ class ThorApp:
 
                         if action == "get_status":
                             res["mode"] = self.mode
-                            res["sensitivity"] = self.gesture.sensitivity
-                            res["glide"] = self.gesture.glide_enabled
                             res["debug_hud"] = self.show_debug_hud
                             res["hardware_stats"] = self.stats.get_stats()
+                            res.update(self.gesture.get_settings())
                         elif action == "get_debug":
                             res["telemetry"] = self.bridge.get_telemetry()
                             res["state"] = self.gesture.last_state_label
@@ -485,28 +480,30 @@ class ThorApp:
                             res["active_fingers"] = len(self.gesture.active_contacts)
                             res["last_key"] = self.last_key_label
                             res["hardware_stats"] = self.stats.get_stats()
+                            res.update(self.gesture.get_settings())
                         elif action == "set_mode":
                             self.set_mode(msg.get("mode", "trackpad"))
                         elif action == "set_settings":
-                            self.gesture.set_settings(
-                                msg.get("sensitivity", self.gesture.sensitivity),
-                                msg.get("glide", self.gesture.glide_enabled),
-                            )
+                            self.gesture.set_settings(**msg)
                             if "debug_hud" in msg:
                                 self.show_debug_hud = bool(msg["debug_hud"])
                             self.save_config()
                             GLib.idle_add(self.drawing_area.queue_draw)
                         elif action == "set_volume":
                             res["vol_pct"] = self.stats.set_volume(msg.get("volume", 50))
+                            self.logger.log(DebugCode.VOLUME_UPDATED, f"volume={res['vol_pct']}%")
                             GLib.idle_add(self.drawing_area.queue_draw)
                         elif action == "toggle_mute":
                             res["vol_muted"] = self.stats.toggle_mute()
+                            self.logger.log(DebugCode.VOLUME_UPDATED, f"muted={res['vol_muted']}")
                             GLib.idle_add(self.drawing_area.queue_draw)
                         elif action == "set_top_brightness":
                             res["top_bright_pct"] = self.stats.set_top_brightness(msg.get("brightness", 100))
+                            self.logger.log(DebugCode.BACKLIGHT_UPDATED, f"top={res['top_bright_pct']}%")
                             GLib.idle_add(self.drawing_area.queue_draw)
                         elif action == "set_bottom_brightness":
                             res["bot_bright_pct"] = self.stats.set_bottom_brightness(msg.get("brightness", 100))
+                            self.logger.log(DebugCode.BACKLIGHT_UPDATED, f"bottom={res['bot_bright_pct']}%")
                             GLib.idle_add(self.drawing_area.queue_draw)
                         elif action == "toggle_hud":
                             self.show_debug_hud = not self.show_debug_hud
@@ -698,12 +695,69 @@ class ThorApp:
         cr.stroke()
         cr.new_path()
 
+        # If Edge Scroll is toggled on, draw an on-glass scrollbar along right edge
+        if self.gesture.edge_scroll_enabled:
+            gutter_w = 64.0
+            gutter_x = pad_x + pad_w - gutter_w - 8.0
+            gutter_y = pad_y + 12.0
+            gutter_h = pad_h - 24.0
+
+            # Gutter background
+            self._round_rect(cr, gutter_x, gutter_y, gutter_w, gutter_h, 14.0)
+            cr.set_source_rgba(0.08, 0.10, 0.14, 0.95)
+            cr.fill_preserve()
+            cr.set_source_rgba(0.25, 0.35, 0.55, 0.7)
+            cr.set_line_width(1.5)
+            cr.stroke()
+            cr.new_path()
+
+            # Chevrons ▲ and ▼
+            cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+            cr.set_font_size(18.0)
+            cr.set_source_rgb(0.45, 0.65, 0.95)
+            cr.move_to(gutter_x + 23.0, gutter_y + 32.0)
+            cr.show_text("▲")
+            cr.move_to(gutter_x + 23.0, gutter_y + gutter_h - 14.0)
+            cr.show_text("▼")
+
+            # Scroll thumb
+            thumb_h = max(70.0, gutter_h * 0.25)
+            if self.gesture.edge_scroll_thumb_y is not None:
+                min_ty = gutter_y + 44.0
+                max_ty = gutter_y + gutter_h - 44.0 - thumb_h
+                ty = max(min_ty, min(max_ty, self.gesture.edge_scroll_thumb_y - thumb_h / 2.0))
+                thumb_rgb = (0.20, 0.75, 1.0)  # Active Cyan glow
+            else:
+                ty = gutter_y + (gutter_h - thumb_h) / 2.0
+                thumb_rgb = (0.35, 0.45, 0.65)  # Resting Slate
+
+            self._round_rect(cr, gutter_x + 8.0, ty, gutter_w - 16.0, thumb_h, 10.0)
+            cr.set_source_rgb(*thumb_rgb)
+            cr.fill_preserve()
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.45)
+            cr.set_line_width(1.5)
+            cr.stroke()
+            cr.new_path()
+
+            # Grip lines on thumb
+            cr.set_source_rgba(0.08, 0.10, 0.15, 0.6)
+            for offset_y in (-8.0, 0.0, 8.0):
+                cr.move_to(gutter_x + 16.0, ty + thumb_h / 2.0 + offset_y)
+                cr.line_to(gutter_x + gutter_w - 16.0, ty + thumb_h / 2.0 + offset_y)
+            cr.stroke()
+            cr.new_path()
+
+        # Center prompt hint
         cr.set_source_rgb(0.30, 0.34, 0.42)
         cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
         cr.set_font_size(20.0)
-        hint = "Trackpad: 1 finger moves · Tap clicks · 2 fingers scroll · Flick glides"
+        if self.gesture.edge_scroll_enabled:
+            hint = "Touch Master: 1 finger moves · Right edge scrollbar · Tap clicks · Flick glides"
+        else:
+            hint = "Touch Master: 1 finger moves · Tap clicks · 2 fingers scroll · Flick glides"
         extents = cr.text_extents(hint)
-        cr.move_to(pad_x + (pad_w - extents.width) / 2.0, pad_y + (pad_h + extents.height) / 2.0)
+        avail_w = pad_w - (80.0 if self.gesture.edge_scroll_enabled else 0.0)
+        cr.move_to(pad_x + (avail_w - extents.width) / 2.0, pad_y + (pad_h + extents.height) / 2.0)
         cr.show_text(hint)
 
     def _draw_keyboard(self, cr: cairo.Context) -> None:

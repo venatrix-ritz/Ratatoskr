@@ -1,4 +1,4 @@
-"""Thor Input Decky Plugin Backend with diagnostic logging, telemetry & quick controls."""
+"""Touch Master Decky Plugin Backend with diagnostic logging, telemetry & quick controls."""
 from __future__ import annotations
 
 import asyncio
@@ -40,14 +40,35 @@ def _is_running() -> bool:
     return bool(res.get("ok"))
 
 
+def _default_config() -> dict:
+    return {
+        "mode": "trackpad",
+        "sensitivity": 1.5,
+        "glide": True,
+        "friction": 5,
+        "scroll_speed": 3,
+        "edge_scroll": False,
+        "tap_to_click": True,
+        "long_press_right_click": True,
+        "long_press_delay_ms": 450,
+        "two_finger_right_click": True,
+        "three_finger_middle_click": True,
+        "pinch_zoom_enabled": True,
+        "three_finger_swipe_enabled": True,
+        "drag_lock_enabled": True,
+        "debug_hud": False,
+    }
+
+
 def _read_config() -> dict:
+    cfg = _default_config()
     if CONFIG_PATH.exists():
         try:
             with open(CONFIG_PATH, encoding="utf-8") as f:
-                return json.load(f)
+                cfg.update(json.load(f))
         except Exception:
             pass
-    return {"mode": "trackpad", "sensitivity": 1.5, "glide": True, "debug_hud": False}
+    return cfg
 
 
 def _save_config(data: dict) -> None:
@@ -66,29 +87,38 @@ class Plugin:
     async def get_status(self) -> dict:
         def _get():
             running = _is_running()
+            cfg = _read_config()
             if running:
                 res = _send_ipc({"action": "get_status"})
                 debug_info = _send_ipc({"action": "get_debug"})
+                cfg.update(res)
                 return {
                     "enabled": True,
                     "code": int(DebugCode.OK),
-                    "mode": res.get("mode", "trackpad"),
-                    "sensitivity": res.get("sensitivity", 1.5),
-                    "glide": res.get("glide", True),
-                    "debug_hud": res.get("debug_hud", False),
+                    "mode": cfg.get("mode", "trackpad"),
+                    "sensitivity": cfg.get("sensitivity", 1.5),
+                    "glide": cfg.get("glide", True),
+                    "friction": cfg.get("friction", 5),
+                    "scroll_speed": cfg.get("scroll_speed", 3),
+                    "edge_scroll": cfg.get("edge_scroll", False),
+                    "tap_to_click": cfg.get("tap_to_click", True),
+                    "long_press_right_click": cfg.get("long_press_right_click", True),
+                    "long_press_delay_ms": cfg.get("long_press_delay_ms", 450),
+                    "two_finger_right_click": cfg.get("two_finger_right_click", True),
+                    "three_finger_middle_click": cfg.get("three_finger_middle_click", True),
+                    "pinch_zoom_enabled": cfg.get("pinch_zoom_enabled", True),
+                    "three_finger_swipe_enabled": cfg.get("three_finger_swipe_enabled", True),
+                    "drag_lock_enabled": cfg.get("drag_lock_enabled", True),
+                    "debug_hud": cfg.get("debug_hud", False),
                     "telemetry": debug_info.get("telemetry", {}),
                     "touch_device": debug_info.get("touch_device", ""),
                     "state": debug_info.get("state", "IDLE"),
                     "hardware_stats": res.get("hardware_stats", {}),
                 }
-            cfg = _read_config()
             return {
                 "enabled": False,
                 "code": int(DebugCode.DAEMON_STOPPED),
-                "mode": cfg.get("mode", "trackpad"),
-                "sensitivity": cfg.get("sensitivity", 1.5),
-                "glide": cfg.get("glide", True),
-                "debug_hud": cfg.get("debug_hud", False),
+                **cfg,
                 "telemetry": {},
                 "touch_device": "",
                 "state": "STOPPED",
@@ -163,21 +193,21 @@ class Plugin:
 
         return await asyncio.to_thread(_set)
 
-    async def set_settings(self, sensitivity: float, glide: bool, debug_hud: bool = False) -> dict:
+    async def set_settings(self, settings: dict | None = None, **kwargs) -> dict:
         def _set():
             cfg = _read_config()
-            cfg["sensitivity"] = float(sensitivity)
-            cfg["glide"] = bool(glide)
-            cfg["debug_hud"] = bool(debug_hud)
+            merged = {}
+            if settings and isinstance(settings, dict):
+                merged.update(settings)
+            merged.update(kwargs)
+            cfg.update(merged)
             _save_config(cfg)
+            self.logger.log(DebugCode.SETTINGS_UPDATED, f"updated={list(merged.keys())}")
             if _is_running():
-                _send_ipc({
-                    "action": "set_settings",
-                    "sensitivity": float(sensitivity),
-                    "glide": bool(glide),
-                    "debug_hud": bool(debug_hud),
-                })
-            return {"ok": True}
+                payload = {"action": "set_settings"}
+                payload.update(merged)
+                _send_ipc(payload)
+            return {"ok": True, "settings": cfg}
 
         return await asyncio.to_thread(_set)
 

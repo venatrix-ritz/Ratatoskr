@@ -1,4 +1,4 @@
-const manifest = { "name": "Thor Input" };
+const manifest = { "name": "Touch Master" };
 const API_VERSION = 2;
 const internalAPIConnection = window.__DECKY_SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED_deckyLoaderAPIInit;
 if (!internalAPIConnection) {
@@ -17,7 +17,7 @@ const definePlugin = (fn) => (...args) => fn(...args);
 const getStatus = () => call("get_status");
 const setEnabled = (enabled) => call("set_enabled", enabled);
 const setMode = (mode) => call("set_mode", mode);
-const setSettings = (sensitivity, glide, debug_hud) => call("set_settings", sensitivity, glide, debug_hud);
+const setSettings = (settings) => call("set_settings", settings);
 const setVolume = (volume) => call("set_volume", volume);
 const toggleMute = () => call("toggle_mute");
 const setBrightness = (target, percent) => call("set_brightness", target, percent);
@@ -30,6 +30,17 @@ function Content() {
         mode: "trackpad",
         sensitivity: 1.5,
         glide: true,
+        friction: 5,
+        scroll_speed: 3,
+        edge_scroll: false,
+        tap_to_click: true,
+        long_press_right_click: true,
+        long_press_delay_ms: 450,
+        two_finger_right_click: true,
+        three_finger_middle_click: true,
+        pinch_zoom_enabled: true,
+        three_finger_swipe_enabled: true,
+        drag_lock_enabled: true,
         debug_hud: false,
         telemetry: {},
         hardware_stats: {},
@@ -44,9 +55,9 @@ function Content() {
         if (inFlight) return;
         try {
             const s = await getStatus();
-            if (s && !inFlight) setStatus(s);
+            if (s && !inFlight) setStatus((prev) => ({ ...prev, ...s }));
         } catch (e) {
-            console.error("[thor-input] getStatus error:", e);
+            console.error("[touch-master] getStatus error:", e);
         } finally {
             setLoading(false);
         }
@@ -63,9 +74,9 @@ function Content() {
         setStatus((prev) => ({ ...prev, enabled: val }));
         try {
             const res = await setEnabled(val);
-            if (res) setStatus(res);
+            if (res) setStatus((prev) => ({ ...prev, ...res }));
         } catch (e) {
-            toaster.toast({ title: "Thor Input", body: "Failed to toggle: " + String(e) });
+            toaster.toast({ title: "Touch Master", body: "Failed to toggle: " + String(e) });
             refreshStatus();
         } finally {
             setInFlight(false);
@@ -77,27 +88,17 @@ function Content() {
         try {
             await setMode(newMode);
         } catch (e) {
-            toaster.toast({ title: "Thor Input", body: "Failed to set mode: " + String(e) });
+            toaster.toast({ title: "Touch Master", body: "Failed to set mode: " + String(e) });
             refreshStatus();
         }
     };
 
-    const handleSensitivityChange = async (val) => {
-        const rounded = Math.round(val * 10) / 10;
-        setStatus((prev) => ({ ...prev, sensitivity: rounded }));
+    const updateSetting = async (key, val) => {
+        setStatus((prev) => ({ ...prev, [key]: val }));
         try {
-            await setSettings(rounded, status.glide, status.debug_hud);
+            await setSettings({ [key]: val });
         } catch (e) {
-            console.error("[thor-input] setSettings error:", e);
-        }
-    };
-
-    const handleGlideToggle = async (val) => {
-        setStatus((prev) => ({ ...prev, glide: val }));
-        try {
-            await setSettings(status.sensitivity, val, status.debug_hud);
-        } catch (e) {
-            console.error("[thor-input] setSettings error:", e);
+            console.error(`[touch-master] setSettings (${key}) error:`, e);
         }
     };
 
@@ -110,7 +111,7 @@ function Content() {
         try {
             await setVolume(rounded);
         } catch (e) {
-            console.error("[thor-input] setVolume error:", e);
+            console.error("[touch-master] setVolume error:", e);
         }
     };
 
@@ -124,7 +125,7 @@ function Content() {
                 }));
             }
         } catch (e) {
-            console.error("[thor-input] toggleMute error:", e);
+            console.error("[touch-master] toggleMute error:", e);
         }
     };
 
@@ -137,7 +138,7 @@ function Content() {
         try {
             await setBrightness("top", rounded);
         } catch (e) {
-            console.error("[thor-input] setBrightness top error:", e);
+            console.error("[touch-master] setBrightness top error:", e);
         }
     };
 
@@ -150,7 +151,7 @@ function Content() {
         try {
             await setBrightness("bottom", rounded);
         } catch (e) {
-            console.error("[thor-input] setBrightness bot error:", e);
+            console.error("[touch-master] setBrightness bot error:", e);
         }
     };
 
@@ -161,7 +162,7 @@ function Content() {
                 setStatus((prev) => ({ ...prev, debug_hud: res.debug_hud }));
             }
         } catch (e) {
-            toaster.toast({ title: "Thor Input", body: "Failed to toggle HUD: " + String(e) });
+            toaster.toast({ title: "Touch Master", body: "Failed to toggle HUD: " + String(e) });
         }
     };
 
@@ -172,7 +173,7 @@ function Content() {
             if (rep && rep.all_passed) {
                 toaster.toast({
                     title: "Diagnostics: PASSED [DBG-000]",
-                    body: "uinput, touchscreen (event5), and display pipeline all healthy."
+                    body: "uinput, touchscreen digitizer, and secondary display all healthy."
                 });
             } else {
                 toaster.toast({
@@ -201,12 +202,12 @@ function Content() {
     return SP_JSX.jsxs(SP_JSX.Fragment, {
         children: [
             SP_JSX.jsxs(DFL.PanelSection, {
-                title: "Thor Bottom Input",
+                title: "Touch Master: Mode & Status",
                 children: [
                     SP_JSX.jsx(DFL.PanelSectionRow, {
                         children: SP_JSX.jsx(DFL.ToggleField, {
                             label: "Enable Bottom Screen",
-                            description: "Turns bottom AMOLED screen into trackpad / keyboard",
+                            description: "Turns bottom AMOLED screen into virtual trackpad & keyboard",
                             checked: status.enabled,
                             disabled: loading || inFlight,
                             onChange: handleToggleEnabled
@@ -272,25 +273,134 @@ function Content() {
                 ]
             }),
             status.enabled && status.mode !== "keyboard" && status.mode !== "settings" && SP_JSX.jsxs(DFL.PanelSection, {
-                title: "Trackpad Settings",
+                title: "Trackpad & Pointer Dynamics",
                 children: [
                     SP_JSX.jsx(DFL.PanelSectionRow, {
                         children: SP_JSX.jsx(DFL.SliderField, {
-                            label: "Pointer Sensitivity",
+                            label: `Pointer Sensitivity: ${status.sensitivity}x`,
                             value: status.sensitivity,
                             min: 0.5,
                             max: 3.5,
                             step: 0.1,
                             showValue: true,
-                            onChange: handleSensitivityChange
+                            onChange: (val) => updateSetting("sensitivity", Math.round(val * 10) / 10)
                         })
                     }),
                     SP_JSX.jsx(DFL.PanelSectionRow, {
                         children: SP_JSX.jsx(DFL.ToggleField, {
                             label: "Momentum Glide (Ball Mode)",
-                            description: "Cursor coasts smoothly when flicked",
+                            description: "Cursor coasts smoothly when flicked across the glass",
                             checked: status.glide,
-                            onChange: handleGlideToggle
+                            onChange: (val) => updateSetting("glide", val)
+                        })
+                    }),
+                    status.glide && SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.SliderField, {
+                            label: `Glide Friction: ${status.friction ?? 5}/10 ` + (status.friction <= 3 ? "(Slick)" : status.friction >= 8 ? "(Heavy Drag)" : "(Balanced)"),
+                            description: "Adjust deceleration rate when flicking the cursor",
+                            value: status.friction ?? 5,
+                            min: 1,
+                            max: 10,
+                            step: 1,
+                            showValue: true,
+                            onChange: (val) => updateSetting("friction", Math.round(val))
+                        })
+                    }),
+                    SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.SliderField, {
+                            label: `Scroll Speed: ${status.scroll_speed ?? 3}/5`,
+                            description: "Precision vs fast scrolling velocity",
+                            value: status.scroll_speed ?? 3,
+                            min: 1,
+                            max: 5,
+                            step: 1,
+                            showValue: true,
+                            onChange: (val) => updateSetting("scroll_speed", Math.round(val))
+                        })
+                    })
+                ]
+            }),
+            status.enabled && status.mode !== "keyboard" && status.mode !== "settings" && SP_JSX.jsxs(DFL.PanelSection, {
+                title: "Scroll Mode",
+                children: [
+                    SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.ToggleField, {
+                            label: "Edge Scroll instead of Two-Finger",
+                            description: "Draws an on-glass scrollbar on the right edge. Single finger drag in gutter scrolls; 2-finger scroll is disabled",
+                            checked: status.edge_scroll ?? false,
+                            onChange: (val) => updateSetting("edge_scroll", val)
+                        })
+                    })
+                ]
+            }),
+            status.enabled && status.mode !== "keyboard" && status.mode !== "settings" && SP_JSX.jsxs(DFL.PanelSection, {
+                title: "Gestures & Clicks",
+                children: [
+                    SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.ToggleField, {
+                            label: "Tap to Click",
+                            description: "1-finger tap performs primary left click",
+                            checked: status.tap_to_click ?? true,
+                            onChange: (val) => updateSetting("tap_to_click", val)
+                        })
+                    }),
+                    SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.ToggleField, {
+                            label: "Long-Press for Right Click",
+                            description: "Hold 1 finger still to trigger secondary right click",
+                            checked: status.long_press_right_click ?? true,
+                            onChange: (val) => updateSetting("long_press_right_click", val)
+                        })
+                    }),
+                    (status.long_press_right_click ?? true) && SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.SliderField, {
+                            label: `Long-Press Delay: ${status.long_press_delay_ms ?? 450} ms`,
+                            value: status.long_press_delay_ms ?? 450,
+                            min: 250,
+                            max: 900,
+                            step: 50,
+                            showValue: true,
+                            onChange: (val) => updateSetting("long_press_delay_ms", Math.round(val))
+                        })
+                    }),
+                    SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.ToggleField, {
+                            label: "Two-Finger Right Click Tap",
+                            description: "2-finger tap emits right click",
+                            checked: status.two_finger_right_click ?? true,
+                            onChange: (val) => updateSetting("two_finger_right_click", val)
+                        })
+                    }),
+                    SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.ToggleField, {
+                            label: "Three-Finger Middle Click Tap",
+                            description: "3-finger tap emits middle click",
+                            checked: status.three_finger_middle_click ?? true,
+                            onChange: (val) => updateSetting("three_finger_middle_click", val)
+                        })
+                    }),
+                    SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.ToggleField, {
+                            label: "Pinch to Zoom",
+                            description: "2-finger pinch emits Ctrl+Wheel zoom",
+                            checked: status.pinch_zoom_enabled ?? true,
+                            onChange: (val) => updateSetting("pinch_zoom_enabled", val)
+                        })
+                    }),
+                    SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.ToggleField, {
+                            label: "Three-Finger Navigation Swipes",
+                            description: "Up = Super/Steam, Down = Escape, Left/Right = Alt+Tab",
+                            checked: status.three_finger_swipe_enabled ?? true,
+                            onChange: (val) => updateSetting("three_finger_swipe_enabled", val)
+                        })
+                    }),
+                    SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.ToggleField, {
+                            label: "Drag Lock",
+                            description: "Double-tap and drag to hold left mouse button",
+                            checked: status.drag_lock_enabled ?? true,
+                            onChange: (val) => updateSetting("drag_lock_enabled", val)
                         })
                     })
                 ]
@@ -334,7 +444,7 @@ function Content() {
 
 const index = definePlugin((serverApi) => {
     return {
-        name: "Thor Input",
+        name: "Touch Master",
         content: SP_JSX.jsx(Content, {}),
         icon: SP_JSX.jsx("svg", {
             xmlns: "http://www.w3.org/2000/svg",

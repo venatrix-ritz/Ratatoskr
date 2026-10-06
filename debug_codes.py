@@ -1,4 +1,4 @@
-"""Thor Input Diagnostic & Debug Code Registry."""
+"""Touch Master Diagnostic & Debug Code Registry."""
 from __future__ import annotations
 
 import glob
@@ -51,8 +51,22 @@ class DebugCode(IntEnum):
     STATUS_CLICK_RIGHT = 511
     STATUS_CLICK_MIDDLE = 512
     STATUS_SCROLL = 520
+    STATUS_EDGE_SCROLL = 521
+    STATUS_PINCH_ZOOM = 522
+    STATUS_SWIPE_NAV = 523
+    STATUS_DRAG_LOCK = 524
+    STATUS_LONG_PRESS = 525
     STATUS_GLIDE_START = 530
     STATUS_KEY_PRESS = 540
+
+    # 6xx: Settings & Quick Controls
+    SETTINGS_UPDATED = 600
+    BACKLIGHT_UPDATED = 601
+    VOLUME_UPDATED = 602
+
+    # 7xx: Hardware Controls Errors
+    ERR_BACKLIGHT_SYSFS = 701
+    ERR_PIPEWIRE_WPCTL = 702
 
 
 CODE_DESCRIPTIONS: dict[DebugCode, str] = {
@@ -86,8 +100,18 @@ CODE_DESCRIPTIONS: dict[DebugCode, str] = {
     DebugCode.STATUS_CLICK_RIGHT: "Right click emitted",
     DebugCode.STATUS_CLICK_MIDDLE: "Middle click emitted",
     DebugCode.STATUS_SCROLL: "Scroll wheel emitted",
+    DebugCode.STATUS_EDGE_SCROLL: "Edge scrollbar active",
+    DebugCode.STATUS_PINCH_ZOOM: "Pinch zoom gesture emitted",
+    DebugCode.STATUS_SWIPE_NAV: "Multi-finger navigation swipe emitted",
+    DebugCode.STATUS_DRAG_LOCK: "Drag lock engaged",
+    DebugCode.STATUS_LONG_PRESS: "Long press right click emitted",
     DebugCode.STATUS_GLIDE_START: "Momentum glide active",
     DebugCode.STATUS_KEY_PRESS: "Hardware keystroke emitted",
+    DebugCode.SETTINGS_UPDATED: "Settings successfully updated",
+    DebugCode.BACKLIGHT_UPDATED: "Display backlight brightness adjusted",
+    DebugCode.VOLUME_UPDATED: "System volume level adjusted",
+    DebugCode.ERR_BACKLIGHT_SYSFS: "Backlight sysfs write failure",
+    DebugCode.ERR_PIPEWIRE_WPCTL: "PipeWire wpctl execution failure",
 }
 
 

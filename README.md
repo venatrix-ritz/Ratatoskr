@@ -1,34 +1,43 @@
-# Thor Input
+# Touch Master
 
-A dedicated **Decky Loader plugin** and input driver for the **AYN Thor Max** (Snapdragon 8 Gen 2, dual-screen handheld running Armada OS).
+A dedicated **Decky Loader plugin** and virtual input driver for the **AYN Thor Max** (Snapdragon 8 Gen 2, dual-screen handheld running Armada OS).
 
-Turns the lower 3.92" AMOLED screen into a zero-latency **Trackpad**, **Keyboard**, or **Split input device** for Steam Game Mode and desktop games on the primary 6" screen, with **zero launcher clutter**.
+Turns the lower 3.92" AMOLED screen into a zero-latency, highly customizable **Trackpad**, **Keyboard**, **Split input device**, or **Quick Settings & Hardware Monitor** for Steam Game Mode and desktop games on the primary 6" screen, with **zero launcher clutter**.
 
 ---
 
-## Features
+## ✨ Features
 
 - **No Launcher Overhead:** Pure input surface—no tiles, cover art, or nested menus.
-- **AMOLED-Optimized:** Pure black `#000000` aesthetic matching the Thor bezel. Unused pixels stay off.
-- **Three Modes (Instant Glass Switch):**
-  - **Trackpad:** 1-finger relative movement with smooth acceleration, tap-to-click, drag-lock, 2-finger scroll, 2-finger right click, and momentum glide ("Ball mode").
-  - **Keyboard:** 5-row thumb-friendly QWERTY layout emitting real Linux hardware scan codes (`EV_KEY`) via `/dev/uinput`.
-  - **Split Mode:** Top 40% is Trackpad, bottom 60% is Keyboard. Drive cursor targeting and hotkeys simultaneously (ideal for *FTL*, *Caves of Qud*, roguelikes, and terminal use).
-- **Physical Click Helpers:** Dedicated on-glass buttons for Left Click and Right Click (can be held while steering).
-- **Decky Quick Access Menu (QAM):**
-  - Toggle input mode on/off.
-  - Switch modes (`Trackpad`, `Split`, `Keyboard`).
-  - Tune pointer sensitivity (0.5x – 3.5x).
-  - Toggle momentum glide.
-  - Real-time diagnostic telemetry and on-glass HUD overlay toggle.
-- **Built-in Diagnostics (`debug_codes.py`):**
-  - Standardized error codes for `/dev/uinput`, touch digitizer, and IPC socket.
-  - Self-test diagnostic runner directly inside Decky.
+- **AMOLED-Optimized:** Pure black `#000000` aesthetic matching the Thor bezel. Unused pixels stay completely unpowered.
+- **Four Instant Modes:**
+  - **Trackpad:** 1-finger relative movement with smooth acceleration, tap-to-click, drag-lock, momentum glide ("Ball mode"), and full multi-touch gestures.
+  - **Keyboard:** 5-row thumb-friendly QWERTY layout emitting real Linux hardware scan codes (`EV_KEY`) via `/dev/uinput` with dual-symbol keys and active modifier glow.
+  - **Split Mode:** Top half is Trackpad, bottom half is Keyboard. Drive cursor targeting and hotkeys simultaneously (ideal for *FTL*, *Caves of Qud*, roguelikes, and terminal use).
+  - **Quick Controls:** On-glass interactive sliders for system volume (PipeWire/WirePlumber), top screen backlight (`ae96000.dsi.0`), and bottom AMOLED backlight (`ae94000.dsi.0`).
+- **Live System Monitor Ribbon:** Always-visible status ribbon reporting Battery % & Watts, CPU Load & Temperature, GPU Frequency & Temperature, RAM usage, Volume, and dual Backlights.
+- **Edge Scroll Mode:**
+  - Toggle between 2-finger scroll and **Edge Scroll**.
+  - When toggled on, draws an on-glass vertical scrollbar with gutter track, chevrons (▲/▼), and an active cyan thumb along the right edge of the trackpad. Single-finger drag in the gutter smoothly scrolls.
+- **Customizable Dynamics & Gestures (Decky QAM):**
+  - **Pointer Sensitivity:** 0.5x to 3.5x.
+  - **Momentum Glide & Friction:** Adjustable deceleration friction (1 = slick coasting to 10 = heavy drag).
+  - **Scroll Speed:** Precision to fast velocity (1 to 5).
+  - **Tap to Click:** 1-finger tap primary click toggle.
+  - **Long-Press Right Click:** Toggleable with adjustable duration (250ms – 900ms).
+  - **Two-Finger Right Click:** 2-finger tap secondary click toggle.
+  - **Three-Finger Middle Click:** 3-finger tap middle click toggle.
+  - **Pinch-to-Zoom:** 2-finger pinch emits Ctrl + Wheel.
+  - **Navigation Swipes:** 3-finger swipes (Up = Super/Steam, Down = Escape, Left/Right = Alt+Tab).
+  - **Drag Lock:** Double-tap and drag holds the primary mouse button.
+- **Built-in Diagnostics & Logging (`debug_codes.py`):**
+  - Standardized diagnostic codes for `/dev/uinput`, touch digitizer, IPC socket, gestures, volume, and backlights.
   - Live on-glass HUD overlay showing FPS, touch coordinates, and event counters.
+  - Structured logging written to `/tmp/thor-input-debug.log`.
 
 ---
 
-## Architecture
+## 🏗️ Architecture
 
 ```
 ┌────────────────────────────────────────────────────────┐
@@ -45,20 +54,20 @@ Turns the lower 3.92" AMOLED screen into a zero-latency **Trackpad**, **Keyboard
 └───────────────────────────▲────────────────────────────┘
                             │ UNIX Socket IPC
 ┌───────────────────────────┴────────────────────────────┐
-│               Decky Plugin Backend (main.py)           │
+│          Touch Master Decky Backend (main.py)          │
 │  • Manages daemon lifecycle                            │
-│  • Reports diagnostic codes and telemetry              │
+│  • Reports diagnostic codes, stats & telemetry         │
 └───────────────────────────▲────────────────────────────┘
                             │ Decky API
 ┌───────────────────────────┴────────────────────────────┐
 │            Decky QAM Frontend (dist/index.js)          │
-│  • User controls & settings in Steam (...) menu        │
+│  • Sliders, toggles & telemetry in Steam (...) menu    │
 └────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Deployment
+## 🚀 Deployment
 
 ```bash
 # Deploy to Thor device over SSH
@@ -66,13 +75,13 @@ Turns the lower 3.92" AMOLED screen into a zero-latency **Trackpad**, **Keyboard
 ```
 
 Or copy manually:
-- Decky plugin files (`plugin.json`, `main.py`, `debug_codes.py`, `dist/index.js`) to `/home/armada/homebrew/plugins/thor-input/`
+- Decky plugin files (`plugin.json`, `package.json`, `main.py`, `debug_codes.py`, `dist/index.js`) to `/home/armada/homebrew/plugins/thor-input/`
 - Backend files (`bin/`, `debug_codes.py`) to `/var/home/armada/.local/share/thor-input/`
 - Restart Decky: `sudo systemctl restart plugin_loader.service`
 
 ---
 
-## Diagnostic Codes
+## 🔍 Diagnostic Codes Registry
 
 | Code | Label | Description |
 |---|---|---|
@@ -84,10 +93,24 @@ Or copy manually:
 | `DBG-203` | `ERR_TOUCH_GRAB` | `EVIOCGRAB` failed |
 | `DBG-300` | `SOCKET_OK` | IPC socket `/run/user/1000/thor-input.sock` ready |
 | `DBG-400` | `DISPLAY_OK` | Connected to secondary display `:2` |
+| `DBG-510` | `STATUS_CLICK_LEFT` | Primary click emitted |
+| `DBG-511` | `STATUS_CLICK_RIGHT` | Secondary click emitted |
+| `DBG-512` | `STATUS_CLICK_MIDDLE`| Middle click emitted |
+| `DBG-520` | `STATUS_SCROLL` | Scroll wheel emitted |
+| `DBG-521` | `STATUS_EDGE_SCROLL` | Edge scrollbar active |
+| `DBG-522` | `STATUS_PINCH_ZOOM` | Pinch zoom gesture emitted |
+| `DBG-523` | `STATUS_SWIPE_NAV` | Multi-finger navigation swipe emitted |
+| `DBG-524` | `STATUS_DRAG_LOCK` | Drag lock engaged |
+| `DBG-525` | `STATUS_LONG_PRESS` | Long-press right click emitted |
+| `DBG-530` | `STATUS_GLIDE_START` | Momentum glide coasting |
+| `DBG-540` | `STATUS_KEY_PRESS` | Hardware keystroke emitted |
+| `DBG-600` | `SETTINGS_UPDATED` | Settings applied and saved to config |
+| `DBG-601` | `BACKLIGHT_UPDATED` | Top or bottom backlight brightness adjusted |
+| `DBG-602` | `VOLUME_UPDATED` | Master volume adjusted or muted |
 
 ---
 
-## Credits & Acknowledgments
+## 🙏 Credits & Acknowledgments
 
 Credit where credit is due: this utility is deeply indebted to and builds upon the pioneering work of:
 
