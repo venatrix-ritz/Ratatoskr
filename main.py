@@ -95,14 +95,14 @@ class Plugin:
             if _is_running():
                 self._stop_service()
 
-    def _run_systemctl(self, action: str) -> None:
+    def _run_systemctl(self, action: str, unit: str = "touch-master.service") -> bool:
         env = dict(os.environ)
         env["XDG_RUNTIME_DIR"] = "/run/user/1000"
         env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/run/user/1000/bus"
 
         cmds = [
-            ["systemctl", "--machine=armada@.host", "--user", action, "touch-master.service"],
-            ["systemctl", "--user", action, "touch-master.service"],
+            ["systemctl", "--machine=armada@.host", "--user", action, unit],
+            ["systemctl", "--user", action, unit],
         ]
         success = False
         for cmd in cmds:
@@ -116,16 +116,20 @@ class Plugin:
         if not success:
             self.logger.log(
                 DebugCode.ERR_SERVICE_STOP if "stop" in action else DebugCode.ERR_SERVICE_START,
-                f"systemctl {action} failed",
+                f"systemctl {action} {unit} failed",
             )
+        return success
 
     def _start_service(self) -> None:
-        self._run_systemctl("enable")
-        self._run_systemctl("start")
+        self._run_systemctl("disable", "armada-bottom-screen.service")
+        self._run_systemctl("enable", "touch-master.service")
+        self._run_systemctl("start", "touch-master.service")
 
     def _stop_service(self) -> None:
-        self._run_systemctl("stop")
-        self._run_systemctl("disable")
+        self._run_systemctl("stop", "touch-master.service")
+        self._run_systemctl("disable", "touch-master.service")
+        self._run_systemctl("enable", "armada-bottom-screen.service")
+        self._run_systemctl("start", "armada-bottom-screen.service")
 
     async def get_status(self) -> dict:
         def _get():

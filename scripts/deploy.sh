@@ -33,7 +33,13 @@ ssh "${THOR_HOST}" "
     kbuildsycoca6 2>/dev/null || true
 "
 
-# 4. Sync Decky plugin files
+# 4. Sync systemd user service unit
+echo "==> Syncing systemd user service..."
+ssh "${THOR_HOST}" "mkdir -p ~/.config/systemd/user"
+scp systemd/touch-master.service "${THOR_HOST}:~/.config/systemd/user/touch-master.service"
+ssh "${THOR_HOST}" "systemctl --user daemon-reload"
+
+# 5. Sync Decky plugin files
 echo "==> Syncing Decky plugin files..."
 scp plugin.json "${THOR_HOST}:/tmp/plugin.json"
 scp package.json "${THOR_HOST}:/tmp/package.json"

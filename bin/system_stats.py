@@ -15,6 +15,7 @@ from typing import Any
 
 TOP_BACKLIGHT_PATH = "/sys/class/backlight/ae96000.dsi.0"
 BOTTOM_BACKLIGHT_PATH = "/sys/class/backlight/ae94000.dsi.0"
+ARMADA_BOTTOM_BRIGHTNESS_FILE = "/etc/armada/bottom-screen-brightness"
 BATTERY_PATH = "/sys/class/power_supply/battery"
 GPU_PATH = "/sys/class/devfreq/3d00000.gpu"
 
@@ -260,6 +261,7 @@ class HardwareStats:
         max_b = _read_int(f"{BOTTOM_BACKLIGHT_PATH}/max_brightness", 255)
         val = round(target * max_b / 100)
         _write_str(f"{BOTTOM_BACKLIGHT_PATH}/brightness", str(val))
+        _write_str(ARMADA_BOTTOM_BRIGHTNESS_FILE, str(target))
         self._last_sample_time = 0.0
         return target
 

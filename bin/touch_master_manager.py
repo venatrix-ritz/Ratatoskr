@@ -25,6 +25,7 @@ if "DBUS_SESSION_BUS_ADDRESS" not in os.environ:
 SOCKET_PATH = f"/run/user/{os.getuid()}/thor-input.sock"
 CONFIG_PATH = Path(os.path.expanduser("~/.config/thor-input/config.json"))
 SERVICE_NAME = "touch-master.service"
+STOCK_BOTTOM_SERVICE = "armada-bottom-screen.service"
 
 DEFAULT_CONFIG = {
     "enabled": True,
@@ -100,6 +101,7 @@ def start_service() -> bool:
     cfg["enabled"] = True
     save_config(cfg)
     try:
+        subprocess.run(["systemctl", "--user", "disable", STOCK_BOTTOM_SERVICE], check=False, timeout=3.0)
         subprocess.run(["systemctl", "--user", "enable", SERVICE_NAME], check=False, timeout=3.0)
         res = subprocess.run(["systemctl", "--user", "start", SERVICE_NAME], check=False, timeout=3.0)
         return res.returncode == 0
@@ -114,6 +116,9 @@ def stop_service() -> bool:
     try:
         res = subprocess.run(["systemctl", "--user", "stop", SERVICE_NAME], check=False, timeout=3.0)
         subprocess.run(["systemctl", "--user", "disable", SERVICE_NAME], check=False, timeout=3.0)
+        # Restore stock Armada bottom screen session
+        subprocess.run(["systemctl", "--user", "enable", STOCK_BOTTOM_SERVICE], check=False, timeout=3.0)
+        subprocess.run(["systemctl", "--user", "start", STOCK_BOTTOM_SERVICE], check=False, timeout=3.0)
         return res.returncode == 0
     except Exception:
         return False

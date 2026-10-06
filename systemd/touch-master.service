@@ -1,0 +1,17 @@
+[Unit]
+Description=Touch Master - AYN Thor Bottom Screen Input Driver
+PartOf=armada-bottom-gamescope.service
+After=armada-bottom-gamescope.service
+Conflicts=armada-bottom-screen.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/armada-run-bottom -- /usr/bin/python3 /var/home/armada/.local/share/thor-input/bin/thor_app.py
+Restart=always
+RestartSec=2
+Environment=PYTHONUNBUFFERED=1
+Environment=GDK_BACKEND=x11
+
+[Install]
+WantedBy=gamescope-session-plus@steam.service default.target
