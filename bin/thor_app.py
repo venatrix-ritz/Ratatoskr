@@ -70,6 +70,7 @@ class ThorApp:
         self.gesture = TouchGestureProcessor(self.bridge, self.logger)
         self.kb_layout = KeyboardLayout(0, HEADER_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT - HEADER_HEIGHT)
         self.held_ui_button: str | None = None
+        self.held_ui_button_tid: int | None = None
         self.active_key_press: int | None = None
         self.last_key_label = ""
         self.last_event_time = time.time()
@@ -213,13 +214,20 @@ class ThorApp:
                 if not r:
                     continue
                 try:
-                    data = os.read(self.touch_fd, EVENT_STRUCT.size * 64)
+                    data = os.read(self.touch_fd, EVENT_STRUCT.size * 256)
                 except (BlockingIOError, OSError):
                     continue
 
                 for off in range(0, len(data) - EVENT_STRUCT.size + 1, EVENT_STRUCT.size):
                     sec, usec, etype, code, value = EVENT_STRUCT.unpack_from(data, off)
-                    if etype == EV_ABS:
+                    if etype == EV_SYN and code == 3:
+                        # SYN_DROPPED: hardware buffer overflowed, flush and resync state
+                        raw.clear()
+                        tracking.clear()
+                        active_contacts.clear()
+                        self.gesture.reset_all()
+                        continue
+                    elif etype == EV_ABS:
                         if code == ABS_MT_SLOT:
                             slot = value
                         elif code == ABS_MT_TRACKING_ID:
@@ -251,6 +259,10 @@ class ThorApp:
                                     active_contacts[tid] = (sx, sy)
                                     self._handle_touch_move(tid, sx, sy, now)
 
+                        if not live and not active_contacts:
+                            self.gesture.reset_all()
+
+
         self.touch_thread = threading.Thread(target=_reader_loop, daemon=True)
         self.touch_thread.start()
 
@@ -274,7 +286,7 @@ class ThorApp:
 
         # 1. Header Navigation Bar (y < 48)
         if y < HEADER_BUTTONS_H:
-            self._handle_header_touch(x, y, True)
+            self._handle_header_touch(tid, x, y, True)
             return
 
         # 2. Status Ribbon (48 <= y < HEADER_HEIGHT) -> tap toggles Quick Settings
@@ -329,12 +341,13 @@ class ThorApp:
 
     def _handle_touch_up(self, tid: int, now: float) -> None:
         self.last_event_time = time.time()
-        if self.held_ui_button:
+        if self.held_ui_button and (tid == self.held_ui_button_tid or len(self.gesture.active_contacts) == 0):
             if self.held_ui_button == "left":
                 self.bridge.mouse_button(BTN_LEFT, False)
             elif self.held_ui_button == "right":
                 self.bridge.mouse_button(BTN_RIGHT, False)
             self.held_ui_button = None
+            self.held_ui_button_tid = None
             GLib.idle_add(self.drawing_area.queue_draw)
 
         if self.active_key_press is not None:
@@ -346,7 +359,7 @@ class ThorApp:
             if self.show_debug_hud:
                 GLib.idle_add(self.drawing_area.queue_draw)
 
-    def _handle_header_touch(self, x: float, y: float, down: bool) -> None:
+    def _handle_header_touch(self, tid: int, x: float, y: float, down: bool) -> None:
         if 12 <= x <= 132:
             self.set_mode("trackpad")
         elif 140 <= x <= 240:
@@ -362,14 +375,14 @@ class ThorApp:
             GLib.idle_add(self.drawing_area.queue_draw)
         elif 680 <= x <= 820:
             self.held_ui_button = "left"
+            self.held_ui_button_tid = tid
             self.bridge.mouse_button(BTN_LEFT, True)
             GLib.idle_add(self.drawing_area.queue_draw)
         elif 828 <= x <= 968:
             self.held_ui_button = "right"
+            self.held_ui_button_tid = tid
             self.bridge.mouse_button(BTN_RIGHT, True)
             GLib.idle_add(self.drawing_area.queue_draw)
-        elif 1120 <= x <= 1220:
-            self.window.close()
 
     def _handle_settings_touch(self, x: float, y: float) -> None:
         # Card 1: Volume (y = 120 .. 230)
@@ -412,17 +425,25 @@ class ThorApp:
 
         # Bottom Action Buttons (y = 840 .. 915)
         if 840 <= y <= 915:
-            if 30 <= x <= 340:
+            if 30 <= x <= 310:
                 self.gesture.edge_scroll_enabled = not self.gesture.edge_scroll_enabled
                 self.save_config()
-            elif 356 <= x <= 626:
-                run_self_diagnostics()
-            elif 642 <= x <= 902:
+            elif 330 <= x <= 610:
+                # Toggle right-click mode between 2-finger and long-press (mutually exclusive)
+                if self.gesture.two_finger_right_click:
+                    self.gesture.two_finger_right_click = False
+                    self.gesture.long_press_right_click = True
+                else:
+                    self.gesture.two_finger_right_click = True
+                    self.gesture.long_press_right_click = False
+                self.save_config()
+            elif 630 <= x <= 910:
                 self.show_debug_hud = not self.show_debug_hud
                 self.save_config()
-            elif 918 <= x <= 1210:
+            elif 930 <= x <= 1210:
                 self.set_mode("trackpad")
             GLib.idle_add(self.drawing_area.queue_draw)
+
 
     def _handle_settings_drag(self, x: float, y: float) -> None:
         if 160 <= y <= 220 and 130 <= x <= 950:
@@ -926,10 +947,17 @@ class ThorApp:
         # Action Buttons
         edge_active = self.gesture.edge_scroll_enabled
         scroll_label = "Scroll: Edge Bars" if edge_active else "Scroll: 2-Finger"
-        self._draw_button(cr, 30, 846, 310, 64, scroll_label, edge_active, accent_color=(0.15, 0.55, 0.95))
-        self._draw_button(cr, 356, 846, 270, 64, "Run Self-Test Diag", False, accent_color=(0.2, 0.55, 0.9))
-        self._draw_button(cr, 642, 846, 260, 64, "Toggle Glass HUD", self.show_debug_hud, accent_color=(0.2, 0.65, 0.4))
-        self._draw_button(cr, 918, 846, 290, 64, "Back to Trackpad", False, accent_color=(0.38, 0.25, 0.85))
+        self._draw_button(cr, 30, 846, 280, 64, scroll_label, edge_active, accent_color=(0.15, 0.55, 0.95))
+
+        right_2f = self.gesture.two_finger_right_click
+        right_label = "Right: 2-Finger" if right_2f else "Right: Press-Hold"
+        self._draw_button(cr, 330, 846, 280, 64, right_label, right_2f, accent_color=(0.2, 0.75, 0.65))
+
+        hud_label = "Glass HUD: ON" if self.show_debug_hud else "Glass HUD: OFF"
+        self._draw_button(cr, 630, 846, 280, 64, hud_label, self.show_debug_hud, accent_color=(0.2, 0.65, 0.4))
+
+        self._draw_button(cr, 930, 846, 280, 64, "Back to Trackpad", False, accent_color=(0.38, 0.25, 0.85))
+
 
     def _draw_slider_card(
         self,

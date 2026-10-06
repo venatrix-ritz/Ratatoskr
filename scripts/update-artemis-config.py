@@ -54,8 +54,8 @@ def update_artemis_conf():
         "audiocfg": "0",
         "hdr": "false",
         "yuv444": "false",
-        "videocfg": "2",       # Force HEVC
-        "videodec": "1",       # Force Hardware Decoder (Qualcomm Iris V4L2 M2M)
+        "videocfg": "0",       # Auto
+        "videodec": "0",       # Auto (prevents fatal hardware decode preflight abort on Armada)
         "windowmode": "0",     # Fullscreen
         "uidisplaymode": "2",  # Fullscreen
         "language": "0",

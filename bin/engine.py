@@ -62,11 +62,10 @@ SCREEN_WIDTH = 1240
 SCREEN_HEIGHT = 1080
 
 # Gesture thresholds
-TAP_MAX_TIME_S = 0.35
-TAP_MAX_DISTANCE_PX = 32.0
+TAP_MAX_TIME_S = 0.38
+TAP_MAX_DISTANCE_PX = 36.0
 LONG_PRESS_TIME_S = 0.45
 LONG_PRESS_MAX_DIST_PX = 24.0
-DRAG_TIMEOUT_S = 0.32
 SCROLL_DIVISOR = 10.0
 PINCH_THRESHOLD_PX = 35.0
 SWIPE_THRESHOLD_PX = 85.0
@@ -248,6 +247,15 @@ class UInputBridge:
             time.sleep(delay_s)
         self.key(key_code, False)
 
+    def tap_button(self, button_code: int, delay_s: float = 0.02) -> None:
+        """Asynchronously emit a button click without blocking the caller."""
+        def _do_click():
+            self.mouse_button(button_code, True)
+            time.sleep(delay_s)
+            self.mouse_button(button_code, False)
+
+        threading.Thread(target=_do_click, daemon=True).start()
+
     def release_all(self) -> None:
         with self.lock:
             for b in list(self.held_buttons):
@@ -314,13 +322,13 @@ class TouchGestureProcessor:
         self.scroll_rest_x = 0.0
         self.scroll_rest_y = 0.0
         self.tap_to_click = True
-        self.long_press_right_click = True
+        self.long_press_right_click = False  # Ven: press to hold or 2-finger, not both (default: 2-finger)
         self.long_press_delay_ms = 450  # 250 to 900 ms
         self.two_finger_right_click = True
-        self.three_finger_middle_click = True
-        self.pinch_zoom_enabled = True
-        self.three_finger_swipe_enabled = True
-        self.drag_lock_enabled = True
+        self.three_finger_middle_click = False
+        self.pinch_zoom_enabled = False  # Disabled to eliminate accidental key 29 (Ctrl) spam
+        self.three_finger_swipe_enabled = False  # Disabled to eliminate accidental gesture triggers
+        self.drag_lock_enabled = False  # Permanently disabled to eliminate sticky left-click drag traps
 
         # Touch tracking state
         self.active_contacts: dict[int, dict] = {}  # tid -> info
@@ -384,12 +392,17 @@ class TouchGestureProcessor:
             self.edge_scroll_enabled = bool(edge_scroll)
         if tap_to_click is not None:
             self.tap_to_click = bool(tap_to_click)
-        if long_press_right_click is not None:
-            self.long_press_right_click = bool(long_press_right_click)
-        if long_press_delay_ms is not None:
-            self.long_press_delay_ms = max(200, min(1200, int(round(float(long_press_delay_ms)))))
+        # Ven's rule: Press to hold OR two finger right click, not both
         if two_finger_right_click is not None:
             self.two_finger_right_click = bool(two_finger_right_click)
+            if self.two_finger_right_click:
+                self.long_press_right_click = False
+        if long_press_right_click is not None:
+            self.long_press_right_click = bool(long_press_right_click)
+            if self.long_press_right_click:
+                self.two_finger_right_click = False
+        if long_press_delay_ms is not None:
+            self.long_press_delay_ms = max(200, min(1200, int(round(float(long_press_delay_ms)))))
         if three_finger_middle_click is not None:
             self.three_finger_middle_click = bool(three_finger_middle_click)
         if pinch_zoom_enabled is not None:
@@ -400,7 +413,7 @@ class TouchGestureProcessor:
             self.drag_lock_enabled = bool(drag_lock_enabled)
         self.logger.log(
             DebugCode.SETTINGS_UPDATED,
-            f"sens={self.sensitivity}, friction={self.friction}, edge_scroll={self.edge_scroll_enabled}, glide={self.glide_enabled}",
+            f"sens={self.sensitivity}, friction={self.friction}, edge_scroll={self.edge_scroll_enabled}, 2f_right={self.two_finger_right_click}",
         )
 
     def get_settings(self) -> dict[str, Any]:
@@ -420,6 +433,22 @@ class TouchGestureProcessor:
             "drag_lock_enabled": self.drag_lock_enabled,
         }
 
+    def reset_all(self) -> None:
+        """Reset all active tracking state and cancel timers cleanly."""
+        self._cancel_long_press()
+        self.active_contacts.clear()
+        self.active_edge_scroll_tid = None
+        self.active_edge_scroll_axis = None
+        self.scroll_rest_x = 0.0
+        self.scroll_rest_y = 0.0
+        self.max_fingers = 0
+        self.is_dragging = False
+        self.accum_dist = 0.0
+        self.vel_x = 0.0
+        self.vel_y = 0.0
+        self.long_press_triggered = False
+        self.last_state_label = "IDLE"
+
     def _cancel_long_press(self) -> None:
         if self.long_press_timer and self.long_press_timer.is_alive():
             self.long_press_timer.cancel()
@@ -430,9 +459,8 @@ class TouchGestureProcessor:
             self.long_press_triggered = True
             self.last_state_label = "LONG PRESS RIGHT"
             self.logger.log(DebugCode.STATUS_LONG_PRESS)
-            self.bridge.mouse_button(BTN_RIGHT, True)
-            time.sleep(0.03)
-            self.bridge.mouse_button(BTN_RIGHT, False)
+            self.bridge.tap_button(BTN_RIGHT)
+
 
     def touch_down(self, tid: int, x: float, y: float, now: float) -> None:
         self.glide_stop.set()
@@ -453,6 +481,9 @@ class TouchGestureProcessor:
                     self.active_edge_scroll_axis = "v"
                     self.scroll_rest_x = 0.0
                     self.scroll_rest_y = 0.0
+                    self.start_time = now
+                    self.last_move_time = now
+                    self.accum_dist = 0.0
                     self.last_state_label = "EDGE SCROLL V"
                     self.logger.log(DebugCode.STATUS_EDGE_SCROLL, f"vertical start x={x:.1f}, y={y:.1f}")
                     return
@@ -464,6 +495,9 @@ class TouchGestureProcessor:
                     self.active_edge_scroll_axis = "h"
                     self.scroll_rest_x = 0.0
                     self.scroll_rest_y = 0.0
+                    self.start_time = now
+                    self.last_move_time = now
+                    self.accum_dist = 0.0
                     self.last_state_label = "EDGE SCROLL H"
                     self.logger.log(DebugCode.STATUS_EDGE_SCROLL, f"horizontal start x={x:.1f}, y={y:.1f}")
                     return
@@ -475,33 +509,14 @@ class TouchGestureProcessor:
             self.vel_y = 0.0
             self.long_press_triggered = False
 
-            if self.drag_lock_enabled and (now - self.last_tap_time) < DRAG_TIMEOUT_S:
-                self.is_dragging = True
-                self.last_state_label = "DRAG LOCK"
-                self.logger.log(DebugCode.STATUS_DRAG_LOCK)
-                self.bridge.mouse_button(BTN_LEFT, True)
-            elif self.long_press_right_click:
-                # Start long-press timer for right click
+            if self.long_press_right_click:
                 self._cancel_long_press()
                 delay_s = self.long_press_delay_ms / 1000.0
                 self.long_press_timer = threading.Timer(delay_s, self._on_long_press)
                 self.long_press_timer.start()
 
-        elif count == 2:
+        elif count >= 2:
             self._cancel_long_press()
-            if self.active_edge_scroll_tid is not None:
-                return
-            pts = list(self.active_contacts.values())
-            self.initial_pinch_dist = math.hypot(pts[0]["start_x"] - pts[1]["start_x"], pts[0]["start_y"] - pts[1]["start_y"])
-            self.pinch_triggered = False
-
-        elif count >= 3:
-            self._cancel_long_press()
-            if self.active_edge_scroll_tid is not None:
-                return
-            pts = list(self.active_contacts.values())
-            self.start_centroid = (sum(p["start_x"] for p in pts) / count, sum(p["start_y"] for p in pts) / count)
-            self.swipe_triggered = False
 
     def touch_move(self, tid: int, x: float, y: float, now: float) -> None:
         contact = self.active_contacts.get(tid)
@@ -513,24 +528,33 @@ class TouchGestureProcessor:
         contact["last_x"] = x
         contact["last_y"] = y
 
-        if self.edge_scroll_enabled and tid == self.active_edge_scroll_tid:
-            self.last_coords = (x, y)
-            scroll_divisor = max(4.0, 22.0 - (self.scroll_speed * 4.0))
-            if self.active_edge_scroll_axis == "v":
-                self.last_state_label = "EDGE SCROLL V"
-                target_dy = -dy * (HI_RES_NOTCH / scroll_divisor) + self.scroll_rest_y
-                units_y = int(target_dy)
-                self.scroll_rest_y = target_dy - units_y
-                if units_y != 0:
-                    self.bridge.emit_scroll(0, units_y)
-            elif self.active_edge_scroll_axis == "h":
-                self.last_state_label = "EDGE SCROLL H"
-                target_dx = dx * (HI_RES_NOTCH / scroll_divisor) + self.scroll_rest_x
-                units_x = int(target_dx)
-                self.scroll_rest_x = target_dx - units_x
-                if units_x != 0:
-                    self.bridge.emit_scroll(units_x, 0)
-            return
+        # 1. Edge scroll handling with watchdog desync protection
+        if self.edge_scroll_enabled and self.active_edge_scroll_tid is not None:
+            if self.active_edge_scroll_tid not in self.active_contacts:
+                self.active_edge_scroll_tid = None
+                self.active_edge_scroll_axis = None
+                self.scroll_rest_x = 0.0
+                self.scroll_rest_y = 0.0
+            elif tid == self.active_edge_scroll_tid:
+                self.last_coords = (x, y)
+                scroll_divisor = max(4.0, 22.0 - (self.scroll_speed * 4.0))
+                if self.active_edge_scroll_axis == "v":
+                    self.last_state_label = "EDGE SCROLL V"
+                    target_dy = -dy * (HI_RES_NOTCH / scroll_divisor) + self.scroll_rest_y
+                    units_y = int(target_dy)
+                    self.scroll_rest_y = target_dy - units_y
+                    if units_y != 0:
+                        self.bridge.emit_scroll(0, units_y)
+                elif self.active_edge_scroll_axis == "h":
+                    self.last_state_label = "EDGE SCROLL H"
+                    target_dx = dx * (HI_RES_NOTCH / scroll_divisor) + self.scroll_rest_x
+                    units_x = int(target_dx)
+                    self.scroll_rest_x = target_dx - units_x
+                    if units_x != 0:
+                        self.bridge.emit_scroll(units_x, 0)
+                return
+            else:
+                return
 
         if self.active_edge_scroll_tid is not None:
             return
@@ -546,7 +570,7 @@ class TouchGestureProcessor:
             if self.accum_dist > LONG_PRESS_MAX_DIST_PX:
                 self._cancel_long_press()
 
-            self.last_state_label = "DRAGGING" if self.is_dragging else "MOVE"
+            self.last_state_label = "MOVE"
             speed = self.sensitivity
             mag = math.hypot(dx, dy)
             accel = 1.0 + min(1.6, mag / 25.0)
@@ -565,62 +589,38 @@ class TouchGestureProcessor:
 
         elif count == 2:
             self._cancel_long_press()
-            pts = list(self.active_contacts.values())
-            cur_pinch_dist = math.hypot(pts[0]["last_x"] - pts[1]["last_x"], pts[0]["last_y"] - pts[1]["last_y"])
-            pinch_delta = cur_pinch_dist - self.initial_pinch_dist
-
-            # Dynamic scroll divisor based on scroll_speed (1=precision/18.0, 3=default/10.0, 5=fast/4.5)
-            scroll_divisor = max(4.0, 22.0 - (self.scroll_speed * 4.0))
-
-            # Detect pinch zoom vs 2-finger scroll
-            if self.pinch_zoom_enabled and abs(pinch_delta) > PINCH_THRESHOLD_PX and not self.pinch_triggered:
-                self.pinch_triggered = True
-                self.last_state_label = "PINCH ZOOM"
-                self.logger.log(DebugCode.STATUS_PINCH_ZOOM, f"delta={pinch_delta:.1f}")
-                wheel_units = 120 if pinch_delta > 0 else -120
-                self.bridge.key(KEY_LEFTCTRL, True)
-                self.bridge.emit_scroll(0, wheel_units)
-                self.bridge.key(KEY_LEFTCTRL, False)
-                self.initial_pinch_dist = cur_pinch_dist
-            elif not self.edge_scroll_enabled:
-                self.last_state_label = "SCROLL"
+            if not self.edge_scroll_enabled:
+                scroll_divisor = max(4.0, 22.0 - (self.scroll_speed * 4.0))
                 scroll_dy = int(-dy * (HI_RES_NOTCH / scroll_divisor))
                 scroll_dx = int(dx * (HI_RES_NOTCH / scroll_divisor))
                 if scroll_dx or scroll_dy:
                     self.bridge.emit_scroll(scroll_dx, scroll_dy)
+                    self.last_state_label = "SCROLL 2-FINGER"
 
         elif count >= 3:
             self._cancel_long_press()
-            if not self.three_finger_swipe_enabled:
-                return
+            if self.three_finger_swipe_enabled:
+                pts = list(self.active_contacts.values())
+                cur_cx = sum(p["last_x"] for p in pts) / count
+                cur_cy = sum(p["last_y"] for p in pts) / count
+                delta_x = cur_cx - self.start_centroid[0]
+                delta_y = cur_cy - self.start_centroid[1]
 
-            pts = list(self.active_contacts.values())
-            cur_cx = sum(p["last_x"] for p in pts) / count
-            cur_cy = sum(p["last_y"] for p in pts) / count
-            delta_x = cur_cx - self.start_centroid[0]
-            delta_y = cur_cy - self.start_centroid[1]
-
-            if not self.swipe_triggered:
-                if delta_y < -SWIPE_THRESHOLD_PX:
-                    # 3-finger Swipe UP -> Super/Win (Steam Overview)
-                    self.swipe_triggered = True
-                    self.last_state_label = "SWIPE UP (SUPER)"
-                    self.logger.log(DebugCode.STATUS_SWIPE_NAV, "action=Super/Win")
-                    self.bridge.tap_key(KEY_LEFTMETA)
-                elif delta_y > SWIPE_THRESHOLD_PX:
-                    # 3-finger Swipe DOWN -> Escape / Dismiss
-                    self.swipe_triggered = True
-                    self.last_state_label = "SWIPE DOWN (ESC)"
-                    self.logger.log(DebugCode.STATUS_SWIPE_NAV, "action=Escape")
-                    self.bridge.tap_key(KEY_ESC)
-                elif abs(delta_x) > SWIPE_THRESHOLD_PX:
-                    # 3-finger Swipe LEFT / RIGHT -> Alt+Tab
-                    self.swipe_triggered = True
-                    self.last_state_label = "SWIPE (ALT+TAB)"
-                    self.logger.log(DebugCode.STATUS_SWIPE_NAV, "action=Alt+Tab")
-                    self.bridge.key(KEY_LEFTALT, True)
-                    self.bridge.tap_key(KEY_TAB)
-                    self.bridge.key(KEY_LEFTALT, False)
+                if not self.swipe_triggered:
+                    if delta_y < -SWIPE_THRESHOLD_PX:
+                        self.swipe_triggered = True
+                        self.last_state_label = "SWIPE UP"
+                        self.bridge.tap_key(KEY_LEFTMETA)
+                    elif delta_y > SWIPE_THRESHOLD_PX:
+                        self.swipe_triggered = True
+                        self.last_state_label = "SWIPE DOWN"
+                        self.bridge.tap_key(KEY_ESC)
+                    elif abs(delta_x) > SWIPE_THRESHOLD_PX:
+                        self.swipe_triggered = True
+                        self.last_state_label = "SWIPE TAB"
+                        self.bridge.key(KEY_LEFTALT, True)
+                        self.bridge.tap_key(KEY_TAB)
+                        self.bridge.key(KEY_LEFTALT, False)
 
     def touch_up(self, tid: int, now: float) -> None:
         self._cancel_long_press()
@@ -638,38 +638,30 @@ class TouchGestureProcessor:
             return
 
         if len(self.active_contacts) == 0:
+            # Guarantee edge scroll reset whenever trackpad is clear
+            self.active_edge_scroll_tid = None
+            self.active_edge_scroll_axis = None
+            self.scroll_rest_x = 0.0
+            self.scroll_rest_y = 0.0
+
             duration = now - self.start_time
 
-            if self.is_dragging:
-                self.is_dragging = False
-                self.last_state_label = "DRAG END"
-                self.bridge.mouse_button(BTN_LEFT, False)
-            elif self.long_press_triggered:
-                # Long press already handled
+            if self.long_press_triggered:
                 self.last_state_label = "LONG PRESS DONE"
-            elif self.pinch_triggered or self.swipe_triggered:
-                # Multi-finger action already executed
-                self.last_state_label = "GESTURE DONE"
             elif self.accum_dist < TAP_MAX_DISTANCE_PX and duration < TAP_MAX_TIME_S:
                 if self.max_fingers == 1 and self.tap_to_click:
-                    # 1-finger Tap: Left Click
+                    # 1-finger Tap: Crisp Left Click (non-blocking)
                     self.last_state_label = "TAP LEFT"
-                    self.bridge.mouse_button(BTN_LEFT, True)
-                    time.sleep(0.02)
-                    self.bridge.mouse_button(BTN_LEFT, False)
+                    self.bridge.tap_button(BTN_LEFT)
                     self.last_tap_time = now
                 elif self.max_fingers == 2 and self.two_finger_right_click:
-                    # 2-finger Tap: Right Click
+                    # 2-finger Tap: Crisp Right Click (non-blocking)
                     self.last_state_label = "TAP RIGHT (2-FINGER)"
-                    self.bridge.mouse_button(BTN_RIGHT, True)
-                    time.sleep(0.02)
-                    self.bridge.mouse_button(BTN_RIGHT, False)
+                    self.bridge.tap_button(BTN_RIGHT)
                 elif self.max_fingers == 3 and self.three_finger_middle_click:
-                    # 3-finger Tap: Middle Click
+                    # 3-finger Tap: Crisp Middle Click (non-blocking)
                     self.last_state_label = "TAP MIDDLE (3-FINGER)"
-                    self.bridge.mouse_button(BTN_MIDDLE, True)
-                    time.sleep(0.02)
-                    self.bridge.mouse_button(BTN_MIDDLE, False)
+                    self.bridge.tap_button(BTN_MIDDLE)
             elif self.glide_enabled and self.max_fingers == 1:
                 speed = math.hypot(self.vel_x, self.vel_y)
                 if speed > 140.0:
@@ -680,6 +672,7 @@ class TouchGestureProcessor:
             self.max_fingers = 0
             if not self.glide_enabled or math.hypot(self.vel_x, self.vel_y) <= 140.0:
                 self.last_state_label = "IDLE"
+
 
     def _start_glide(self, vx: float, vy: float) -> None:
         self.glide_stop.clear()

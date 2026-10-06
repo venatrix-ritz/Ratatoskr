@@ -49,15 +49,16 @@ def _default_config() -> dict:
         "scroll_speed": 3,
         "edge_scroll": False,
         "tap_to_click": True,
-        "long_press_right_click": True,
+        "long_press_right_click": False,
         "long_press_delay_ms": 450,
         "two_finger_right_click": True,
-        "three_finger_middle_click": True,
-        "pinch_zoom_enabled": True,
-        "three_finger_swipe_enabled": True,
-        "drag_lock_enabled": True,
+        "three_finger_middle_click": False,
+        "pinch_zoom_enabled": False,
+        "three_finger_swipe_enabled": False,
+        "drag_lock_enabled": False,
         "debug_hud": False,
     }
+
 
 
 def _read_config() -> dict:

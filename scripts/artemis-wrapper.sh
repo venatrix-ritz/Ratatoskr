@@ -19,11 +19,7 @@ fi
 unset QT_QPA_PLATFORM
 unset WAYLAND_DISPLAY
 unset GAMESCOPE_WAYLAND_DISPLAY
+# SDL video driver for Gamescope nested X11
 export SDL_VIDEODRIVER=x11
-
-# Qualcomm Iris V4L2 M2M hardware decoder hints & bypass
-export H264_DECODER_HINT=h264_v4l2m2m
-export HEVC_DECODER_HINT=hevc_v4l2m2m
-export ARTEMIS_FORCE_HW_ACCEL=1
 
 exec "${HERE}/bin/artemis.bin" "$@"

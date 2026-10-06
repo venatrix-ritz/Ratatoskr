@@ -40,8 +40,21 @@ def _write_str(path: str, value: str) -> bool:
         with open(path, "w", encoding="utf-8") as f:
             f.write(value + "\n")
         return True
+    except PermissionError:
+        try:
+            res = subprocess.run(
+                ["sudo", "-n", "tee", path],
+                input=f"{value}\n",
+                text=True,
+                capture_output=True,
+                timeout=0.4,
+            )
+            return res.returncode == 0
+        except Exception:
+            return False
     except OSError:
         return False
+
 
 
 def _wpctl_env() -> dict[str, str]:
