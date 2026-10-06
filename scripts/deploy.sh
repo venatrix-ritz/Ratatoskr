@@ -18,9 +18,21 @@ ssh "${THOR_HOST}" "
 echo "==> Syncing backend engine & diagnostics..."
 scp debug_codes.py "${THOR_HOST}:${APP_DIR}/"
 scp bin/*.py "${THOR_HOST}:${APP_DIR}/bin/"
-ssh "${THOR_HOST}" "chmod +x '${APP_DIR}/bin/thor_app.py'"
+ssh "${THOR_HOST}" "chmod +x '${APP_DIR}/bin/thor_app.py' '${APP_DIR}/bin/touch_master_manager.py'"
 
-# 3. Sync Decky plugin files
+# 3. Sync Standalone App Desktop Entry & Icon
+echo "==> Syncing standalone app launcher & icon..."
+ssh "${THOR_HOST}" "mkdir -p ~/.local/share/applications ~/.local/share/icons/hicolor/scalable/apps"
+scp touch-master.desktop "${THOR_HOST}:~/.local/share/applications/touch-master.desktop"
+scp touch-master.svg "${THOR_HOST}:~/.local/share/icons/hicolor/scalable/apps/touch-master.svg"
+ssh "${THOR_HOST}" "
+    chmod +x ~/.local/share/applications/touch-master.desktop
+    update-desktop-database ~/.local/share/applications 2>/dev/null || true
+    gtk-update-icon-cache -f ~/.local/share/icons/hicolor 2>/dev/null || true
+    kbuildsycoca6 2>/dev/null || true
+"
+
+# 4. Sync Decky plugin files
 echo "==> Syncing Decky plugin files..."
 scp plugin.json "${THOR_HOST}:/tmp/plugin.json"
 scp package.json "${THOR_HOST}:/tmp/package.json"

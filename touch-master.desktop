@@ -1,0 +1,25 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Touch Master
+GenericName=Bottom Screen Input Driver & Trackpad
+Comment=AYN Thor bottom AMOLED screen virtual trackpad, keyboard, and hardware controls
+Exec=/var/home/armada/.local/share/thor-input/bin/touch_master_manager.py
+Icon=touch-master
+Terminal=false
+Categories=Utility;HardwareSettings;
+StartupWMClass=touch-master
+Keywords=trackpad;touchpad;bottom screen;ayn thor;touch master;input;driver;keyboard;
+Actions=Toggle;Start;Stop;
+
+[Desktop Action Toggle]
+Name=Toggle Driver On/Off
+Exec=/var/home/armada/.local/share/thor-input/bin/touch_master_manager.py --toggle
+
+[Desktop Action Start]
+Name=Start Driver
+Exec=/var/home/armada/.local/share/thor-input/bin/touch_master_manager.py --start
+
+[Desktop Action Stop]
+Name=Stop Driver
+Exec=/var/home/armada/.local/share/thor-input/bin/touch_master_manager.py --stop
