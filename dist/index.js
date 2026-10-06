@@ -18,6 +18,9 @@ const getStatus = () => call("get_status");
 const setEnabled = (enabled) => call("set_enabled", enabled);
 const setMode = (mode) => call("set_mode", mode);
 const setSettings = (sensitivity, glide, debug_hud) => call("set_settings", sensitivity, glide, debug_hud);
+const setVolume = (volume) => call("set_volume", volume);
+const toggleMute = () => call("toggle_mute");
+const setBrightness = (target, percent) => call("set_brightness", target, percent);
 const toggleHud = () => call("toggle_hud");
 const runDiagnostics = () => call("run_diagnostics");
 
@@ -29,30 +32,34 @@ function Content() {
         glide: true,
         debug_hud: false,
         telemetry: {},
+        hardware_stats: {},
         touch_device: "",
         state: "IDLE"
     });
     const [loading, setLoading] = SP_REACT.useState(true);
+    const [inFlight, setInFlight] = SP_REACT.useState(false);
     const [diagRunning, setDiagRunning] = SP_REACT.useState(false);
 
     const refreshStatus = SP_REACT.useCallback(async () => {
+        if (inFlight) return;
         try {
             const s = await getStatus();
-            if (s) setStatus(s);
+            if (s && !inFlight) setStatus(s);
         } catch (e) {
             console.error("[thor-input] getStatus error:", e);
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [inFlight]);
 
     SP_REACT.useEffect(() => {
         refreshStatus();
-        const interval = setInterval(refreshStatus, 2500);
+        const interval = setInterval(refreshStatus, 2000);
         return () => clearInterval(interval);
     }, [refreshStatus]);
 
     const handleToggleEnabled = async (val) => {
+        setInFlight(true);
         setStatus((prev) => ({ ...prev, enabled: val }));
         try {
             const res = await setEnabled(val);
@@ -60,6 +67,8 @@ function Content() {
         } catch (e) {
             toaster.toast({ title: "Thor Input", body: "Failed to toggle: " + String(e) });
             refreshStatus();
+        } finally {
+            setInFlight(false);
         }
     };
 
@@ -89,6 +98,59 @@ function Content() {
             await setSettings(status.sensitivity, val, status.debug_hud);
         } catch (e) {
             console.error("[thor-input] setSettings error:", e);
+        }
+    };
+
+    const handleVolumeChange = async (val) => {
+        const rounded = Math.round(val);
+        setStatus((prev) => ({
+            ...prev,
+            hardware_stats: { ...prev.hardware_stats, vol_pct: rounded }
+        }));
+        try {
+            await setVolume(rounded);
+        } catch (e) {
+            console.error("[thor-input] setVolume error:", e);
+        }
+    };
+
+    const handleMuteToggle = async () => {
+        try {
+            const res = await toggleMute();
+            if (res && res.vol_muted !== undefined) {
+                setStatus((prev) => ({
+                    ...prev,
+                    hardware_stats: { ...prev.hardware_stats, vol_muted: res.vol_muted }
+                }));
+            }
+        } catch (e) {
+            console.error("[thor-input] toggleMute error:", e);
+        }
+    };
+
+    const handleTopBrightnessChange = async (val) => {
+        const rounded = Math.round(val);
+        setStatus((prev) => ({
+            ...prev,
+            hardware_stats: { ...prev.hardware_stats, top_bright_pct: rounded }
+        }));
+        try {
+            await setBrightness("top", rounded);
+        } catch (e) {
+            console.error("[thor-input] setBrightness top error:", e);
+        }
+    };
+
+    const handleBotBrightnessChange = async (val) => {
+        const rounded = Math.round(val);
+        setStatus((prev) => ({
+            ...prev,
+            hardware_stats: { ...prev.hardware_stats, bot_bright_pct: rounded }
+        }));
+        try {
+            await setBrightness("bottom", rounded);
+        } catch (e) {
+            console.error("[thor-input] setBrightness bot error:", e);
         }
     };
 
@@ -129,10 +191,12 @@ function Content() {
     const modeOptions = [
         { data: "trackpad", label: "Trackpad" },
         { data: "split", label: "Split (Mouse + Keyboard)" },
-        { data: "keyboard", label: "Keyboard" }
+        { data: "keyboard", label: "Keyboard" },
+        { data: "settings", label: "Quick Settings & Controls" }
     ];
 
     const telem = status.telemetry || {};
+    const hw = status.hardware_stats || {};
 
     return SP_JSX.jsxs(SP_JSX.Fragment, {
         children: [
@@ -144,7 +208,7 @@ function Content() {
                             label: "Enable Bottom Screen",
                             description: "Turns bottom AMOLED screen into trackpad / keyboard",
                             checked: status.enabled,
-                            disabled: loading,
+                            disabled: loading || inFlight,
                             onChange: handleToggleEnabled
                         })
                     }),
@@ -162,7 +226,52 @@ function Content() {
                     })
                 ]
             }),
-            status.enabled && status.mode !== "keyboard" && SP_JSX.jsxs(DFL.PanelSection, {
+            status.enabled && SP_JSX.jsxs(DFL.PanelSection, {
+                title: "Quick Hardware Controls",
+                children: [
+                    SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.SliderField, {
+                            label: `Master Volume: ${hw.vol_pct ?? 40}%` + (hw.vol_muted ? " [MUTED]" : ""),
+                            value: hw.vol_pct ?? 40,
+                            min: 0,
+                            max: 100,
+                            step: 5,
+                            showValue: true,
+                            onChange: handleVolumeChange
+                        })
+                    }),
+                    SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.ToggleField, {
+                            label: "Mute Audio",
+                            checked: hw.vol_muted ?? false,
+                            onChange: handleMuteToggle
+                        })
+                    }),
+                    SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.SliderField, {
+                            label: `Top Screen Brightness: ${hw.top_bright_pct ?? 100}%`,
+                            value: hw.top_bright_pct ?? 100,
+                            min: 5,
+                            max: 100,
+                            step: 5,
+                            showValue: true,
+                            onChange: handleTopBrightnessChange
+                        })
+                    }),
+                    SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.SliderField, {
+                            label: `Bottom AMOLED Brightness: ${hw.bot_bright_pct ?? 100}%`,
+                            value: hw.bot_bright_pct ?? 100,
+                            min: 5,
+                            max: 100,
+                            step: 5,
+                            showValue: true,
+                            onChange: handleBotBrightnessChange
+                        })
+                    })
+                ]
+            }),
+            status.enabled && status.mode !== "keyboard" && status.mode !== "settings" && SP_JSX.jsxs(DFL.PanelSection, {
                 title: "Trackpad Settings",
                 children: [
                     SP_JSX.jsx(DFL.PanelSectionRow, {
@@ -190,6 +299,12 @@ function Content() {
                 title: "Diagnostics & Telemetry",
                 children: [
                     status.enabled && SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.Field, {
+                            label: "System Health Monitor",
+                            description: `Bat: ${hw.bat_cap ?? 0}% (${hw.bat_watts ?? 0}W) | CPU: ${hw.cpu_load ?? 0}% (${hw.cpu_temp ?? 0}°C) | GPU: ${hw.gpu_mhz ?? 0}M (${hw.gpu_temp ?? 0}°C) | RAM: ${hw.ram_used_gb ?? 0}/${hw.ram_total_gb ?? 0}G`
+                        })
+                    }),
+                    status.enabled && SP_JSX.jsx(DFL.PanelSectionRow, {
                         children: SP_JSX.jsx(DFL.ToggleField, {
                             label: "Bottom Screen HUD Overlay",
                             description: "Renders live coordinates, FPS, and event stats on glass",
@@ -199,7 +314,7 @@ function Content() {
                     }),
                     status.enabled && SP_JSX.jsx(DFL.PanelSectionRow, {
                         children: SP_JSX.jsx(DFL.Field, {
-                            label: "Telemetry Stats",
+                            label: "Input Telemetry Stats",
                             description: `Moves: ${telem.mouse_moves || 0} | Scrolls: ${telem.scrolls || 0} | Clicks: ${(telem.clicks_left || 0) + (telem.clicks_right || 0)} | Keys: ${telem.keystrokes || 0}`
                         })
                     }),

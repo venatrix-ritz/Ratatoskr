@@ -1,4 +1,4 @@
-"""Thor Input Decky Plugin Backend with diagnostic logging & self-test."""
+"""Thor Input Decky Plugin Backend with diagnostic logging, telemetry & quick controls."""
 from __future__ import annotations
 
 import asyncio
@@ -79,6 +79,7 @@ class Plugin:
                     "telemetry": debug_info.get("telemetry", {}),
                     "touch_device": debug_info.get("touch_device", ""),
                     "state": debug_info.get("state", "IDLE"),
+                    "hardware_stats": res.get("hardware_stats", {}),
                 }
             cfg = _read_config()
             return {
@@ -91,6 +92,7 @@ class Plugin:
                 "telemetry": {},
                 "touch_device": "",
                 "state": "STOPPED",
+                "hardware_stats": {},
             }
 
         return await asyncio.to_thread(_get)
@@ -100,6 +102,16 @@ class Plugin:
             running = _is_running()
             if enabled and not running:
                 self.logger.log(DebugCode.DAEMON_STARTING, "Spawning thor_app under armada-run-bottom")
+                # Ensure backlight permissions
+                try:
+                    subprocess.run(
+                        ["chmod", "666", "/sys/class/backlight/ae94000.dsi.0/brightness", "/sys/class/backlight/ae96000.dsi.0/brightness"],
+                        check=False,
+                        timeout=1.0,
+                    )
+                except Exception:
+                    pass
+
                 if os.getuid() == 0:
                     cmd = [
                         "runuser",
@@ -130,7 +142,14 @@ class Plugin:
             return {"ok": True, "enabled": enabled}
 
         await asyncio.to_thread(_set)
-        await asyncio.sleep(0.5)
+
+        # Polling loop up to 3.0s waiting for socket state to synchronize
+        for _ in range(30):
+            await asyncio.sleep(0.1)
+            running = await asyncio.to_thread(_is_running)
+            if running == enabled:
+                break
+
         return await self.get_status()
 
     async def set_mode(self, mode: str) -> dict:
@@ -159,6 +178,31 @@ class Plugin:
                     "debug_hud": bool(debug_hud),
                 })
             return {"ok": True}
+
+        return await asyncio.to_thread(_set)
+
+    async def set_volume(self, volume: int) -> dict:
+        def _set():
+            if _is_running():
+                return _send_ipc({"action": "set_volume", "volume": int(volume)})
+            return {"ok": False}
+
+        return await asyncio.to_thread(_set)
+
+    async def toggle_mute(self) -> dict:
+        def _set():
+            if _is_running():
+                return _send_ipc({"action": "toggle_mute"})
+            return {"ok": False}
+
+        return await asyncio.to_thread(_set)
+
+    async def set_brightness(self, target: str, percent: int) -> dict:
+        def _set():
+            if _is_running():
+                action = "set_top_brightness" if target == "top" else "set_bottom_brightness"
+                return _send_ipc({"action": action, "brightness": int(percent)})
+            return {"ok": False}
 
         return await asyncio.to_thread(_set)
 

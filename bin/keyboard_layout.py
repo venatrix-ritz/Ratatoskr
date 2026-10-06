@@ -83,6 +83,8 @@ class Key:
         self.shift_label = shift_label if shift_label is not None else label.upper()
         self.is_modifier = is_modifier
         self.special = special
+        self.is_letter = len(label) == 1 and label.isalpha()
+        self.has_sub_symbol = shift_label is not None and shift_label != label.upper()
         self.x = 0.0
         self.y = 0.0
         self.w = 0.0

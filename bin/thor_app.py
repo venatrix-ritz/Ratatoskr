@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Thor Input App: Bottom-screen GTK 3 interface with diagnostic telemetry & HUD."""
+"""Thor Input App: Bottom-screen AMOLED interface with trackpad, keyboard, system monitor & quick controls."""
 from __future__ import annotations
 
 import fcntl
@@ -44,10 +44,13 @@ from engine import (
     raw_to_screen,
 )
 from keyboard_layout import KeyboardLayout
+from system_stats import HardwareStats
 
 SOCKET_PATH = f"/run/user/{os.getuid()}/thor-input.sock"
 CONFIG_PATH = os.path.expanduser("~/.config/thor-input/config.json")
-HEADER_HEIGHT = 64.0
+HEADER_BUTTONS_H = 48.0
+STATUS_RIBBON_H = 44.0
+HEADER_HEIGHT = HEADER_BUTTONS_H + STATUS_RIBBON_H  # 92.0
 
 
 class ThorApp:
@@ -55,9 +58,12 @@ class ThorApp:
         self.logger = DebugLogger("app")
         self.logger.log(DebugCode.DAEMON_STARTING)
 
-        self.mode = "trackpad"  # 'trackpad', 'split', 'keyboard'
+        self.mode = "trackpad"  # 'trackpad', 'split', 'keyboard', 'settings'
         self.show_debug_hud = False
         self.touch_dev_node = ""
+
+        # Hardware stats & control sampler
+        self.stats = HardwareStats(cache_ttl=0.4)
 
         # Bridge & processors
         self.bridge = UInputBridge(self.logger)
@@ -125,7 +131,7 @@ class ThorApp:
             self.logger.log(DebugCode.ERR_SOCKET_PROTOCOL, f"save_config: {err}")
 
     def set_mode(self, mode: str) -> None:
-        if mode not in ("trackpad", "split", "keyboard"):
+        if mode not in ("trackpad", "split", "keyboard", "settings"):
             return
         self.mode = mode
         self.update_mode_bounds()
@@ -136,14 +142,22 @@ class ThorApp:
         if self.mode == "keyboard":
             self.kb_layout.update_bounds(0, HEADER_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT - HEADER_HEIGHT)
         elif self.mode == "split":
-            split_y = 480.0
+            split_y = 500.0
             self.kb_layout.update_bounds(0, split_y, SCREEN_WIDTH, SCREEN_HEIGHT - split_y)
 
     def start(self) -> None:
         self._start_touch_reader()
         self._start_ipc_server()
         self.window.show_all()
+        # Periodic 1-second refresh for live system monitor ribbon
+        GLib.timeout_add(1000, self._on_stats_tick)
         self.logger.log(DebugCode.DAEMON_READY, f"Mode={self.mode}, Device={self.touch_dev_node}")
+
+    def _on_stats_tick(self) -> bool:
+        if not self.touch_stop.is_set():
+            self.drawing_area.queue_draw()
+            return True
+        return False
 
     def on_destroy(self, *_) -> None:
         self.cleanup()
@@ -159,44 +173,35 @@ class ThorApp:
                 fcntl.ioctl(self.touch_fd, EVIOCGRAB, 0)
             except OSError:
                 pass
-            os.close(self.touch_fd)
-            self.touch_fd = -1
-        if os.path.exists(SOCKET_PATH):
             try:
-                os.remove(SOCKET_PATH)
+                os.close(self.touch_fd)
             except OSError:
                 pass
+            self.touch_fd = -1
         self.bridge.close()
         self.logger.log(DebugCode.DAEMON_STOPPED)
 
     # -------------------------------------------------------------------------
-    # Touch Event Processing
+    # Touch Input Processing (Raw Digitizer Thread)
     # -------------------------------------------------------------------------
 
-    def _find_touch_device(self) -> str | None:
-        for name_file in glob.glob("/sys/class/input/event*/device/name"):
-            try:
-                with open(name_file, encoding="utf-8") as f:
-                    if f.read().strip() == "bottom_touchscreen":
-                        return "/dev/input/" + name_file.split("/")[4]
-            except OSError:
-                continue
-        return None
-
     def _start_touch_reader(self) -> None:
-        dev_path = self._find_touch_device()
-        if not dev_path:
-            self.logger.log(DebugCode.ERR_TOUCH_MISSING)
+        node = self._find_bottom_touchscreen()
+        if not node:
+            self.logger.log(DebugCode.ERR_TOUCH_MISSING, "No bottom touchscreen digitizer located")
             return
 
-        self.touch_dev_node = dev_path
+        self.touch_dev_node = node
         try:
-            self.touch_fd = os.open(dev_path, os.O_RDONLY | os.O_NONBLOCK)
+            self.touch_fd = os.open(node, os.O_RDONLY | os.O_NONBLOCK)
             EVIOCGRAB = (1 << 30) | (struct.calcsize("i") << 16) | (ord("E") << 8) | 0x90
             fcntl.ioctl(self.touch_fd, EVIOCGRAB, 1)
-            self.logger.log(DebugCode.TOUCH_OK, f"Exclusively grabbed {dev_path}")
+            self.logger.log(DebugCode.TOUCH_OK, f"Exclusively grabbed {node}")
+        except PermissionError:
+            self.logger.log(DebugCode.ERR_TOUCH_OPEN, f"Permission denied accessing {node}")
+            return
         except OSError as err:
-            self.logger.log(DebugCode.ERR_TOUCH_GRAB, f"{dev_path}: {err}")
+            self.logger.log(DebugCode.ERR_TOUCH_GRAB, f"Failed grabbing {node}: {err}")
             return
 
         def _reader_loop():
@@ -251,13 +256,44 @@ class ThorApp:
         self.touch_thread = threading.Thread(target=_reader_loop, daemon=True)
         self.touch_thread.start()
 
+    def _find_bottom_touchscreen(self) -> str | None:
+        for node in sorted(glob.glob("/dev/input/event*")):
+            try:
+                with open(f"/sys/class/input/{os.path.basename(node)}/device/name", encoding="utf-8") as f:
+                    name = f.read().strip().lower()
+                    if "bottom" in name and "touchscreen" in name:
+                        return node
+            except OSError:
+                pass
+        return "/dev/input/event5" if os.path.exists("/dev/input/event5") else None
+
+    # -------------------------------------------------------------------------
+    # Touch Event Routing
+    # -------------------------------------------------------------------------
+
     def _handle_touch_down(self, tid: int, x: float, y: float, now: float) -> None:
         self.last_event_time = time.time()
-        if y < HEADER_HEIGHT:
+
+        # 1. Header Navigation Bar (y < 48)
+        if y < HEADER_BUTTONS_H:
             self._handle_header_touch(x, y, True)
             return
 
-        if self.mode == "keyboard" or (self.mode == "split" and y >= 480.0):
+        # 2. Status Ribbon (48 <= y < HEADER_HEIGHT) -> tap toggles Quick Settings
+        if y < HEADER_HEIGHT:
+            if self.mode == "settings":
+                self.set_mode("trackpad")
+            else:
+                self.set_mode("settings")
+            return
+
+        # 3. Quick Settings Mode
+        if self.mode == "settings":
+            self._handle_settings_touch(x, y)
+            return
+
+        # 4. Keyboard / Split Mode
+        if self.mode == "keyboard" or (self.mode == "split" and y >= 500.0):
             key = self.kb_layout.hit_test(x, y)
             if key:
                 self.active_key_press = key.code
@@ -266,8 +302,9 @@ class ThorApp:
                     self.kb_layout.shift_active = not self.kb_layout.shift_active
                     self.bridge.key(key.code, self.kb_layout.shift_active)
                 elif key.special in ("ctrl", "alt", "super"):
-                    setattr(self.kb_layout, f"{key.special}_active", not getattr(self.kb_layout, f"{key.special}_active"))
-                    self.bridge.key(key.code, getattr(self.kb_layout, f"{key.special}_active"))
+                    current = getattr(self.kb_layout, f"{key.special}_active", False)
+                    setattr(self.kb_layout, f"{key.special}_active", not current)
+                    self.bridge.key(key.code, not current)
                 else:
                     self.bridge.tap_key(key.code)
                     if self.kb_layout.shift_active and not key.is_modifier:
@@ -276,6 +313,7 @@ class ThorApp:
                 GLib.idle_add(self.drawing_area.queue_draw)
             return
 
+        # 5. Trackpad Mode (or top half of Split)
         self.gesture.touch_down(tid, x, y, now)
         if self.show_debug_hud:
             GLib.idle_add(self.drawing_area.queue_draw)
@@ -283,7 +321,10 @@ class ThorApp:
     def _handle_touch_move(self, tid: int, x: float, y: float, now: float) -> None:
         self.last_event_time = time.time()
         if y >= HEADER_HEIGHT:
-            if self.mode == "trackpad" or (self.mode == "split" and y < 480.0):
+            if self.mode == "settings":
+                # Continuous slider drag in settings
+                self._handle_settings_drag(x, y)
+            elif self.mode == "trackpad" or (self.mode == "split" and y < 500.0):
                 self.gesture.touch_move(tid, x, y, now)
                 if self.show_debug_hud:
                     GLib.idle_add(self.drawing_area.queue_draw)
@@ -302,32 +343,100 @@ class ThorApp:
             self.active_key_press = None
             GLib.idle_add(self.drawing_area.queue_draw)
 
-        self.gesture.touch_up(tid, now)
-        if self.show_debug_hud:
-            GLib.idle_add(self.drawing_area.queue_draw)
+        if self.mode != "settings":
+            self.gesture.touch_up(tid, now)
+            if self.show_debug_hud:
+                GLib.idle_add(self.drawing_area.queue_draw)
 
     def _handle_header_touch(self, x: float, y: float, down: bool) -> None:
-        if 16 <= x <= 170:
+        if 12 <= x <= 132:
             self.set_mode("trackpad")
-        elif 180 <= x <= 320:
+        elif 140 <= x <= 240:
             self.set_mode("split")
-        elif 330 <= x <= 490:
+        elif 248 <= x <= 368:
             self.set_mode("keyboard")
-        elif 500 <= x <= 620:
-            # HUD toggle button
+        elif 376 <= x <= 526:
+            self.set_mode("settings")
+        elif 534 <= x <= 614:
+            # HUD toggle
             self.show_debug_hud = not self.show_debug_hud
             self.save_config()
             GLib.idle_add(self.drawing_area.queue_draw)
-        elif 750 <= x <= 920:
+        elif 680 <= x <= 820:
             self.held_ui_button = "left"
             self.bridge.mouse_button(BTN_LEFT, True)
             GLib.idle_add(self.drawing_area.queue_draw)
-        elif 940 <= x <= 1110:
+        elif 828 <= x <= 968:
             self.held_ui_button = "right"
             self.bridge.mouse_button(BTN_RIGHT, True)
             GLib.idle_add(self.drawing_area.queue_draw)
         elif 1120 <= x <= 1220:
             self.window.close()
+
+    def _handle_settings_touch(self, x: float, y: float) -> None:
+        # Card 1: Volume (y = 120 .. 230)
+        if 160 <= y <= 220:
+            if 30 <= x <= 120:
+                self.stats.adjust_volume(-5)
+            elif 130 <= x <= 950:
+                pct = round((x - 130) / (950 - 130) * 100)
+                self.stats.set_volume(pct)
+            elif 960 <= x <= 1050:
+                self.stats.adjust_volume(5)
+            elif 1060 <= x <= 1210:
+                self.stats.toggle_mute()
+            GLib.idle_add(self.drawing_area.queue_draw)
+            return
+
+        # Card 2: Top Brightness (y = 270 .. 380)
+        if 310 <= y <= 370:
+            if 30 <= x <= 120:
+                self.stats.adjust_top_brightness(-10)
+            elif 130 <= x <= 1090:
+                pct = round((x - 130) / (1090 - 130) * 100)
+                self.stats.set_top_brightness(pct)
+            elif 1100 <= x <= 1210:
+                self.stats.adjust_top_brightness(10)
+            GLib.idle_add(self.drawing_area.queue_draw)
+            return
+
+        # Card 3: Bottom Brightness (y = 420 .. 530)
+        if 460 <= y <= 520:
+            if 30 <= x <= 120:
+                self.stats.adjust_bottom_brightness(-10)
+            elif 130 <= x <= 1090:
+                pct = round((x - 130) / (1090 - 130) * 100)
+                self.stats.set_bottom_brightness(pct)
+            elif 1100 <= x <= 1210:
+                self.stats.adjust_bottom_brightness(10)
+            GLib.idle_add(self.drawing_area.queue_draw)
+            return
+
+        # Bottom Action Buttons (y = 850 .. 910)
+        if 850 <= y <= 910:
+            if 30 <= x <= 380:
+                # Diagnostics self-test
+                run_self_diagnostics()
+            elif 400 <= x <= 650:
+                self.show_debug_hud = not self.show_debug_hud
+                self.save_config()
+            elif 670 <= x <= 920:
+                self.set_mode("trackpad")
+            GLib.idle_add(self.drawing_area.queue_draw)
+
+    def _handle_settings_drag(self, x: float, y: float) -> None:
+        if 160 <= y <= 220 and 130 <= x <= 950:
+            pct = round((x - 130) / (950 - 130) * 100)
+            self.stats.set_volume(pct)
+            GLib.idle_add(self.drawing_area.queue_draw)
+        elif 310 <= y <= 370 and 130 <= x <= 1090:
+            pct = round((x - 130) / (1090 - 130) * 100)
+            self.stats.set_top_brightness(pct)
+            GLib.idle_add(self.drawing_area.queue_draw)
+        elif 460 <= y <= 520 and 130 <= x <= 1090:
+            pct = round((x - 130) / (1090 - 130) * 100)
+            self.stats.set_bottom_brightness(pct)
+            GLib.idle_add(self.drawing_area.queue_draw)
 
     # -------------------------------------------------------------------------
     # IPC Server for Decky Loader
@@ -367,6 +476,7 @@ class ThorApp:
                             res["sensitivity"] = self.gesture.sensitivity
                             res["glide"] = self.gesture.glide_enabled
                             res["debug_hud"] = self.show_debug_hud
+                            res["hardware_stats"] = self.stats.get_stats()
                         elif action == "get_debug":
                             res["telemetry"] = self.bridge.get_telemetry()
                             res["state"] = self.gesture.last_state_label
@@ -374,6 +484,7 @@ class ThorApp:
                             res["touch_device"] = self.touch_dev_node
                             res["active_fingers"] = len(self.gesture.active_contacts)
                             res["last_key"] = self.last_key_label
+                            res["hardware_stats"] = self.stats.get_stats()
                         elif action == "set_mode":
                             self.set_mode(msg.get("mode", "trackpad"))
                         elif action == "set_settings":
@@ -384,6 +495,18 @@ class ThorApp:
                             if "debug_hud" in msg:
                                 self.show_debug_hud = bool(msg["debug_hud"])
                             self.save_config()
+                            GLib.idle_add(self.drawing_area.queue_draw)
+                        elif action == "set_volume":
+                            res["vol_pct"] = self.stats.set_volume(msg.get("volume", 50))
+                            GLib.idle_add(self.drawing_area.queue_draw)
+                        elif action == "toggle_mute":
+                            res["vol_muted"] = self.stats.toggle_mute()
+                            GLib.idle_add(self.drawing_area.queue_draw)
+                        elif action == "set_top_brightness":
+                            res["top_bright_pct"] = self.stats.set_top_brightness(msg.get("brightness", 100))
+                            GLib.idle_add(self.drawing_area.queue_draw)
+                        elif action == "set_bottom_brightness":
+                            res["bot_bright_pct"] = self.stats.set_bottom_brightness(msg.get("brightness", 100))
                             GLib.idle_add(self.drawing_area.queue_draw)
                         elif action == "toggle_hud":
                             self.show_debug_hud = not self.show_debug_hud
@@ -404,7 +527,7 @@ class ThorApp:
         self.ipc_thread.start()
 
     # -------------------------------------------------------------------------
-    # Cairo Drawing (AMOLED UI + Debug HUD)
+    # Cairo Drawing (AMOLED UI, Keyboard, Ribbon & Quick Controls)
     # -------------------------------------------------------------------------
 
     def on_draw(self, _, cr: cairo.Context) -> bool:
@@ -415,12 +538,13 @@ class ThorApp:
             self.frame_count = 0
             self.last_fps_calc = now
 
-        # Pure Black Background
+        # Pure OLED Black Background
         cr.set_source_rgb(0, 0, 0)
         cr.paint()
 
-        # Header Bar
+        # Header Bar & Live Status Ribbon
         self._draw_header(cr)
+        self._draw_status_ribbon(cr)
 
         # Mode Contents
         if self.mode == "trackpad":
@@ -428,9 +552,11 @@ class ThorApp:
         elif self.mode == "keyboard":
             self._draw_keyboard(cr)
         elif self.mode == "split":
-            split_y = 480.0
+            split_y = 500.0
             self._draw_trackpad_surface(cr, HEADER_HEIGHT, split_y - HEADER_HEIGHT)
             self._draw_keyboard(cr)
+        elif self.mode == "settings":
+            self._draw_quick_settings(cr)
 
         # Live Debug HUD Overlay (when enabled)
         if self.show_debug_hud:
@@ -439,26 +565,88 @@ class ThorApp:
         return True
 
     def _draw_header(self, cr: cairo.Context) -> None:
-        cr.set_source_rgb(0.12, 0.14, 0.18)
+        cr.set_source_rgb(0.10, 0.12, 0.16)
         cr.set_line_width(1.0)
-        cr.move_to(0, HEADER_HEIGHT)
-        cr.line_to(SCREEN_WIDTH, HEADER_HEIGHT)
+        cr.move_to(0, HEADER_BUTTONS_H)
+        cr.line_to(SCREEN_WIDTH, HEADER_BUTTONS_H)
         cr.stroke()
+        cr.new_path()
 
-        self._draw_button(cr, 16, 10, 150, 44, "Trackpad", self.mode == "trackpad")
-        self._draw_button(cr, 176, 10, 140, 44, "Split", self.mode == "split")
-        self._draw_button(cr, 326, 10, 160, 44, "Keyboard", self.mode == "keyboard")
+        self._draw_button(cr, 12, 6, 120, 36, "Trackpad", self.mode == "trackpad")
+        self._draw_button(cr, 140, 6, 100, 36, "Split", self.mode == "split")
+        self._draw_button(cr, 248, 6, 120, 36, "Keyboard", self.mode == "keyboard")
+        self._draw_button(cr, 376, 6, 150, 36, "Quick Controls", self.mode == "settings", accent_color=(0.20, 0.55, 0.90))
 
         # HUD Toggle Button
         hud_active = self.show_debug_hud
-        self._draw_button(cr, 496, 10, 120, 44, "HUD", hud_active, accent_color=(0.15, 0.65, 0.45))
+        self._draw_button(cr, 534, 6, 80, 36, "HUD", hud_active, accent_color=(0.15, 0.65, 0.45))
 
         # Click helper buttons
         left_active = self.held_ui_button == "left"
         right_active = self.held_ui_button == "right"
-        self._draw_button(cr, 750, 10, 170, 44, "Left Click", left_active, accent_color=(0.3, 0.45, 0.95))
-        self._draw_button(cr, 930, 10, 170, 44, "Right Click", right_active, accent_color=(0.85, 0.35, 0.35))
-        self._draw_button(cr, 1120, 10, 95, 44, "✕ Close", False)
+        self._draw_button(cr, 680, 6, 140, 36, "Left Click", left_active, accent_color=(0.3, 0.45, 0.95))
+        self._draw_button(cr, 828, 6, 140, 36, "Right Click", right_active, accent_color=(0.85, 0.35, 0.35))
+        self._draw_button(cr, 1120, 6, 100, 36, "✕ Close", False)
+
+    def _draw_status_ribbon(self, cr: cairo.Context) -> None:
+        """Render live system monitoring ribbon across top of AMOLED display."""
+        st = self.stats.get_stats()
+        ry = HEADER_BUTTONS_H
+        rh = STATUS_RIBBON_H
+
+        # Ribbon Background container
+        cr.set_source_rgb(0.04, 0.05, 0.07)
+        cr.rectangle(0, ry, SCREEN_WIDTH, rh)
+        cr.fill()
+
+        cr.set_source_rgb(0.14, 0.16, 0.22)
+        cr.set_line_width(1.0)
+        cr.move_to(0, ry + rh)
+        cr.line_to(SCREEN_WIDTH, ry + rh)
+        cr.stroke()
+        cr.new_path()
+
+        # Telemetry pills text
+        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+        cr.set_font_size(14.0)
+
+        # Battery
+        bat_icon = "⚡" if "charg" in st.get("bat_status", "").lower() else "🔋"
+        bat_txt = f"{bat_icon} {st.get('bat_cap', 0)}% ({st.get('bat_watts', 0)}W)"
+        # CPU
+        cpu_txt = f"🧠 CPU {st.get('cpu_load', 0)}% · {st.get('cpu_temp', 0)}°C"
+        # GPU
+        gpu_txt = f"🎮 GPU {st.get('gpu_mhz', 0)}M · {st.get('gpu_temp', 0)}°C"
+        # RAM
+        ram_txt = f"💾 RAM {st.get('ram_used_gb', 0)}/{st.get('ram_total_gb', 0)}G"
+        # Volume
+        vol_txt = f"🔊 Muted" if st.get("vol_muted") else f"🔊 Vol {st.get('vol_pct', 0)}%"
+        # Brightness
+        brt_txt = f"☀️ Top {st.get('top_bright_pct', 100)}% · Bot {st.get('bot_bright_pct', 100)}%"
+
+        pills = [
+            (bat_txt, (0.3, 0.85, 0.5)),
+            (cpu_txt, (0.4, 0.75, 1.0)),
+            (gpu_txt, (0.95, 0.7, 0.3)),
+            (ram_txt, (0.75, 0.6, 0.95)),
+            (vol_txt, (0.9, 0.5, 0.5) if st.get("vol_muted") else (0.4, 0.85, 0.9)),
+            (brt_txt, (1.0, 0.85, 0.4)),
+        ]
+
+        cur_x = 20.0
+        for text, col in pills:
+            cr.set_source_rgb(*col)
+            cr.move_to(cur_x, ry + 27.0)
+            cr.show_text(text)
+            ext = cr.text_extents(text)
+            cur_x += ext.width + 26.0
+
+            # Divider dot
+            if cur_x < SCREEN_WIDTH - 80:
+                cr.set_source_rgb(0.25, 0.28, 0.35)
+                cr.arc(cur_x - 13.0, ry + 22.0, 2.0, 0, 6.28)
+                cr.fill()
+                cr.new_path()
 
     def _draw_button(
         self,
@@ -471,28 +659,32 @@ class ThorApp:
         active: bool,
         accent_color: tuple[float, float, float] = (0.38, 0.25, 0.85),
     ) -> None:
-        radius = 12.0
+        radius = 10.0
         self._round_rect(cr, x, y, w, h, radius)
         if active:
             cr.set_source_rgb(*accent_color)
             cr.fill_preserve()
+            cr.set_source_rgb(0.75, 0.65, 1.0)
+            cr.set_line_width(1.5)
+            cr.stroke()
             cr.set_source_rgb(1.0, 1.0, 1.0)
         else:
             cr.set_source_rgb(0.08, 0.09, 0.12)
             cr.fill_preserve()
             cr.set_source_rgb(0.2, 0.22, 0.28)
-            cr.set_line_width(1.5)
+            cr.set_line_width(1.0)
             cr.stroke()
             cr.set_source_rgb(0.85, 0.88, 0.92)
+        cr.new_path()
 
         cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-        cr.set_font_size(18.0)
+        cr.set_font_size(15.0)
         extents = cr.text_extents(text)
         cr.move_to(x + (w - extents.width) / 2.0, y + (h + extents.height) / 2.0 - 2)
         cr.show_text(text)
 
     def _draw_trackpad_surface(self, cr: cairo.Context, y: float, h: float) -> None:
-        margin = 24.0
+        margin = 20.0
         pad_x = margin
         pad_y = y + margin
         pad_w = SCREEN_WIDTH - 2 * margin
@@ -504,8 +696,9 @@ class ThorApp:
         cr.set_source_rgb(0.15, 0.17, 0.22)
         cr.set_line_width(1.5)
         cr.stroke()
+        cr.new_path()
 
-        cr.set_source_rgb(0.25, 0.28, 0.35)
+        cr.set_source_rgb(0.30, 0.34, 0.42)
         cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
         cr.set_font_size(20.0)
         hint = "Trackpad: 1 finger moves · Tap clicks · 2 fingers scroll · Flick glides"
@@ -514,35 +707,234 @@ class ThorApp:
         cr.show_text(hint)
 
     def _draw_keyboard(self, cr: cairo.Context) -> None:
+        """Render virtual keyboard with clean key highlighting and dual symbol labels."""
+        shift_on = self.kb_layout.shift_active
+
         for row in self.kb_layout.rows:
             for k in row:
                 is_active = self.active_key_press == k.code
-                if k.special == "shift" and self.kb_layout.shift_active:
+                if k.special == "shift" and shift_on:
                     is_active = True
                 elif k.special == "ctrl" and self.kb_layout.ctrl_active:
                     is_active = True
                 elif k.special == "alt" and self.kb_layout.alt_active:
                     is_active = True
+                elif k.special == "super" and getattr(self.kb_layout, "super_active", False):
+                    is_active = True
 
                 self._round_rect(cr, k.x, k.y, k.w, k.h, 10.0)
                 if is_active:
-                    cr.set_source_rgb(0.38, 0.25, 0.85)
+                    # Highlighted active key
+                    cr.set_source_rgb(0.48, 0.28, 0.95)
                     cr.fill_preserve()
-                    cr.set_source_rgb(1.0, 1.0, 1.0)
+                    cr.set_source_rgb(0.78, 0.60, 1.0)
+                    cr.set_line_width(2.0)
+                    cr.stroke()
                 else:
-                    cr.set_source_rgb(0.10, 0.11, 0.15)
+                    if shift_on and k.is_letter:
+                        # Subtle highlighted tint for letters when Shift is active
+                        cr.set_source_rgb(0.15, 0.14, 0.22)
+                    else:
+                        cr.set_source_rgb(0.10, 0.11, 0.15)
                     cr.fill_preserve()
                     cr.set_source_rgb(0.22, 0.25, 0.32)
                     cr.set_line_width(1.0)
                     cr.stroke()
-                    cr.set_source_rgb(0.92, 0.94, 0.96)
+                cr.new_path()  # Path clean reset
 
-                label = k.shift_label if self.kb_layout.shift_active else k.label
-                cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-                cr.set_font_size(20.0 if len(label) == 1 else 16.0)
-                extents = cr.text_extents(label)
-                cr.move_to(k.x + (k.w - extents.width) / 2.0, k.y + (k.h + extents.height) / 2.0 - 1)
-                cr.show_text(label)
+                # Draw Labels
+                if k.has_sub_symbol:
+                    # Keys with dual symbols (e.g. 1 / !, - / _, [ / {)
+                    prim = k.label
+                    sub = k.shift_label
+
+                    # Primary character (centered / lower)
+                    cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+                    cr.set_font_size(18.0)
+                    if shift_on:
+                        cr.set_source_rgb(0.60, 0.64, 0.72)
+                    else:
+                        cr.set_source_rgb(1.0, 1.0, 1.0) if is_active else cr.set_source_rgb(0.92, 0.94, 0.96)
+                    ext = cr.text_extents(prim)
+                    cr.move_to(k.x + (k.w - ext.width) / 2.0 - 5, k.y + k.h - 13)
+                    cr.show_text(prim)
+
+                    # Secondary shifted symbol (upper-right corner)
+                    cr.set_font_size(14.0)
+                    if shift_on:
+                        cr.set_source_rgb(0.35, 0.85, 1.0)  # Highlighted cyan!
+                    else:
+                        cr.set_source_rgb(0.42, 0.48, 0.58)  # Subtle secondary
+                    sub_ext = cr.text_extents(sub)
+                    cr.move_to(k.x + k.w - sub_ext.width - 10, k.y + 20)
+                    cr.show_text(sub)
+                else:
+                    # Normal letter or modifier
+                    label = k.shift_label if (shift_on and k.is_letter) else k.label
+                    cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+                    cr.set_font_size(20.0 if len(label) == 1 else 16.0)
+
+                    if is_active:
+                        cr.set_source_rgb(1.0, 1.0, 1.0)
+                    elif shift_on and k.is_letter:
+                        cr.set_source_rgb(0.40, 0.85, 1.0)  # Bright cyan highlight for active uppercase!
+                    else:
+                        cr.set_source_rgb(0.92, 0.94, 0.96)
+                    extents = cr.text_extents(label)
+                    cr.move_to(k.x + (k.w - extents.width) / 2.0, k.y + (k.h + extents.height) / 2.0 - 1)
+                    cr.show_text(label)
+
+    def _draw_quick_settings(self, cr: cairo.Context) -> None:
+        """Render full Quick Settings dashboard cards."""
+        st = self.stats.get_stats()
+
+        # Card 1: Master Audio Volume
+        self._draw_slider_card(
+            cr,
+            x=20,
+            y=120,
+            w=SCREEN_WIDTH - 40,
+            h=120,
+            title=f"Master Audio Volume: {st.get('vol_pct', 0)}%" + (" [MUTED]" if st.get("vol_muted") else ""),
+            pct=st.get("vol_pct", 0),
+            track_w=820,
+            has_mute=True,
+            is_muted=st.get("vol_muted", False),
+            accent_col=(0.35, 0.55, 0.95),
+        )
+
+        # Card 2: Top Display Brightness
+        self._draw_slider_card(
+            cr,
+            x=20,
+            y=270,
+            w=SCREEN_WIDTH - 40,
+            h=120,
+            title=f"Top Screen Brightness: {st.get('top_bright_pct', 100)}%",
+            pct=st.get("top_bright_pct", 100),
+            track_w=960,
+            has_mute=False,
+            accent_col=(1.0, 0.80, 0.30),
+        )
+
+        # Card 3: Bottom AMOLED Brightness
+        self._draw_slider_card(
+            cr,
+            x=20,
+            y=420,
+            w=SCREEN_WIDTH - 40,
+            h=120,
+            title=f"Bottom AMOLED Brightness: {st.get('bot_bright_pct', 100)}%",
+            pct=st.get("bot_bright_pct", 100),
+            track_w=960,
+            has_mute=False,
+            accent_col=(0.30, 0.85, 0.60),
+        )
+
+        # Card 4: Hardware Health Monitor Grid
+        self._round_rect(cr, 20, 570, SCREEN_WIDTH - 40, 240, 18.0)
+        cr.set_source_rgb(0.06, 0.07, 0.10)
+        cr.fill_preserve()
+        cr.set_source_rgb(0.18, 0.20, 0.26)
+        cr.set_line_width(1.5)
+        cr.stroke()
+        cr.new_path()
+
+        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+        cr.set_font_size(18.0)
+        cr.set_source_rgb(0.85, 0.88, 0.95)
+        cr.move_to(44, 608)
+        cr.show_text("Live System Health & Power Telemetry")
+
+        grid_items = [
+            ("Battery Status", f"{st.get('bat_cap', 0)}% · {st.get('bat_status', 'N/A')} ({st.get('bat_watts', 0)} W)", (0.3, 0.85, 0.5)),
+            ("CPU Processor", f"{st.get('cpu_load', 0)}% Load · {st.get('cpu_ghz', 0)} GHz · {st.get('cpu_temp', 0)}°C", (0.4, 0.75, 1.0)),
+            ("GPU Adreno", f"{st.get('gpu_mhz', 0)} MHz · {st.get('gpu_temp', 0)}°C", (0.95, 0.7, 0.3)),
+            ("System RAM", f"{st.get('ram_used_gb', 0)} / {st.get('ram_total_gb', 0)} GB ({st.get('ram_pct', 0)}%)", (0.75, 0.6, 0.95)),
+        ]
+
+        gx = 44.0
+        gy = 650.0
+        for i, (label, val, col) in enumerate(grid_items):
+            rx = gx if (i % 2 == 0) else gx + 580.0
+            ry = gy if (i < 2) else gy + 75.0
+
+            cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+            cr.set_font_size(15.0)
+            cr.set_source_rgb(0.55, 0.60, 0.70)
+            cr.move_to(rx, ry)
+            cr.show_text(label)
+
+            cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+            cr.set_font_size(20.0)
+            cr.set_source_rgb(*col)
+            cr.move_to(rx, ry + 30.0)
+            cr.show_text(val)
+
+        # Action Buttons
+        self._draw_button(cr, 30, 850, 350, 60, "Run Self-Test Diagnostics", False, accent_color=(0.2, 0.55, 0.9))
+        self._draw_button(cr, 400, 850, 250, 60, "Toggle Glass HUD", self.show_debug_hud, accent_color=(0.2, 0.65, 0.4))
+        self._draw_button(cr, 670, 850, 250, 60, "Back to Trackpad", False)
+
+    def _draw_slider_card(
+        self,
+        cr: cairo.Context,
+        x: float,
+        y: float,
+        w: float,
+        h: float,
+        title: str,
+        pct: int,
+        track_w: float,
+        has_mute: bool = False,
+        is_muted: bool = False,
+        accent_col: tuple[float, float, float] = (0.35, 0.55, 0.95),
+    ) -> None:
+        self._round_rect(cr, x, y, w, h, 16.0)
+        cr.set_source_rgb(0.06, 0.07, 0.10)
+        cr.fill_preserve()
+        cr.set_source_rgb(0.18, 0.20, 0.26)
+        cr.set_line_width(1.5)
+        cr.stroke()
+        cr.new_path()
+
+        # Title
+        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+        cr.set_font_size(17.0)
+        cr.set_source_rgb(0.88, 0.90, 0.96)
+        cr.move_to(x + 24, y + 32)
+        cr.show_text(title)
+
+        ctrl_y = y + 46.0
+        # [-] button
+        self._draw_button(cr, x + 10, ctrl_y, 90, 56, "–", False)
+
+        # Slider track
+        track_x = x + 110.0
+        self._round_rect(cr, track_x, ctrl_y + 12.0, track_w, 32.0, 16.0)
+        cr.set_source_rgb(0.12, 0.14, 0.18)
+        cr.fill_preserve()
+        cr.set_source_rgb(0.24, 0.27, 0.35)
+        cr.set_line_width(1.0)
+        cr.stroke()
+        cr.new_path()
+
+        # Active filled portion
+        fill_w = max(16.0, track_w * (pct / 100.0))
+        self._round_rect(cr, track_x, ctrl_y + 12.0, fill_w, 32.0, 16.0)
+        cr.set_source_rgb(*accent_col)
+        cr.fill()
+        cr.new_path()
+
+        # [+] button
+        plus_x = track_x + track_w + 10.0
+        self._draw_button(cr, plus_x, ctrl_y, 90, 56, "+", False)
+
+        # Optional Mute button
+        if has_mute:
+            mute_x = plus_x + 100.0
+            mute_col = (0.85, 0.35, 0.35) if is_muted else (0.25, 0.28, 0.35)
+            self._draw_button(cr, mute_x, ctrl_y, 140, 56, "Muted" if is_muted else "Mute", is_muted, accent_color=mute_col)
 
     def _draw_debug_hud(self, cr: cairo.Context) -> None:
         """Render diagnostic telemetry HUD in top-right of trackpad area."""
@@ -556,6 +948,7 @@ class ThorApp:
         cr.set_source_rgba(0.18, 0.55, 0.35, 0.8)
         cr.set_line_width(1.5)
         cr.stroke()
+        cr.new_path()
 
         # Telemetry info
         telem = self.bridge.get_telemetry()
