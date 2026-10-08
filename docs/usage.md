@@ -30,6 +30,23 @@ Pinch zoom, three-finger swipes and drag lock are off by default because they ca
 
 Four or more fingers at once do nothing: the touch is ignored until every finger has left the glass. The digitizer has five slots and, observed on the Thor on 2026-10-08, it sometimes never reports the lift of a finger when several were down; the kernel then keeps that contact "held". Ignoring multi-finger presses stops them from turning into scrolls or clicks, and a contact that goes quiet for 1.5 s is treated as lifted, so the pointer is back within about 1.5 s of letting go.
 
+## Pen mode
+For a stylus. Tap the orange **Pen** button in the header (each tap goes Off, Pen, Pen +, Off) or use the **Pen** section of the Decky panel.
+
+| In Pen mode | Result |
+|---|---|
+| One touch moves | the pointer moves like a mouse; lifting and setting the pen down again only repositions it |
+| Double tap (two taps within 0.45 s and 60 px) | left click; a third quick tap clicks again, so three quick taps make a double click |
+| Single tap | nothing: a pen landing often registers as a quick tap, so a lone tap never clicks |
+| Press and hold (0.45 s) | right click |
+| Drag along the right-hand strip | scroll up and down |
+| Drag along the bottom strip | scroll sideways |
+| A second touch while one is down | ignored, so a resting palm does nothing |
+
+Two-finger scroll, right-click taps, three-finger swipes, pinch, drag lock and glide are off while Pen mode is on. A touch that starts in a strip stays a scroll wherever the pen drifts.
+
+**Pen +** is Pen plus Game Mode's pointer-visible setting. Game Mode's gamescope hides the pointer 3 s after it last moved, and a scroll or a button press does not count as moving it (`refs/upstream/gamescope` `steamcompmgr.cpp` `checkSuspension`, `wlserver.cpp`). Plain Pen deals with that by nudging the pointer one pixel out and back before a scroll or press that follows 2 s of stillness. Pen + removes the cause instead: it writes `~/.config/environment.d/50-ratatoskr-cursor.conf` (`HIDE_CURSOR_DELAY_MS=3600000`), which the Thor's `gamescope-session-plus` passes to gamescope as `--hide-cursor-delay`. That is a launch argument with no run-time setter, so it takes effect the next time Game Mode starts (a reboot is the sure way). Until then the nudges stay on and the pen hint says so. Leaving Pen + deletes the file.
+
 ## Settings
 In the Decky panel (Steam menu, Decky, Ratatoskr): sensitivity, glide and friction, scroll speed, tap to click, long-press right click and its delay, two- and three-finger taps, pinch zoom, navigation swipes, drag lock, the on-glass HUD, and the **Screens** toggle that dims the bottom screen with Steam's idle dim ([details](dim-mirror.md)). All keys and ranges are in [configuration.md](configuration.md).
 
