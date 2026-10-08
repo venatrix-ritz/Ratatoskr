@@ -112,19 +112,33 @@ def _device_name(node: str) -> str:
         return ""
 
 
+def list_input_devices() -> list[tuple[str, str]]:
+    """(node, name) for every input node that currently has a name."""
+    return [(node, _device_name(node)) for node in sorted(glob.glob("/dev/input/event*"))]
+
+
 class IdleTracker:
     """Newest user-input time across every readable input node except the grabbed bottom touchscreen.
 
     Ratatoskr grabs the bottom touchscreen exclusively, so nothing else can read it; the app
-    calls poke() for those touches instead.
+    calls poke() for those touches instead. The device list is rescanned every few seconds,
+    because controllers appear after this service starts (InputPlumber's virtual pads, Bluetooth
+    and USB pads) and others disappear.
     """
 
-    def __init__(self, logger, skip_names: tuple[str, ...] = ("bottom_touchscreen",)) -> None:
+    def __init__(self, logger, skip_names: tuple[str, ...] = ("bottom_touchscreen",), scan_interval: float = 5.0,
+                 lister: Callable[[], list[tuple[str, str]]] = list_input_devices,
+                 opener: Callable[[str], int] | None = None) -> None:
         self._logger = logger
         self._skip = skip_names
+        self._scan_interval = scan_interval
+        self._lister = lister
+        self._opener = opener or (lambda node: os.open(node, os.O_RDONLY | os.O_NONBLOCK))
         self._last = time.monotonic()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._fds: dict[int, tuple[str, str]] = {}
+        self._announced: tuple[str, ...] = ()
         self.devices: list[str] = []
 
     def poke(self) -> None:
@@ -140,34 +154,67 @@ class IdleTracker:
     def stop(self) -> None:
         self._stop.set()
 
-    def _open_all(self) -> dict[int, tuple[str, str]]:
-        fds: dict[int, tuple[str, str]] = {}
-        for node in sorted(glob.glob("/dev/input/event*")):
-            name = _device_name(node)
-            if not name or name in self._skip or any(tag in name for tag in _IGNORED_NAMES):
+    def _wanted(self, name: str) -> bool:
+        return bool(name) and name not in self._skip and not any(tag in name for tag in _IGNORED_NAMES)
+
+    def _scan(self) -> None:
+        """Open nodes that appeared; forget nodes that went away."""
+        try:
+            present = self._lister()
+        except Exception as err:  # a bad listing must not kill the tracker
+            self._logger.log(DebugCode.DIM_MIRROR, f"idle tracker could not list input devices: {err}")
+            return
+        present_nodes = {node for node, name in present if self._wanted(name)}
+        for fd, (node, _name) in list(self._fds.items()):
+            if node not in present_nodes:
+                self._drop(fd)
+        have = {node for node, _name in self._fds.values()}
+        for node, name in present:
+            if node in have or not self._wanted(name):
                 continue
             try:
-                fd = os.open(node, os.O_RDONLY | os.O_NONBLOCK)
+                fd = self._opener(node)
             except OSError:
                 continue
-            fds[fd] = (node, name)
-        self.devices = [f"{n} ({node})" for node, n in fds.values()]
-        return fds
+            self._fds[fd] = (node, name)
+        self.devices = sorted(f"{name} ({node})" for node, name in self._fds.values())
+        key = tuple(self.devices)
+        if key != self._announced:
+            self._announced = key
+            self._logger.log(DebugCode.DIM_MIRROR, f"idle tracker watching {len(key)} input devices: {self.devices}")
+
+    def _drop(self, fd: int) -> None:
+        self._fds.pop(fd, None)
+        try:
+            os.close(fd)
+        except OSError:
+            pass
 
     def _run(self) -> None:
-        fds = self._open_all()
-        self._logger.log(DebugCode.DIM_MIRROR, f"idle tracker watching {len(fds)} input devices: {self.devices}")
+        next_scan = 0.0
         try:
-            while not self._stop.is_set() and fds:
-                ready, _, _ = select.select(list(fds), [], [], 1.0)
+            while not self._stop.is_set():
+                now = time.monotonic()
+                if now >= next_scan:
+                    self._scan()
+                    next_scan = now + self._scan_interval
+                if not self._fds:
+                    self._stop.wait(min(1.0, self._scan_interval))
+                    continue
+                try:
+                    ready, _, _ = select.select(list(self._fds), [], [], min(1.0, self._scan_interval))
+                except (OSError, ValueError):
+                    for fd in list(self._fds):  # a stale descriptor: drop them all, the next scan reopens
+                        self._drop(fd)
+                    continue
                 for fd in ready:
-                    name = fds[fd][1]
+                    name = self._fds[fd][1]
                     try:
                         data = os.read(fd, _EVENT.size * 64)
                     except BlockingIOError:
                         continue
                     except OSError:
-                        fds.pop(fd, None)
+                        self._drop(fd)
                         continue
                     for off in range(0, len(data) - _EVENT.size + 1, _EVENT.size):
                         _, _, ev_type, code, value = _EVENT.unpack_from(data, off)
@@ -175,11 +222,8 @@ class IdleTracker:
                             self._last = time.monotonic()
                             break
         finally:
-            for fd in fds:
-                try:
-                    os.close(fd)
-                except OSError:
-                    pass
+            for fd in list(self._fds):
+                self._drop(fd)
 
 
 class DimMirror:
