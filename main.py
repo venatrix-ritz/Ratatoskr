@@ -27,7 +27,16 @@ def _send_ipc(request: dict) -> dict:
             s.settimeout(2.0)
             s.connect(SOCKET_PATH)
             s.sendall(json.dumps(request).encode("utf-8"))
-            data = s.recv(4096)
+            chunks, total = [], 0
+            while True:  # the driver closes the connection after replying, and a status reply is several KB
+                chunk = s.recv(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+                if total > 1024 * 1024:
+                    raise ValueError("reply too large")
+            data = b"".join(chunks)
             if not data:
                 return {"ok": False, "code": int(DebugCode.ERR_SOCKET_PROTOCOL), "error": "empty response"}
             return json.loads(data.decode("utf-8"))
