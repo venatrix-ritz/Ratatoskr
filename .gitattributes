@@ -6,3 +6,4 @@
 *.js text eol=lf
 *.json text eol=lf
 *.svg text eol=lf
+*.sudoers text eol=lf
