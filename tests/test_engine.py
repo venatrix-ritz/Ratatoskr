@@ -537,6 +537,27 @@ def read_events(r, n):
     return out
 
 
+def test_closing_the_bridge_with_a_button_held_releases_it_instead_of_deadlocking():
+    import threading
+    r, w = os.pipe()
+    real = E.UInputBridge._init_devices
+    E.UInputBridge._init_devices = lambda self: None          # no /dev/uinput here: use the real constructor, a pipe for the device
+    try:
+        b = E.UInputBridge(E.DebugLogger("test"))
+    finally:
+        E.UInputBridge._init_devices = real
+    b.mouse_fd = w
+    b.wake_pointer = False                                    # keep the pointer nudge out of this test
+    b.mouse_button(E.BTN_LEFT, True)
+    read_events(r, 2)
+    t = threading.Thread(target=b.release_all, daemon=True)
+    t.start()
+    t.join(3.0)
+    assert not t.is_alive(), "release_all() deadlocked on its own lock"
+    assert read_events(r, 2) == [(E.EV_KEY, E.BTN_LEFT, 0), (E.EV_SYN, 0, 0)]
+    assert not b.held_buttons
+
+
 def test_the_first_scroll_after_a_still_spell_nudges_the_pointer_out_and_back():
     b, r = bridge_with_pipe()
     b.emit_scroll(0, -120)
