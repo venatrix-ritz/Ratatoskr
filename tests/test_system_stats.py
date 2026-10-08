@@ -72,6 +72,92 @@ def test_failure_reason_is_recorded_for_the_logs():
     assert "FileNotFoundError" in ss.LAST_WRITE_ERROR
 
 
+# --- slider writes ----------------------------------------------------------------------------------------
+
+def test_a_burst_of_slider_values_is_folded_into_few_writes_and_the_last_one_wins():
+    import time
+    seen = []
+
+    def slow_write(v):
+        time.sleep(0.03)
+        seen.append(v)
+
+    w = ss._LatestWriter(slow_write, "test-writer")
+    for v in range(1, 61):                            # 60 touch events in about 0.3 s
+        w.submit(v)
+        time.sleep(0.005)
+    assert w.wait_idle(2.0)
+    assert seen[-1] == 60, seen
+    assert len(seen) < 20, f"{len(seen)} writes for 60 events"
+    assert seen == sorted(seen)
+
+
+def test_a_failing_write_does_not_end_the_writer():
+    import time
+    seen = []
+
+    def flaky(v):
+        seen.append(v)
+        if v == 1:
+            raise RuntimeError("boom")
+
+    w = ss._LatestWriter(flaky, "test-flaky")
+    w.submit(1)
+    assert w.wait_idle(1.0)
+    w.submit(2)
+    assert w.wait_idle(1.0)
+    assert seen == [1, 2] and "boom" in ss.LAST_WRITE_ERROR
+
+
+class CountingStats(ss.HardwareStats):
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.samples = 0
+        self.written = []
+
+    def _sample(self):
+        self.samples += 1
+        return {"bot_bright_pct": 40, "top_bright_pct": 50, "vol_pct": 30}
+
+    def set_bottom_brightness(self, pct, persist=True, minimum=5):
+        self.written.append(pct)
+        return pct
+
+
+def test_the_requested_value_shows_at_once_and_the_real_one_returns_later():
+    import time
+    s = CountingStats(optimistic_hold=0.1)
+    s._writers["bottom"]._fn = s.set_bottom_brightness
+    s.start_sampler(interval=60)
+    assert s.get_stats()["bot_bright_pct"] == 40
+    assert s.request_bottom_brightness(75) == 75
+    assert s.get_stats()["bot_bright_pct"] == 75       # drawn before any write has finished
+    assert s.wait_for_writes(1.0) and s.written == [75]
+    time.sleep(0.15)
+    assert s.get_stats()["bot_bright_pct"] == 40       # the sampled value takes over once the hold ends
+    s.stop_sampler()
+
+
+def test_with_the_sampler_running_get_stats_never_samples():
+    s = CountingStats()
+    s.start_sampler(interval=60)
+    before = s.samples
+    for _ in range(200):
+        s.get_stats()
+    s.request_bottom_brightness(60)                    # a write used to force a fresh sample on the next read
+    for _ in range(200):
+        s.get_stats()
+    assert s.samples == before, (before, s.samples)
+    s.stop_sampler()
+
+
+def test_requests_are_clamped():
+    s = CountingStats()
+    assert s.request_bottom_brightness(-30) == 5
+    assert s.request_bottom_brightness(900) == 100
+    assert s.request_volume(-1) == 0 and s.request_volume(400) == 100
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
