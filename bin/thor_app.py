@@ -58,6 +58,7 @@ from touch_frames import TouchFrameParser
 from dim_mirror import DimMirror, IdleTracker
 from system_stats import HardwareStats
 import pen_mode as pm
+import ipc_util
 import session_cursor
 
 SOCKET_PATH = f"/run/user/{os.getuid()}/thor-input.sock"
@@ -785,10 +786,11 @@ class ThorApp:
                     break
                 with conn:
                     try:
-                        data = conn.recv(4096)
-                        if not data:
+                        msg = ipc_util.read_json_request(conn)
+                        if msg is None:
                             continue
-                        msg = json.loads(data.decode("utf-8"))
+                        if not isinstance(msg, dict):
+                            raise ValueError("a request must be a JSON object")
                         action = msg.get("action")
                         res = {"ok": True, "code": int(DebugCode.OK)}
 
@@ -859,9 +861,15 @@ class ThorApp:
                             res["diagnostics"] = run_self_diagnostics()
                         elif action == "quit":
                             GLib.idle_add(self.window.close)
+                        else:
+                            res.update(ok=False, code=int(DebugCode.ERR_SOCKET_PROTOCOL), error=f"unknown action: {action!r}")
                         conn.sendall(json.dumps(res).encode("utf-8"))
                     except Exception as err:
-                        self.logger.log(DebugCode.ERR_SOCKET_PROTOCOL, str(err))
+                        self.logger.log(DebugCode.ERR_SOCKET_PROTOCOL, f"{type(err).__name__}: {err}")
+                        try:  # answer instead of leaving the client to time out
+                            conn.sendall(json.dumps({"ok": False, "code": int(DebugCode.ERR_SOCKET_PROTOCOL), "error": f"{type(err).__name__}: {err}"}).encode("utf-8"))
+                        except OSError:
+                            pass
 
             server_sock.close()
 

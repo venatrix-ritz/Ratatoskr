@@ -27,7 +27,7 @@ Settings live in one JSON file, `~/.config/thor-input/config.json` (`/var/home/a
 Values outside a range are clamped. The ranges and defaults come from `bin/engine.py` (`TouchGestureProcessor`), `bin/thor_app.py` and `main.py`.
 
 ## Things to know
-- The standalone manager keeps its own copy of the defaults, and two differ from the driver's: `glide` is `false` and `friction` is `7`. Once `config.json` exists, whatever it holds wins.
+- The standalone manager keeps its own copy of the defaults (it writes the whole file when you touch a control, so they matter). They match the driver's since 2026-10-08; before that the manager's `glide` was `false` and `friction` `7`, and any `config.json` it wrote carries those values. Once `config.json` exists, whatever it holds wins.
 - The pointer and tap thresholds that are not settings are constants in `bin/engine.py`: tap time 0.25 s, tap travel 12 px per finger (the cursor is held still until the finger travels past that or stays down that long), long-press travel 24 px, swipe distance 85 px.
 - Steam's own settings are not Ratatoskr's, but one of them matters: the dim mirror reads `IdleBacklightDimBatterySeconds` and `IdleBacklightDimACSeconds` from `~/.local/share/Steam/config/config.vdf`.
 - Runtime files: socket `/run/user/<uid>/thor-input.sock`, log `/tmp/thor-input-debug.log`.
