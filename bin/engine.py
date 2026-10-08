@@ -75,6 +75,14 @@ SCROLL_DIVISOR = 10.0
 PINCH_THRESHOLD_PX = 35.0
 SWIPE_THRESHOLD_PX = 85.0
 HI_RES_NOTCH = 120
+# The Thor's touch controller sometimes loses a finger-lift: the kernel keeps reporting that contact as down
+# (observed: a contact still held 57 s later, with every finger off the glass). A contact that has reported
+# nothing for this long is treated as lifted. Just above the longest long-press delay (1.2 s) so a deliberate
+# press-and-hold is not cut short; real fingers on this panel jitter, a stationary ghost reports nothing.
+STALE_CONTACT_S = 1.5
+# The controller reports at most five fingers and loses lifts when several are down at once, so this many
+# simultaneous fingers is treated as misuse: no output until every finger has left the glass (or expired).
+MISUSE_FINGERS = 4
 
 
 def raw_to_screen(raw_x: int, raw_y: int) -> tuple[float, float]:
@@ -326,6 +334,8 @@ class TouchGestureProcessor:
         self.max_fingers: int = 0
         self.is_dragging: bool = False
         self.pointer_active: bool = False  # False while a one-finger touch could still turn out to be a tap
+        self.misuse_lock: bool = False  # True from the MISUSE_FINGERS-th finger until no contact is left
+        self._expired_tids: set[int] = set()  # contacts dropped as stale: the kernel may reuse their slot
         self.last_tap_time: float = 0.0
 
         # Long-press right click timer
@@ -429,7 +439,30 @@ class TouchGestureProcessor:
         self.vel_x = 0.0
         self.vel_y = 0.0
         self.long_press_triggered = False
+        self.misuse_lock = False
+        self._expired_tids.clear()
         self.last_state_label = "IDLE"
+
+    def expire_stale(self, now: float) -> None:
+        """Forget contacts that have been silent for STALE_CONTACT_S: a lost lift would otherwise make every later
+        single-finger touch look like a two-finger scroll, and nothing resets until the controller lets go.
+        Called with the kernel timestamp of every frame, and from the reader's idle ticks."""
+        self._drop_stale_contacts(now)
+
+    def _drop_stale_contacts(self, now: float) -> None:
+        stale = [tid for tid, c in self.active_contacts.items() if now - c.get("seen_t", now) > STALE_CONTACT_S]
+        for tid in stale:
+            c = self.active_contacts.pop(tid)
+            self._expired_tids.add(tid)
+            self.logger.log(DebugCode.STATUS_TOUCH_UP, f"dropped stale contact {tid} at ({c['last_x']:.0f}, {c['last_y']:.0f}): silent for {now - c['seen_t']:.1f}s")
+        if stale and not self.active_contacts:
+            self.max_fingers = 0
+            self.accum_dist = 0.0
+            self.vel_x = 0.0
+            self.vel_y = 0.0
+            self.pointer_active = False
+            self.misuse_lock = False
+            self._cancel_long_press()
 
     def _cancel_long_press(self) -> None:
         if self.long_press_timer and self.long_press_timer.is_alive():
@@ -446,12 +479,24 @@ class TouchGestureProcessor:
 
     def touch_down(self, tid: int, x: float, y: float, now: float) -> None:
         self.glide_stop.set()
-        contact = {"id": tid, "start_x": x, "start_y": y, "last_x": x, "last_y": y, "start_t": now}
+        self._drop_stale_contacts(now)
+        contact = {"id": tid, "start_x": x, "start_y": y, "last_x": x, "last_y": y, "start_t": now, "seen_t": now}
         self.active_contacts[tid] = contact
         count = len(self.active_contacts)
         self.max_fingers = max(self.max_fingers, count)
         self.last_coords = (x, y)
         self.last_state_label = f"DOWN ({count} finger{'s' if count > 1 else ''})"
+        self._expired_tids.discard(tid)
+
+        if count >= MISUSE_FINGERS:
+            if not self.misuse_lock:
+                self.logger.log(DebugCode.STATUS_TOUCH_DOWN, f"{count} fingers down: ignoring touch until all lift")
+            self.misuse_lock = True
+            self._cancel_long_press()
+            self.vel_x = 0.0
+            self.vel_y = 0.0
+            self.last_state_label = "TOO MANY FINGERS"
+            return
 
         if count == 1:
             self.start_time = now
@@ -479,12 +524,22 @@ class TouchGestureProcessor:
     def touch_move(self, tid: int, x: float, y: float, now: float) -> None:
         contact = self.active_contacts.get(tid)
         if not contact:
+            if tid not in self._expired_tids:
+                return
+            # A new finger landed in the slot of a ghost we already dropped: the kernel keeps the old tracking
+            # id and reports it as movement. It is moving, so it is a real finger.
+            self.logger.log(DebugCode.STATUS_TOUCH_DOWN, f"contact {tid} moved after being dropped as stale: treating it as a new touch")
+            self.touch_down(tid, x, y, now)
             return
 
         dx = x - contact["last_x"]
         dy = y - contact["last_y"]
         contact["last_x"] = x
         contact["last_y"] = y
+        contact["seen_t"] = now
+
+        if self.misuse_lock:
+            return
 
         self.accum_dist += math.hypot(dx, dy)
         self.last_coords = (x, y)
@@ -559,8 +614,21 @@ class TouchGestureProcessor:
 
     def touch_up(self, tid: int, now: float) -> None:
         self._cancel_long_press()
+        self._expired_tids.discard(tid)
         contact = self.active_contacts.pop(tid, None)
         if not contact:
+            return
+
+        if self.misuse_lock:
+            if not self.active_contacts:
+                self.misuse_lock = False
+                self.max_fingers = 0
+                self.accum_dist = 0.0
+                self.vel_x = 0.0
+                self.vel_y = 0.0
+                self.pointer_active = False
+                self.swipe_triggered = False
+                self.last_state_label = "IDLE"
             return
 
         if len(self.active_contacts) < 3:
