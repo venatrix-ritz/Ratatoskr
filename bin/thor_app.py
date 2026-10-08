@@ -57,6 +57,7 @@ from keyboard_layout import Key, KeyboardLayout
 from touch_frames import TouchFrameParser
 from dim_mirror import DimMirror, IdleTracker
 from system_stats import HardwareStats
+import pen_mode as pm
 import session_cursor
 
 SOCKET_PATH = f"/run/user/{os.getuid()}/thor-input.sock"
@@ -79,6 +80,8 @@ class ThorApp:
         self._last_contacts = (0, 0)
         self._last_frame_ts = 0.0
         self._slider_drag: tuple[int, str] | None = None  # (touch id, 'vol' | 'top' | 'bot') while a slider is held
+        self.pen_mode = "off"  # off | pen | pen_plus, see pen_mode.py
+        self._cursor_status = {"cursor_stay_visible": False, "cursor_hide_delay_ms": None, "cursor_stay_visible_active": False}
         self._draw_ms_sum = 0.0
         self._draw_ms_max = 0.0
         self._draws = 0
@@ -151,6 +154,8 @@ class ThorApp:
                     self.show_debug_hud = cfg.get("debug_hud", self.show_debug_hud)
                     self.gesture.set_settings(**cfg)
                     self._apply_mirror_settings(cfg)
+                    self.pen_mode = pm.initial(cfg, session_cursor.is_configured())
+                    self.gesture.set_settings(stylus_mode=pm.engine_flag(self.pen_mode))
             except Exception as err:
                 self.logger.log(DebugCode.ERR_SOCKET_PROTOCOL, f"load_config: {err}")
 
@@ -160,6 +165,7 @@ class ThorApp:
             cfg = {
                 "mode": self.mode,
                 "debug_hud": self.show_debug_hud,
+                "pen_mode": self.pen_mode,
                 **self.gesture.get_settings(),
                 **self.mirror_cfg,
             }
@@ -167,6 +173,23 @@ class ThorApp:
                 json.dump(cfg, f, indent=2)
         except Exception as err:
             self.logger.log(DebugCode.ERR_SOCKET_PROTOCOL, f"save_config: {err}")
+
+    def set_pen_mode(self, mode) -> str:
+        """Off, Pen, or Pen +. Pen + also writes Game Mode's pointer-visible override (it applies the next time Game
+        Mode starts); leaving Pen + removes it. Until the override is running, the nudges stay on."""
+        mode = pm.normalize(mode)
+        self.pen_mode = mode
+        self.gesture.set_settings(stylus_mode=pm.engine_flag(mode))
+        ok = session_cursor.set_stay_visible(pm.wants_override(mode))
+        self._refresh_cursor_status(fresh=True)
+        self.logger.log(
+            DebugCode.SETTINGS_UPDATED,
+            f"pen mode {mode}; pointer-visible override {'on' if pm.wants_override(mode) else 'off'} "
+            f"{'written' if ok else 'FAILED'}; it applies when Game Mode next starts",
+        )
+        self.save_config()
+        GLib.idle_add(self.drawing_area.queue_draw)
+        return mode
 
     def _apply_mirror_settings(self, msg: dict) -> None:
         if "mirror_dim" in msg:
@@ -294,6 +317,7 @@ class ThorApp:
 
     def start(self) -> None:
         self.stats.start_sampler()
+        self._refresh_cursor_status()
         self._start_touch_reader()
         self._start_ipc_server()
         self.idle_tracker.start()
@@ -303,8 +327,14 @@ class ThorApp:
         GLib.timeout_add(1000, self._on_stats_tick)
         self.logger.log(DebugCode.DAEMON_READY, f"Mode={self.mode}, Device={self.touch_dev_node}")
 
+    def _refresh_cursor_status(self, fresh: bool = False) -> None:
+        """Is the running Game Mode keeping the pointer visible? If so the pre-scroll and pre-press nudges are off."""
+        self._cursor_status = session_cursor.status(ttl=0 if fresh else 10.0)
+        self.bridge.wake_pointer = not self._cursor_status["cursor_stay_visible_active"]
+
     def _on_stats_tick(self) -> bool:
         if not self.touch_stop.is_set():
+            self._refresh_cursor_status()
             self.drawing_area.queue_draw()
             return True
         return False
@@ -613,9 +643,7 @@ class ThorApp:
             self.bridge.mouse_button(BTN_RIGHT, True)
             GLib.idle_add(self.drawing_area.queue_draw)
         elif 980 <= x <= 1080:
-            self.gesture.set_settings(stylus_mode=not self.gesture.stylus_mode)
-            self.save_config()
-            GLib.idle_add(self.drawing_area.queue_draw)
+            self.set_pen_mode(pm.cycle(self.pen_mode))
 
     def _handle_settings_touch(self, tid: int, x: float, y: float) -> None:
         # Card 1: Volume (y = 120 .. 230)
@@ -738,7 +766,8 @@ class ThorApp:
                             res.update(self.gesture.get_settings())
                             res.update(self.mirror_cfg)
                             res["bottom_dimmed"] = self.dim_mirror.dimmed
-                            res.update(session_cursor.status())
+                            res.update(self._cursor_status)
+                            res["pen_mode"] = self.pen_mode
                         elif action == "get_debug":
                             res["telemetry"] = self.bridge.get_telemetry()
                             res["state"] = self.gesture.last_state_label
@@ -780,16 +809,9 @@ class ThorApp:
                             res["bot_bright_pct"] = self.stats.request_bottom_brightness(msg.get("brightness", 100))
                             self.logger.log(DebugCode.BACKLIGHT_UPDATED, f"bottom={res['bot_bright_pct']}%")
                             GLib.idle_add(self.drawing_area.queue_draw)
-                        elif action == "get_cursor_override":
-                            res.update(session_cursor.status(ttl=0))
-                        elif action == "set_cursor_override":
-                            enabled = bool(msg.get("enabled"))
-                            res["ok"] = session_cursor.set_stay_visible(enabled)
-                            res.update(session_cursor.status(ttl=0))
-                            self.logger.log(
-                                DebugCode.SETTINGS_UPDATED,
-                                f"pointer auto-hide override {'on' if enabled else 'off'}: {'written' if res['ok'] else 'FAILED'}; applies when Game Mode next starts",
-                            )
+                        elif action == "set_pen_mode":
+                            res["pen_mode"] = self.set_pen_mode(msg.get("mode"))
+                            res.update(self._cursor_status)
                         elif action == "wake":
                             # A harmless key tap on the virtual keyboard: Steam and the compositor see it as input,
                             # so the sleep and dim timers restart and a dimmed top screen wakes.
@@ -883,7 +905,7 @@ class ThorApp:
         right_active = self.held_ui_button == "right"
         self._draw_button(cr, 680, 6, 140, 36, "Left Click", left_active, accent_color=(0.3, 0.45, 0.95))
         self._draw_button(cr, 828, 6, 140, 36, "Right Click", right_active, accent_color=(0.85, 0.35, 0.35))
-        self._draw_button(cr, 980, 6, 100, 36, "Pen", self.gesture.stylus_mode, accent_color=(0.95, 0.65, 0.20))
+        self._draw_button(cr, 980, 6, 100, 36, pm.label(self.pen_mode), self.pen_mode != "off", accent_color=(0.95, 0.65, 0.20))
 
     def _draw_status_ribbon(self, cr: cairo.Context) -> None:
         """Render live system monitoring ribbon across top of AMOLED display."""
@@ -1001,7 +1023,9 @@ class ThorApp:
         cr.set_font_size(18.0)
         hint = "Ratatoskr: 1 finger moves · Tap clicks · 2 fingers scroll · Flick glides"
         if self.gesture.stylus_mode:
-            hint = "Pen mode: touch moves · Tap clicks · Hold right-clicks · Edge strips scroll"
+            hint = "Pen: touch moves · Double-tap clicks · Hold right-clicks · Edge strips scroll"
+            if self.pen_mode == "pen_plus" and not self._cursor_status["cursor_stay_visible_active"]:
+                hint = "Pen +: restart Game Mode to keep the pointer visible (until then Pen's nudges stay on)"
         extents = cr.text_extents(hint)
         cr.move_to(pad_x + (pad_w - extents.width) / 2.0, pad_y + (pad_h + extents.height) / 2.0)
         cr.show_text(hint)

@@ -514,6 +514,7 @@ def bridge_with_pipe():
     b.scroll_accum_x = b.scroll_accum_y = 0.0
     b.count_scrolls = b.count_mouse_moves = b.count_pointer_wakes = 0
     b.moved_at = 0.0
+    b.wake_pointer = True
     b.held_buttons = set()
     b.count_clicks_left = b.count_clicks_right = 0
     return b, r
@@ -575,6 +576,17 @@ def test_clicker_style_tapping_in_one_place_keeps_the_pointer_awake():
         b.mouse_button(E.BTN_LEFT, False)
         b.moved_at -= 0.6
     assert b.count_pointer_wakes == 2, b.count_pointer_wakes   # the first click, then again once 2 s have passed
+
+
+def test_no_nudges_when_game_mode_keeps_the_pointer_visible():
+    b, r = bridge_with_pipe()
+    b.wake_pointer = False                                     # Pen +: the running Game Mode has the override
+    b.emit_scroll(0, -120)
+    ev = read_events(r, 3)                                     # hi-res wheel, whole notch, sync: nothing before them
+    assert not [e for e in ev if e[0] == E.EV_REL and e[1] == E.REL_X], ev
+    b.mouse_button(E.BTN_LEFT, True)
+    assert read_events(r, 2) == [(E.EV_KEY, E.BTN_LEFT, 1), (E.EV_SYN, 0, 0)]
+    assert b.count_pointer_wakes == 0
 
 
 def test_a_long_scroll_keeps_waking_the_pointer_every_couple_of_seconds():

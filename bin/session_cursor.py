@@ -15,8 +15,8 @@ CONF_PATH = os.path.expanduser("~/.config/environment.d/50-ratatoskr-cursor.conf
 KEY = "HIDE_CURSOR_DELAY_MS"
 STAY_VISIBLE_MS = 3_600_000  # one hour: effectively never
 _HEADER = (
-    "# Written by Ratatoskr's \"Keep the pointer visible\" switch in its Decky panel.\n"
-    "# Delete this file (or turn the switch off) to go back to Game Mode's default of 3000 ms.\n"
+    "# Written by Ratatoskr when Pen + is selected (header Pen button or its Decky panel).\n"
+    "# Delete this file (or leave Pen +) to go back to Game Mode's default of 3000 ms.\n"
 )
 
 _cache: dict[str, tuple[float, int | None]] = {}

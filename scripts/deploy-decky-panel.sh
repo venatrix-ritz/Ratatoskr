@@ -29,4 +29,4 @@ ssh "${THOR_HOST}" "
     echo '==> Restarting plugin_loader.service...'
     sudo systemctl restart plugin_loader.service
 "
-echo "==> Done. Open the Ratatoskr panel in Decky: there is now a 'Pointer' section."
+echo "==> Done. Open the Ratatoskr panel in Decky: there is now a 'Pen' section (Pen mode and Pen +)."
