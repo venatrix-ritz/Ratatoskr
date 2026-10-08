@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy Thor Input to the AYN Thor handheld device.
+# Deploy Ratatoskr (formerly Touch Master) to the AYN Thor handheld device.
 set -euo pipefail
 
 # Host: arg 1, $THOR_HOST, $THOR_ENV_FILE, ./local/thor.env, or ../../local/thor.env (when reached through the AynThor
@@ -15,7 +15,7 @@ THOR_HOST="${1:-${THOR_HOST:-}}"
 PLUGIN_DIR="/home/armada/homebrew/plugins/thor-input"
 APP_DIR="/var/home/armada/.local/share/thor-input"
 
-echo "==> Deploying Thor Input to ${THOR_HOST}..."
+echo "==> Deploying Ratatoskr to ${THOR_HOST}..."
 
 # 1. Prepare remote directories
 ssh "${THOR_HOST}" "
@@ -65,4 +65,7 @@ ssh "${THOR_HOST}" "
     sudo systemctl restart plugin_loader.service
 "
 
-echo "==> Thor Input successfully deployed and active!"
+echo "==> Restarting the Ratatoskr user service so the new code loads..."
+ssh "${THOR_HOST}" "systemctl --user daemon-reload && systemctl --user restart touch-master.service && systemctl --user is-active touch-master.service"
+
+echo "==> Ratatoskr deployed. (Turn on 'Dim bottom screen with the top' in its Decky panel; see systemd/touch-master-backlight.sudoers for the optional narrow sudo rule.)"
