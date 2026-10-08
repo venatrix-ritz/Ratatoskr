@@ -61,6 +61,7 @@ import pen_mode as pm
 import atomic_json
 import ipc_util
 import session_cursor
+import tray_actions
 
 SOCKET_PATH = f"/run/user/{os.getuid()}/thor-input.sock"
 CONFIG_PATH = os.path.expanduser("~/.config/thor-input/config.json")
@@ -276,19 +277,15 @@ class ThorApp:
             self.logger.log(DebugCode.ERR_SOCKET_PROTOCOL, f"launch manager: {err}")
 
     def _stop_via_indicator(self, *_) -> None:
+        """Stop the driver and give the bottom screen back to Armada's stock session. The steps after stopping
+        the service would die with this process, so the manager does them from its own transient unit."""
         try:
             import subprocess
 
-            if os.path.exists(CONFIG_PATH):
-                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                    cfg = json.load(f)
-            else:
-                cfg = {}
-            cfg["enabled"] = False
-            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-                json.dump(cfg, f, indent=2)
-            subprocess.Popen(["systemctl", "--user", "stop", "touch-master.service"])
-            subprocess.Popen(["systemctl", "--user", "disable", "touch-master.service"])
+            subprocess.Popen(
+                tray_actions.stop_command(str(SCRIPT_DIR / "touch_master_manager.py"), sys.executable),
+                start_new_session=True,
+            )
         except Exception as err:
             self.logger.log(DebugCode.ERR_SOCKET_PROTOCOL, f"stop via indicator: {err}")
 
