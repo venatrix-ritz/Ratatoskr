@@ -25,11 +25,7 @@ In the Decky panel, **Run Diagnostics** checks `/dev/uinput`, the touchscreen no
 | Panel missing from Decky | the plugin folder or `plugin.json` is wrong | redeploy with `scripts/deploy.sh`; `sudo systemctl restart plugin_loader.service` |
 
 ## Known issues (not yet fixed)
-These were found while writing the documentation, on the code as published. They are real and unfixed; the Decky panel is the reliable interface.
-1. **The standalone manager window sends actions the driver does not understand.** Its brightness sliders send `set_brightness` and its HUD switch sends `set_debug_hud`; the driver only handles `set_top_brightness`, `set_bottom_brightness` and `toggle_hud`. Those controls do nothing live.
-2. **The manager nests settings** (`{"action": "set_settings", "settings": {...}}`) but the driver reads flat keys, so its sensitivity slider and switches, including the dim switch, are saved to `config.json` and take effect only after the service restarts. The Decky panel sends flat keys and applies instantly.
-3. **Defaults differ** between the manager (`glide` off, `friction` 7) and the driver (`glide` on, `friction` 5). See [configuration.md](configuration.md).
-4. **The dim mirror and the narrow sudo rule are untested on a Thor.**
+1. **The narrow sudo rule is untested.** The Thor in use has full passwordless sudo, so the dim mirror's backlight writes have been exercised through that, not through `systemd/touch-master-backlight.sudoers`.
 
 ## Reporting a problem
 Open an issue with the Armada version, the output of `touch_master_manager.py --status`, and the last lines of the log.
