@@ -36,26 +36,44 @@ def _read_int(path: str, default: int = 0) -> int:
         return default
 
 
+SUDO_WRITE_TIMEOUT_S = 2.0
+LAST_WRITE_ERROR = ""  # why the most recent write failed, for the logs
+
+
+def _write_via_sudo(path: str, value: str, timeout: float = SUDO_WRITE_TIMEOUT_S) -> bool:
+    """`sudo -n tee path`. A timeout leaves the outcome unknown (tee may have written before it was killed),
+    so the value is read back instead of being reported as a failure."""
+    global LAST_WRITE_ERROR
+    try:
+        res = subprocess.run(
+            ["sudo", "-n", "tee", path],
+            input=f"{value}\n",
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+        )
+        if res.returncode != 0:
+            LAST_WRITE_ERROR = f"sudo tee {os.path.basename(os.path.dirname(path))}/{os.path.basename(path)} exited {res.returncode}: {(res.stderr or '').strip()[:120]}"
+        return res.returncode == 0
+    except subprocess.TimeoutExpired:
+        ok = _read_str(path) == value.strip()
+        if not ok:
+            LAST_WRITE_ERROR = f"sudo tee {os.path.basename(path)} timed out after {timeout}s and the value was not written"
+        return ok
+    except Exception as err:
+        LAST_WRITE_ERROR = f"sudo tee {os.path.basename(path)} raised {type(err).__name__}: {err}"
+        return False
+
+
 def _write_str(path: str, value: str) -> bool:
     try:
         with open(path, "w", encoding="utf-8") as f:
             f.write(value + "\n")
         return True
     except PermissionError:
-        try:
-            res = subprocess.run(
-                ["sudo", "-n", "tee", path],
-                input=f"{value}\n",
-                text=True,
-                capture_output=True,
-                timeout=0.4,
-            )
-            return res.returncode == 0
-        except Exception:
-            return False
+        return _write_via_sudo(path, value)
     except OSError:
         return False
-
 
 
 def _wpctl_env() -> dict[str, str]:
@@ -73,6 +91,7 @@ class HardwareStats:
         self.cache_ttl = cache_ttl
         self._last_sample_time = 0.0
         self.last_write_ok = True
+        self.last_error = ""
         self._last_data: dict[str, Any] = {}
         self._lock = threading.Lock()
 
@@ -266,6 +285,7 @@ class HardwareStats:
         if persist:
             ok = _write_str(ARMADA_BOTTOM_BRIGHTNESS_FILE, str(target)) and ok
         self.last_write_ok = ok
+        self.last_error = "" if ok else LAST_WRITE_ERROR
         self._last_sample_time = 0.0
         return target
 
