@@ -21,12 +21,12 @@ Switch with the buttons along the top of the bottom screen, from the Decky panel
 | Two-finger tap | right click | `two_finger_right_click` (on) |
 | Press and hold (0.45 s default) | right click | `long_press_right_click` (off; turning it on turns two-finger right click off, and the reverse) |
 | Three-finger tap | middle click | `three_finger_middle_click` (off) |
-| Two-finger pinch | Ctrl plus mouse wheel (zoom) | `pinch_zoom_enabled` (off) |
+| Two-finger pinch | **not implemented**: the switch is stored and nothing reads it | `pinch_zoom_enabled` |
 | Three-finger swipe (85 px) | up: Super (opens Steam), down: Escape, left/right: Alt+Tab | `three_finger_swipe_enabled` (off) |
-| Double-tap and drag | holds the left button | `drag_lock_enabled` (off) |
+| Double-tap and drag | **not implemented**: the switch is stored and nothing reads it | `drag_lock_enabled` |
 | Flick and release | the pointer keeps gliding and slows down | `glide`, `friction` |
 
-Pinch zoom, three-finger swipes and drag lock are off by default because they caused accidental triggers (Ctrl presses, stray gestures, a stuck left button).
+Three-finger swipes are off by default because they caused accidental triggers. Pinch zoom and drag lock were switched off for the same reason (Ctrl presses, a stuck left button) and the code behind them was never finished: the engine keeps the switches and some leftover state (`initial_pinch_dist`, `is_dragging`) but nothing acts on them. Whether to finish or remove them is open.
 
 Four or more fingers at once do nothing: the touch is ignored until every finger has left the glass. The digitizer has five slots and, observed on the Thor on 2026-10-08, it sometimes never reports the lift of a finger when several were down; the kernel then keeps that contact "held". Ignoring multi-finger presses stops them from turning into scrolls or clicks, and a contact that goes quiet for 1.5 s is treated as lifted, so the pointer is back within about 1.5 s of letting go.
 
@@ -48,7 +48,7 @@ Two-finger scroll, right-click taps, three-finger swipes, pinch, drag lock and g
 **Pen +** is Pen plus Game Mode's pointer-visible setting. Game Mode's gamescope hides the pointer 3 s after it last moved, and a scroll or a button press does not count as moving it (`refs/upstream/gamescope` `steamcompmgr.cpp` `checkSuspension`, `wlserver.cpp`). Plain Pen deals with that by nudging the pointer one pixel out and back before a scroll or press that follows 2 s of stillness. Pen + removes the cause instead: it writes `~/.config/environment.d/50-ratatoskr-cursor.conf` (`HIDE_CURSOR_DELAY_MS=3600000`), which the Thor's `gamescope-session-plus` passes to gamescope as `--hide-cursor-delay`. That is a launch argument with no run-time setter, so it takes effect the next time Game Mode starts (a reboot is the sure way). Until then the nudges stay on and the pen hint says so. Leaving Pen + deletes the file.
 
 ## Settings
-In the Decky panel (Steam menu, Decky, Ratatoskr): sensitivity, glide and friction, scroll speed, tap to click, long-press right click and its delay, two- and three-finger taps, pinch zoom, navigation swipes, drag lock, the on-glass HUD, and the **Screens** toggle that dims the bottom screen with Steam's idle dim ([details](dim-mirror.md)). All keys and ranges are in [configuration.md](configuration.md).
+In the Decky panel (Steam menu, Decky, Ratatoskr): sensitivity, glide and friction, scroll speed, tap to click, long-press right click and its delay, two- and three-finger taps, navigation swipes, the pinch zoom and drag lock switches (which do nothing), the **Pen** section (Pen mode and Pen +), the on-glass HUD, and the **Screens** toggle that dims the bottom screen with Steam's idle dim ([details](dim-mirror.md)). All keys and ranges are in [configuration.md](configuration.md).
 
 The panel also shows service state, hardware stats, input telemetry (moves, scrolls, clicks, keys) and a **Run Diagnostics** button.
 

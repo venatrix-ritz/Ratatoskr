@@ -25,7 +25,8 @@ In the Decky panel, **Run Diagnostics** checks `/dev/uinput`, the touchscreen no
 | Panel missing from Decky | the plugin folder or `plugin.json` is wrong | redeploy with `scripts/deploy.sh`; `sudo systemctl restart plugin_loader.service` |
 
 ## Known issues (not yet fixed)
-1. **The narrow sudo rule is untested.** The Thor in use has full passwordless sudo, so the dim mirror's backlight writes have been exercised through that, not through `systemd/touch-master-backlight.sudoers`.
+1. **Pinch zoom and drag lock do nothing.** Both switches exist in the Decky panel, the manager and `config.json`, but `bin/engine.py` never acts on `pinch_zoom_enabled` or `drag_lock_enabled`. They need either an implementation or removal.
+2. **The narrow sudo rule is untested.** The Thor in use has full passwordless sudo, so the dim mirror's backlight writes have been exercised through that, not through `systemd/touch-master-backlight.sudoers`.
 
 ## Reporting a problem
 Open an issue with the Armada version, the output of `touch_master_manager.py --status`, and the last lines of the log.
