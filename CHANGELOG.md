@@ -3,6 +3,7 @@
 Dates are 2026. The project was called Touch Master until 2026-10-07. No version numbers have been cut yet.
 
 ## Unreleased
+- **Fixed:** three-finger swipes no longer fire on a 2 px move. The swipe's start position was never set (it compared against the screen corner, so any move sent Escape), and it could not trigger a second time. The start is now taken when the third finger lands, and a new swipe is allowed after a finger lifts.
 - **Fixed:** quick cursor nudges no longer click, and taps no longer nudge the cursor. A tap is now under 0.25 s and 12 px of travel per finger (was 0.38 s and 36 px), and the cursor is held still while a touch could still be a tap. The engine now imports on machines without `fcntl`, so its tests run anywhere.
 - **Added:** a `wake` action (and `touch_master_manager.py --wake`) that taps F24 through the virtual keyboard. Steam treats it as input: it restored a dimmed top screen within a second on the Thor and restarts the idle and sleep timers.
 - **Fixed:** a dim left by a crash or restart is now reliably put back. Found on the Thor: the first write after a restart can fail with "Invalid argument", and recovery gave up. Recovery is retried every 5 s until it works, a `sudo` write that times out is checked by reading the value back (the timeout is 2 s, was 0.4 s), and write failures now log the reason.
