@@ -424,6 +424,7 @@ class TouchGestureProcessor:
         self.active_contacts.clear()
         self.max_fingers = 0
         self.is_dragging = False
+        self.swipe_triggered = False
         self.accum_dist = 0.0
         self.vel_x = 0.0
         self.vel_y = 0.0
@@ -469,6 +470,11 @@ class TouchGestureProcessor:
 
         elif count >= 2:
             self._cancel_long_press()
+
+        if count == 3:
+            pts = list(self.active_contacts.values())
+            self.start_centroid = (sum(p["last_x"] for p in pts) / 3.0, sum(p["last_y"] for p in pts) / 3.0)
+            self.swipe_triggered = False
 
     def touch_move(self, tid: int, x: float, y: float, now: float) -> None:
         contact = self.active_contacts.get(tid)
@@ -556,6 +562,9 @@ class TouchGestureProcessor:
         contact = self.active_contacts.pop(tid, None)
         if not contact:
             return
+
+        if len(self.active_contacts) < 3:
+            self.swipe_triggered = False  # a new three-finger swipe can start once a finger has lifted
 
         if len(self.active_contacts) == 0:
 
