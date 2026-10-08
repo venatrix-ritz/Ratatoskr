@@ -18,6 +18,7 @@ In the Decky panel, **Run Diagnostics** checks `/dev/uinput`, the touchscreen no
 | Cursor does not move, keys do nothing (`DBG-101`) | `/dev/uinput` is not writable by `armada` | check `ls -l /dev/uinput` and your groups |
 | Brightness sliders and the dim mirror do nothing (`DBG-701`) | stock Armada makes both backlights root-only | install the narrow sudo rule in [installation.md](installation.md) |
 | Volume slider does nothing (`DBG-702`) | `wpctl` failed under PipeWire | run `wpctl status` in a user session |
+| Log: `could not recover the bottom level ... Invalid argument; will retry` | right after the service (re)starts, the bottom backlight can reject a write for a moment (observed 2026-10-08) | nothing; the mirror retries and the next attempt succeeds. A dim left by a crash or restart is put back from `~/.local/state/thor-input/dim-restore.json` |
 | Panel missing from Decky | the plugin folder or `plugin.json` is wrong | redeploy with `scripts/deploy.sh`; `sudo systemctl restart plugin_loader.service` |
 
 ## Known issues (not yet fixed)

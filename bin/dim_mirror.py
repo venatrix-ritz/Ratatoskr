@@ -247,13 +247,15 @@ class DimMirror:
         self._top_prev: int | None = None
         self._retry_after = 0.0
         self._restore_fail_logged = 0.0
+        self._recover_pending = False
+        self._next_recover = 0.0
 
     @property
     def dimmed(self) -> bool:
         return self._saved is not None
 
     def start(self) -> None:
-        self.recover()
+        self._recover_pending = not self.recover()
         self._thread = threading.Thread(target=self._run, name="dim-mirror", daemon=True)
         self._thread.start()
 
@@ -280,20 +282,38 @@ class DimMirror:
         except OSError as err:
             self._logger.log(DebugCode.ERR_BACKLIGHT_SYSFS, f"could not remove the dim recovery record: {err}")
 
-    def recover(self) -> None:
-        """A dim left over from a crash, kill or reboot: put the recorded level back."""
+    def recover(self) -> bool:
+        """A dim left over from a crash, kill or reboot: put the recorded level back.
+
+        Returns True when there is nothing left to do (no record, or it is restored) and False when the write
+        failed, so the caller retries. Does nothing while this instance is itself dimmed: the record is then its own.
+        """
+        if self._saved is not None:
+            return True
         try:
             with open(self._state_file, encoding="utf-8") as f:
                 pct = int(json.load(f)["pct"])
+        except FileNotFoundError:
+            return True
         except (OSError, ValueError, KeyError, TypeError):
-            return
-        if 1 <= pct <= 100:
-            self._stats.set_bottom_brightness(pct, persist=True, minimum=1)
-            if not self._stats.last_write_ok:
-                self._logger.log(DebugCode.ERR_BACKLIGHT_SYSFS, f"could not recover the bottom level {pct}% after an earlier dim")
-                return
-            self._logger.log(DebugCode.DIM_MIRROR, f"recovered the bottom level {pct}% left by an earlier dim")
+            self._clear_record()  # unreadable or corrupt: it cannot be used
+            return True
+        if not 1 <= pct <= 100:
+            self._clear_record()
+            return True
+        if read_saved_bottom_level(self._saved_path) == pct:
+            self._clear_record()  # the saved level is already the recorded one: nothing was left dimmed
+            return True
+        self._stats.set_bottom_brightness(pct, persist=True, minimum=1)
+        if not self._stats.last_write_ok:
+            now = time.monotonic()
+            if now - self._restore_fail_logged > 30:
+                self._restore_fail_logged = now
+                self._logger.log(DebugCode.ERR_BACKLIGHT_SYSFS, f"could not recover the bottom level {pct}% after an earlier dim ({getattr(self._stats, 'last_error', '')}); will retry")
+            return False
+        self._logger.log(DebugCode.DIM_MIRROR, f"recovered the bottom level {pct}% left by an earlier dim")
         self._clear_record()
+        return True
 
     # -- dim and restore -------------------------------------------------------------------------------
     def restore(self, why: str) -> bool:
@@ -306,7 +326,7 @@ class DimMirror:
             now = time.monotonic()
             if now - self._restore_fail_logged > 30:
                 self._restore_fail_logged = now
-                self._logger.log(DebugCode.ERR_BACKLIGHT_SYSFS, f"could not restore the bottom level {pct}% ({why}); will retry")
+                self._logger.log(DebugCode.ERR_BACKLIGHT_SYSFS, f"could not restore the bottom level {pct}% ({why}; {getattr(self._stats, 'last_error', '')}); will retry")
             return False
         self._saved = None
         self._clear_record()
@@ -364,6 +384,9 @@ class DimMirror:
     def _run(self) -> None:
         delay, last_read, was_ac = 0, 0.0, None
         while not self._stop.wait(0.25 if self.dimmed else 1.0):
+            if self._recover_pending and time.monotonic() >= self._next_recover:
+                self._recover_pending = not self.recover()
+                self._next_recover = time.monotonic() + 5.0
             cfg = self._get_config()
             idle = self._tracker.idle_seconds()
             ac = on_ac_power()
