@@ -58,6 +58,7 @@ from touch_frames import TouchFrameParser
 from dim_mirror import DimMirror, IdleTracker
 from system_stats import HardwareStats
 import pen_mode as pm
+import atomic_json
 import ipc_util
 import session_cursor
 
@@ -171,8 +172,7 @@ class ThorApp:
                 **self.gesture.get_settings(),
                 **self.mirror_cfg,
             }
-            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-                json.dump(cfg, f, indent=2)
+            atomic_json.write_json_atomic(CONFIG_PATH, cfg)
         except Exception as err:
             self.logger.log(DebugCode.ERR_SOCKET_PROTOCOL, f"save_config: {err}")
 
