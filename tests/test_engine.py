@@ -314,6 +314,71 @@ def test_three_finger_swipe_off_does_nothing():
     assert not [e for e in b.log if e[0] in ("tapkey", "key")]
 
 
+# --- scrolling wakes a hidden pointer ---------------------------------------------------------------------
+
+def bridge_with_pipe():
+    import threading
+    r, w = os.pipe()
+    b = E.UInputBridge.__new__(E.UInputBridge)
+    b.lock = threading.Lock()
+    b.logger = E.DebugLogger("test")
+    b.mouse_fd = w
+    b.scroll_accum_x = b.scroll_accum_y = 0.0
+    b.count_scrolls = b.count_mouse_moves = b.count_pointer_wakes = 0
+    b.moved_at = 0.0
+    return b, r
+
+
+def drain(r):
+    import select
+    data = b""
+    while select.select([r], [], [], 0)[0] if os.name != "nt" else False:
+        data += os.read(r, 4096)
+    return data
+
+
+def read_events(r, n):
+    out = []
+    data = os.read(r, E.EVENT_STRUCT.size * n)
+    for off in range(0, len(data), E.EVENT_STRUCT.size):
+        _, _, etype, code, value = E.EVENT_STRUCT.unpack_from(data, off)
+        out.append((etype, code, value))
+    return out
+
+
+def test_the_first_scroll_after_a_still_spell_nudges_the_pointer_out_and_back():
+    b, r = bridge_with_pipe()
+    b.emit_scroll(0, -120)
+    ev = read_events(r, 7)
+    xs = [v for t, c, v in ev if t == E.EV_REL and c == E.REL_X]
+    assert xs == [1, -1], ev
+    assert ev.index((E.EV_REL, E.REL_X, 1)) < ev.index((E.EV_REL, E.REL_WHEEL_HI_RES, -120))
+    assert b.count_pointer_wakes == 1
+
+
+def test_scrolling_right_after_pointer_motion_does_not_nudge():
+    b, r = bridge_with_pipe()
+    b.emit_mouse_rel(3, 0)
+    read_events(r, 3)
+    b.emit_scroll(0, -60)
+    ev = read_events(r, 2)
+    assert not [e for e in ev if e[0] == E.EV_REL and e[1] == E.REL_X], ev
+    assert b.count_pointer_wakes == 0
+
+
+def test_a_long_scroll_keeps_waking_the_pointer_every_couple_of_seconds():
+    b, r = bridge_with_pipe()
+    b.emit_scroll(0, -60)
+    read_events(r, 6)
+    b.emit_scroll(0, -60)                          # straight after: no second nudge
+    read_events(r, 2)
+    assert b.count_pointer_wakes == 1
+    b.moved_at -= E.POINTER_WAKE_S + 0.5           # the pointer has been still since
+    b.emit_scroll(0, -60)
+    read_events(r, 6)
+    assert b.count_pointer_wakes == 2
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

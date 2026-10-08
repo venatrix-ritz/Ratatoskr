@@ -75,6 +75,12 @@ SCROLL_DIVISOR = 10.0
 PINCH_THRESHOLD_PX = 35.0
 SWIPE_THRESHOLD_PX = 85.0
 HI_RES_NOTCH = 120
+# Game Mode's gamescope hides the pointer once it has not moved for --hide-cursor-delay (3000 ms on the Thor,
+# refs/upstream/gamescope steamcompmgr.cpp checkSuspension). Pointer motion and buttons un-hide it, wheel events
+# neither un-hide it nor restart the timer (wlserver.cpp wlserver_mousemotion / wlserver_mousewheel), and a hidden
+# pointer's wheel does not reach Steam. So a scroll after the pointer has been still for this long is preceded by
+# a net-zero one-pixel nudge, the same fix barry-launcher's inputd uses (WAKE_POINTER_S = 2.0).
+POINTER_WAKE_S = 2.0
 # The Thor's touch controller sometimes loses a finger-lift: the kernel keeps reporting that contact as down
 # (observed: a contact still held 57 s later, with every finger off the glass). A contact that has reported
 # nothing for this long is treated as lifted. Just above the longest long-press delay (1.2 s) so a deliberate
@@ -107,6 +113,8 @@ class UInputBridge:
         self.count_clicks_right = 0
         self.count_scrolls = 0
         self.count_keystrokes = 0
+        self.count_pointer_wakes = 0
+        self.moved_at = 0.0  # monotonic time of the last pointer motion we sent
 
         # Scroll accumulators for high-res wheel to notch conversion
         self.scroll_accum_y = 0.0
@@ -174,6 +182,7 @@ class UInputBridge:
                 try:
                     os.write(self.mouse_fd, b"".join(evs))
                     self.count_mouse_moves += 1
+                    self.moved_at = time.monotonic()
                 except OSError as err:
                     self.logger.log(DebugCode.ERR_UINPUT_WRITE, f"emit_mouse_rel: {err}")
 
@@ -201,6 +210,11 @@ class UInputBridge:
         with self.lock:
             if self.mouse_fd >= 0:
                 try:
+                    if time.monotonic() - self.moved_at > POINTER_WAKE_S:
+                        for step in (1, -1):  # out and back: the pointer ends where it started
+                            os.write(self.mouse_fd, EVENT_STRUCT.pack(sec, usec, EV_REL, REL_X, step) + EVENT_STRUCT.pack(sec, usec, EV_SYN, SYN_REPORT, 0))
+                        self.moved_at = time.monotonic()
+                        self.count_pointer_wakes += 1
                     os.write(self.mouse_fd, b"".join(evs))
                     self.count_scrolls += 1
                 except OSError as err:
@@ -283,6 +297,7 @@ class UInputBridge:
                 "clicks_left": self.count_clicks_left,
                 "clicks_right": self.count_clicks_right,
                 "scrolls": self.count_scrolls,
+                "pointer_wakes": self.count_pointer_wakes,
                 "keystrokes": self.count_keystrokes,
                 "held_buttons": list(self.held_buttons),
                 "held_keys": list(self.held_keys),
