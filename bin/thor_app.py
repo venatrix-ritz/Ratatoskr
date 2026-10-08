@@ -55,6 +55,7 @@ from keyboard_layout import Key, KeyboardLayout
 from touch_frames import TouchFrameParser
 from dim_mirror import DimMirror, IdleTracker
 from system_stats import HardwareStats
+import session_cursor
 
 SOCKET_PATH = f"/run/user/{os.getuid()}/thor-input.sock"
 CONFIG_PATH = os.path.expanduser("~/.config/thor-input/config.json")
@@ -731,6 +732,7 @@ class ThorApp:
                             res.update(self.gesture.get_settings())
                             res.update(self.mirror_cfg)
                             res["bottom_dimmed"] = self.dim_mirror.dimmed
+                            res.update(session_cursor.status())
                         elif action == "get_debug":
                             res["telemetry"] = self.bridge.get_telemetry()
                             res["state"] = self.gesture.last_state_label
@@ -772,6 +774,16 @@ class ThorApp:
                             res["bot_bright_pct"] = self.stats.request_bottom_brightness(msg.get("brightness", 100))
                             self.logger.log(DebugCode.BACKLIGHT_UPDATED, f"bottom={res['bot_bright_pct']}%")
                             GLib.idle_add(self.drawing_area.queue_draw)
+                        elif action == "get_cursor_override":
+                            res.update(session_cursor.status(ttl=0))
+                        elif action == "set_cursor_override":
+                            enabled = bool(msg.get("enabled"))
+                            res["ok"] = session_cursor.set_stay_visible(enabled)
+                            res.update(session_cursor.status(ttl=0))
+                            self.logger.log(
+                                DebugCode.SETTINGS_UPDATED,
+                                f"pointer auto-hide override {'on' if enabled else 'off'}: {'written' if res['ok'] else 'FAILED'}; applies when Game Mode next starts",
+                            )
                         elif action == "wake":
                             # A harmless key tap on the virtual keyboard: Steam and the compositor see it as input,
                             # so the sleep and dim timers restart and a dimmed top screen wakes.
