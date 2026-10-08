@@ -1,4 +1,6 @@
-# Touch Master
+# Ratatoskr
+
+> **Ratatoskr** is the squirrel that runs messages up and down Yggdrasil: it carries your touches from the bottom screen to the game on the top one. It was called *Touch Master* until 2026-10-08; the service, config folder, socket and install paths still use the old `touch-master` / `thor-input` names so existing installs keep working.
 
 A dedicated **Decky Loader plugin** and virtual input driver for the **AYN Thor Max** (Snapdragon 8 Gen 2, dual-screen handheld running Armada OS).
 
@@ -15,7 +17,7 @@ Turns the lower 3.92" AMOLED screen into a zero-latency, highly customizable **T
   - **Keyboard:** 5-row thumb-friendly QWERTY layout emitting real Linux hardware scan codes (`EV_KEY`) via `/dev/uinput` with dual-symbol keys and active modifier glow.
   - **Split Mode:** Top half is Trackpad, bottom half is Keyboard. Drive cursor targeting and hotkeys simultaneously (ideal for *FTL*, *Caves of Qud*, roguelikes, and terminal use).
   - **Quick Controls:** On-glass interactive sliders for system volume (PipeWire/WirePlumber), top screen backlight (`ae96000.dsi.0`), and bottom AMOLED backlight (`ae94000.dsi.0`).
-- **Bottom screen follows Steam's idle dim (opt-in):** Steam dims only the top panel (Armada steers Steam's backlight writes to it). Switch on *Dim bottom screen with the top* in the Decky menu and Touch Master reads Steam's own delay (`IdleBacklightDimBatterySeconds` / `IdleBacklightDimACSeconds` in `~/.local/share/Steam/config/config.vdf`, 0 = never), watches input on every readable device, and dims the bottom panel to `mirror_dim_floor_percent` (default 3 %) after that long without input, restoring it on the next input. It never writes Armada's saved bottom-screen level. Sleep needs nothing: Armada's fake-suspend already blanks every backlight. Needs the optional `systemd/touch-master-backlight.sudoers` (see the file). Log lines (`DBG-610` in `/tmp/thor-input-debug.log`) also record when the top backlight really drops, so the timer can be checked against Steam.
+- **Bottom screen follows Steam's idle dim (opt-in):** Steam dims only the top panel (Armada steers Steam's backlight writes to it). Switch on *Dim bottom screen with the top* in the Decky menu and Ratatoskr reads Steam's own delay (`IdleBacklightDimBatterySeconds` / `IdleBacklightDimACSeconds` in `~/.local/share/Steam/config/config.vdf`, 0 = never), watches input on every readable device, and dims the bottom panel to `mirror_dim_floor_percent` (default 3 %) after that long without input, restoring it on the next input. It never writes Armada's saved bottom-screen level. Sleep needs nothing: Armada's fake-suspend already blanks every backlight. Needs the optional `systemd/touch-master-backlight.sudoers` (see the file). Log lines (`DBG-610` in `/tmp/thor-input-debug.log`) also record when the top backlight really drops, so the timer can be checked against Steam.
 - **Live System Monitor Ribbon:** Always-visible status ribbon reporting Battery % & Watts, CPU Load & Temperature, GPU Frequency & Temperature, RAM usage, Volume, and dual Backlights.
 - **Edge Scroll Mode:**
   - Toggle between 2-finger scroll and **Edge Scroll**.
@@ -55,7 +57,7 @@ Turns the lower 3.92" AMOLED screen into a zero-latency, highly customizable **T
 └───────────────────────────▲────────────────────────────┘
                             │ UNIX Socket IPC
 ┌───────────────────────────┴────────────────────────────┐
-│          Touch Master Decky Backend (main.py)          │
+│          Ratatoskr Decky Backend (main.py)          │
 │  • Manages daemon lifecycle                            │
 │  • Reports diagnostic codes, stats & telemetry         │
 └───────────────────────────▲────────────────────────────┘

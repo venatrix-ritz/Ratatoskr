@@ -89,7 +89,7 @@ def _device_name(node: str) -> str:
 class IdleTracker:
     """Newest user-input time across every readable input node except the grabbed bottom touchscreen.
 
-    Touch Master grabs the bottom touchscreen exclusively, so nothing else can read it; the app
+    Ratatoskr grabs the bottom touchscreen exclusively, so nothing else can read it; the app
     calls poke() for those touches instead.
     """
 

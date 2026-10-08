@@ -1,5 +1,5 @@
 [Unit]
-Description=Touch Master - AYN Thor Bottom Screen Input Driver
+Description=Ratatoskr - AYN Thor Bottom Screen Input Driver
 PartOf=armada-bottom-gamescope.service
 After=armada-bottom-gamescope.service
 Conflicts=armada-bottom-screen.service

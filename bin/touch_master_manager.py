@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Touch Master Standalone Manager & Control App for Plasma Mobile & Desktop.
+"""Ratatoskr Standalone Manager & Control App for Plasma Mobile & Desktop.
 
 Provides a standalone GUI control panel and CLI interface to monitor,
-start, stop, and configure the Touch Master bottom-screen input driver
+start, stop, and configure the Ratatoskr bottom-screen input driver
 independent of Decky Loader.
 """
 from __future__ import annotations
@@ -141,7 +141,7 @@ def launch_gui() -> None:
 
     class TouchMasterWindow(Gtk.Window):
         def __init__(self):
-            super().__init__(title="Touch Master")
+            super().__init__(title="Ratatoskr")
             self.set_default_size(520, 680)
             self.set_position(Gtk.WindowPosition.CENTER)
             self.set_border_width(16)
@@ -163,7 +163,7 @@ def launch_gui() -> None:
 
             title_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
             title_lbl = Gtk.Label()
-            title_lbl.set_markup("<span size='x-large' weight='bold'>Touch Master</span>")
+            title_lbl.set_markup("<span size='x-large' weight='bold'>Ratatoskr</span>")
             title_lbl.set_xalign(0)
             title_box.pack_start(title_lbl, False, False, 0)
 
@@ -402,10 +402,10 @@ def launch_gui() -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Touch Master Standalone Driver Manager")
-    parser.add_argument("--start", action="store_true", help="Start and enable Touch Master service")
-    parser.add_argument("--stop", action="store_true", help="Stop and disable Touch Master service")
-    parser.add_argument("--toggle", action="store_true", help="Toggle Touch Master service on/off")
+    parser = argparse.ArgumentParser(description="Ratatoskr Standalone Driver Manager")
+    parser.add_argument("--start", action="store_true", help="Start and enable Ratatoskr service")
+    parser.add_argument("--stop", action="store_true", help="Stop and disable Ratatoskr service")
+    parser.add_argument("--toggle", action="store_true", help="Toggle Ratatoskr service on/off")
     parser.add_argument("--status", action="store_true", help="Query service and driver status")
     parser.add_argument("--mode", choices=["trackpad", "keyboard", "settings"], help="Switch input mode")
     args = parser.parse_args()

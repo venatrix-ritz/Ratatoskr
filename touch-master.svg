@@ -32,7 +32,7 @@
   <!-- Device Hinge Divider -->
   <rect x="96" y="112" width="64" height="6" rx="3" fill="#64748b" opacity="0.7"/>
 
-  <!-- Device Outline: Bottom Screen (Touch Master AMOLED Digitizer) -->
+  <!-- Device Outline: Bottom Screen (Ratatoskr AMOLED Digitizer) -->
   <rect x="52" y="126" width="152" height="92" rx="12" fill="#040b14" stroke="url(#botGrad)" stroke-width="3.5" filter="url(#glow)"/>
 
   <!-- Touchpad Glass Grid / Horizon Lines -->

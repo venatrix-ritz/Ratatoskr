@@ -1,9 +1,9 @@
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=Stop Touch Master
+Name=Stop Ratatoskr
 GenericName=Stop Bottom Screen Driver
-Comment=Immediately stop and disable the Touch Master bottom screen input driver
+Comment=Immediately stop and disable the Ratatoskr bottom screen input driver
 Exec=/var/home/armada/.local/share/thor-input/bin/touch_master_manager.py --stop
 Icon=process-stop
 Terminal=false

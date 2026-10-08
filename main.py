@@ -1,4 +1,4 @@
-"""Touch Master Decky Plugin Backend with diagnostic logging, telemetry & quick controls."""
+"""Ratatoskr Decky Plugin Backend with diagnostic logging, telemetry & quick controls."""
 from __future__ import annotations
 
 import asyncio
@@ -88,7 +88,7 @@ class Plugin:
 
     async def _main(self) -> None:
         """Called automatically by Decky Loader on startup."""
-        self.logger.log(DebugCode.DAEMON_STARTING, "Decky initialized Touch Master plugin")
+        self.logger.log(DebugCode.DAEMON_STARTING, "Decky initialized Ratatoskr plugin")
         cfg = _read_config()
         if cfg.get("enabled", True):
             if not _is_running():
