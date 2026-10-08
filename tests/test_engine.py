@@ -120,6 +120,149 @@ def test_tap_to_click_off_means_no_click():
     assert not clicks(b.log)
 
 
+# --- ghost contacts (the touch controller loses a lift) ---------------------------------------------------
+
+def test_a_ghost_contact_does_not_turn_one_finger_into_a_scroll():
+    g, b = fresh(sensitivity=1.5, glide=False)
+    g.touch_down(73, 877, 592, 100.0)              # a finger whose lift the controller never reports
+    for i, t in enumerate((110.0, 125.0)):         # later single-finger touches, ghost still "down"
+        finger_path(g, 10 + i, 300, 300, 20, 4, 0, t, 0.015)
+        g.touch_up(10 + i, t + 0.4)
+    assert moves(b.log), "one finger must move the cursor"
+    assert not [e for e in b.log if e[0] == "scroll"], "and must not scroll"
+    assert 73 not in g.active_contacts
+
+
+def test_a_recent_second_finger_still_scrolls():
+    g, b = fresh(scroll_speed=3)
+    g.touch_down(1, 300, 300, 100.0)
+    g.touch_move(1, 300, 305, 101.9)               # first finger reported 0.1 s before the second lands
+    g.touch_down(2, 400, 300, 102.0)
+    g.touch_move(1, 300, 320, 102.02)
+    g.touch_move(2, 400, 320, 102.02)
+    assert [e for e in b.log if e[0] == "scroll"], b.log
+
+
+def test_a_resting_anchor_finger_survives_a_short_pause():
+    g, b = fresh()
+    g.touch_down(1, 300, 300, 100.0)
+    g.touch_down(2, 400, 300, 101.0)               # 1.0 s of silence is still within the grace period
+    assert set(g.active_contacts) == {1, 2}
+
+
+def test_a_press_and_hold_is_not_cut_short_by_the_expiry():
+    g, b = fresh(long_press_right_click=True, long_press_delay_ms=1200)
+    g.touch_down(1, 300, 300, 100.0)
+    g.expire_stale(101.2)                          # the longest long-press delay
+    assert 1 in g.active_contacts
+
+
+def test_ghosts_expire_while_another_finger_keeps_moving():
+    g, b = fresh(sensitivity=1.5, glide=False)
+    g.touch_down(111, 652, 412, 100.0)             # four fingers were down; two lifts never arrive
+    g.touch_down(112, 440, 759, 100.0)
+    g.touch_down(5, 300, 300, 100.5)
+    t = 100.5
+    for i in range(1, 200):                        # one real finger keeps sliding for 3 s
+        t += 0.015
+        g.expire_stale(t)
+        g.touch_move(5, 300 + 2 * i, 300, t)
+    assert set(g.active_contacts) == {5}, g.active_contacts
+    assert len(moves(b.log)) > 100, "once the ghosts expire the finger moves the cursor"
+    late_scrolls = [e for e in b.log[-60:] if e[0] == "scroll"]
+    assert not late_scrolls
+
+
+def test_expiring_on_idle_ticks_clears_a_lone_ghost():
+    g, b = fresh()
+    g.touch_down(73, 877, 592, 100.0)
+    g.expire_stale(100.5)
+    assert 73 in g.active_contacts
+    g.expire_stale(101.6)
+    assert not g.active_contacts
+
+
+def test_dropping_the_only_stale_contact_resets_the_tap_state():
+    g, b = fresh(glide=False)
+    g.touch_down(73, 877, 592, 100.0)
+    g.touch_down(5, 300, 300, 120.0)
+    g.touch_up(5, 120.1)                           # a clean tap with the ghost gone
+    assert clicks(b.log) == [("click", E.BTN_LEFT)], b.log
+
+
+# --- a finger that lands in a dropped ghost's slot ---------------------------------------------------------
+
+def test_a_finger_landing_in_a_dropped_ghosts_slot_moves_the_cursor():
+    g, b = fresh(sensitivity=1.5, glide=False)
+    g.touch_down(135, 276, 596, 100.0)             # lift lost; the kernel keeps tracking id 135 in its slot
+    g.expire_stale(101.6)
+    assert not g.active_contacts
+    t = 110.0
+    for i in range(1, 30):                         # a new finger takes the slot: same id, now moving
+        t += 0.015
+        g.touch_move(135, 300 + 4 * i, 300, t)
+    assert moves(b.log), "the finger in the old slot must drive the cursor"
+    assert 135 in g.active_contacts
+
+
+def test_a_move_for_a_contact_never_seen_is_still_ignored():
+    g, b = fresh()
+    g.touch_move(99, 300, 300, 100.0)
+    assert not b.log and not g.active_contacts
+
+
+def test_a_lift_forgets_the_dropped_ghost():
+    g, b = fresh()
+    g.touch_down(135, 276, 596, 100.0)
+    g.expire_stale(101.6)
+    g.touch_up(135, 102.0)
+    g.touch_move(135, 300, 300, 102.1)             # the slot was released: this is not a live contact
+    assert not g.active_contacts and not b.log
+
+
+# --- too many fingers ---------------------------------------------------------------------------------------
+
+def four_down(g, t):
+    for tid, x in ((1, 200), (2, 300), (3, 400), (4, 500)):
+        g.touch_down(tid, x, 500, t)
+
+
+def test_four_fingers_produce_no_output_and_no_click():
+    g, b = fresh(three_finger_swipe_enabled=True, three_finger_middle_click=True)
+    four_down(g, 100.0)
+    for tid, x in ((1, 200), (2, 300), (3, 400), (4, 500)):
+        g.touch_move(tid, x, 400, 100.02)          # a 100 px swipe by all four
+    for tid in (1, 2, 3, 4):
+        g.touch_up(tid, 100.1)
+    assert not b.log, b.log
+    assert not g.active_contacts and not g.misuse_lock
+
+
+def test_the_lock_holds_until_the_last_finger_has_lifted():
+    g, b = fresh(sensitivity=1.5, glide=False, three_finger_swipe_enabled=True)
+    four_down(g, 100.0)
+    g.touch_up(4, 100.05)                          # three left: they must not scroll, swipe or click
+    for i in range(1, 6):
+        for tid, x in ((1, 200), (2, 300), (3, 400)):
+            g.touch_move(tid, x, 500 - 30 * i, 100.05 + 0.02 * i)
+    for tid in (1, 2, 3):
+        g.touch_up(tid, 100.4)
+    assert not b.log, b.log
+    finger_path(g, 7, 300, 300, 20, 4, 0, 101.0, 0.015)   # afterwards one finger works as normal
+    assert moves(b.log)
+
+
+def test_ghosts_left_by_a_five_finger_press_expire_and_release_the_lock():
+    g, b = fresh(sensitivity=1.5, glide=False)
+    for tid, x in ((1, 100), (2, 200), (3, 300), (4, 400), (5, 500)):
+        g.touch_down(tid, x, 500, 100.0)           # none of the lifts ever arrives
+    assert g.misuse_lock
+    g.expire_stale(101.6)
+    assert not g.active_contacts and not g.misuse_lock
+    finger_path(g, 8, 300, 300, 20, 4, 0, 102.0, 0.015)
+    assert moves(b.log) and not [e for e in b.log if e[0] == "scroll"]
+
+
 # --- three-finger swipes ----------------------------------------------------------------------------------
 
 def three_down(g, t, y=500):

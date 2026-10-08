@@ -28,6 +28,8 @@ Switch with the buttons along the top of the bottom screen, from the Decky panel
 
 Pinch zoom, three-finger swipes and drag lock are off by default because they caused accidental triggers (Ctrl presses, stray gestures, a stuck left button).
 
+Four or more fingers at once do nothing: the touch is ignored until every finger has left the glass. The digitizer has five slots and, observed on the Thor on 2026-10-08, it sometimes never reports the lift of a finger when several were down; the kernel then keeps that contact "held". Ignoring multi-finger presses stops them from turning into scrolls or clicks, and a contact that goes quiet for 1.5 s is treated as lifted, so the pointer is back within about 1.5 s of letting go.
+
 ## Settings
 In the Decky panel (Steam menu, Decky, Ratatoskr): sensitivity, glide and friction, scroll speed, tap to click, long-press right click and its delay, two- and three-finger taps, pinch zoom, navigation swipes, drag lock, the on-glass HUD, and the **Screens** toggle that dims the bottom screen with Steam's idle dim ([details](dim-mirror.md)). All keys and ranges are in [configuration.md](configuration.md).
 

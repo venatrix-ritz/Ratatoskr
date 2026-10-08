@@ -2,6 +2,7 @@
 """Thor Input App: Bottom-screen AMOLED interface with trackpad, keyboard, system monitor & quick controls."""
 from __future__ import annotations
 
+import errno
 import fcntl
 import glob
 import json
@@ -51,6 +52,7 @@ from engine import (
     raw_to_screen,
 )
 from keyboard_layout import Key, KeyboardLayout
+from touch_frames import TouchFrameParser
 from dim_mirror import DimMirror, IdleTracker
 from system_stats import HardwareStats
 
@@ -69,6 +71,10 @@ class ThorApp:
         self.mode = "trackpad"  # 'trackpad', 'split', 'keyboard', 'settings'
         self.show_debug_hud = False
         self.touch_dev_node = ""
+        self.exit_code = 0
+        self._parser = None
+        self._last_contacts = (0, 0)
+        self._last_frame_ts = 0.0
 
         # Hardware stats & control sampler
         self.stats = HardwareStats(cache_ttl=0.4)
@@ -325,7 +331,8 @@ class ThorApp:
     def _start_touch_reader(self) -> None:
         node = self._find_bottom_touchscreen()
         if not node:
-            self.logger.log(DebugCode.ERR_TOUCH_MISSING, "No bottom touchscreen digitizer located")
+            self.logger.log(DebugCode.ERR_TOUCH_MISSING, "No bottom touchscreen digitizer located; looking again in 5 s")
+            GLib.timeout_add_seconds(5, self._retry_touch_reader)
             return
 
         self.touch_dev_node = node
@@ -334,76 +341,95 @@ class ThorApp:
             EVIOCGRAB = (1 << 30) | (struct.calcsize("i") << 16) | (ord("E") << 8) | 0x90
             fcntl.ioctl(self.touch_fd, EVIOCGRAB, 1)
             self.logger.log(DebugCode.TOUCH_OK, f"Exclusively grabbed {node}")
-        except PermissionError:
-            self.logger.log(DebugCode.ERR_TOUCH_OPEN, f"Permission denied accessing {node}")
-            return
-        except OSError as err:
-            self.logger.log(DebugCode.ERR_TOUCH_GRAB, f"Failed grabbing {node}: {err}")
+        except (PermissionError, OSError) as err:
+            if self.touch_fd >= 0:
+                try:
+                    os.close(self.touch_fd)
+                except OSError:
+                    pass
+                self.touch_fd = -1
+            if isinstance(err, PermissionError):
+                self.logger.log(DebugCode.ERR_TOUCH_OPEN, f"Permission denied accessing {node}; trying again in 5 s")
+            else:
+                self.logger.log(DebugCode.ERR_TOUCH_GRAB, f"Failed grabbing {node}: {err}; trying again in 5 s")
+            GLib.timeout_add_seconds(5, self._retry_touch_reader)
             return
 
         def _reader_loop():
-            slot = 0
-            raw: dict[int, list[int]] = {}
-            tracking: dict[int, int] = {}
-            active_contacts: dict[int, tuple[float, float]] = {}
-
+            parser = TouchFrameParser(raw_to_screen)
+            self._parser = parser
+            last_error_log = 0.0
             while not self.touch_stop.is_set():
                 r, _, _ = select.select([self.touch_fd], [], [], 0.1)
                 if not r:
+                    self.gesture.expire_stale(time.time())  # kernel event timestamps are wall-clock
                     continue
                 try:
                     data = os.read(self.touch_fd, EVENT_STRUCT.size * 256)
-                except (BlockingIOError, OSError):
+                except BlockingIOError:
+                    continue
+                except OSError as err:
+                    if err.errno in (errno.ENODEV, errno.EIO, errno.EBADF, errno.ENOENT):
+                        # The digitizer went away (resume, re-enumeration). Exit so systemd restarts the service,
+                        # which finds and grabs it again; spinning on a dead descriptor would burn a core.
+                        self.logger.log(DebugCode.ERR_TOUCH_READ, f"touch device lost ({err}); restarting")
+                        GLib.idle_add(self._device_lost)
+                        return
+                    self.logger.log(DebugCode.ERR_TOUCH_READ, f"read failed: {err}")
+                    time.sleep(0.05)
+                    continue
+                if not data:
+                    time.sleep(0.05)
                     continue
                 self.idle_tracker.poke()  # the grabbed bottom touchscreen is invisible to the tracker
-
-                for off in range(0, len(data) - EVENT_STRUCT.size + 1, EVENT_STRUCT.size):
-                    sec, usec, etype, code, value = EVENT_STRUCT.unpack_from(data, off)
-                    if etype == EV_SYN and code == 3:
-                        # SYN_DROPPED: hardware buffer overflowed, flush and resync state
-                        raw.clear()
-                        tracking.clear()
-                        active_contacts.clear()
-                        self.gesture.reset_all()
-                        continue
-                    elif etype == EV_ABS:
-                        if code == ABS_MT_SLOT:
-                            slot = value
-                        elif code == ABS_MT_TRACKING_ID:
-                            if value >= 0:
-                                tracking[slot] = value
-                            else:
-                                tracking.pop(slot, None)
-                        elif code in (ABS_MT_POSITION_X, ABS_MT_POSITION_Y):
-                            raw.setdefault(slot, [0, 0])[code - ABS_MT_POSITION_X] = value
-                    elif etype == EV_SYN and code == 0:
-                        now = time.monotonic()
-                        live: dict[int, tuple[float, float]] = {}
-                        for s, tid in tracking.items():
-                            raw_coords = raw.get(s, [0, 0])
-                            live[tid] = raw_to_screen(raw_coords[0], raw_coords[1])
-
-                        for tid in list(active_contacts.keys()):
-                            if tid not in live:
-                                active_contacts.pop(tid)
-                                self._handle_touch_up(tid, now)
-
-                        for tid, (sx, sy) in live.items():
-                            if tid not in active_contacts:
-                                active_contacts[tid] = (sx, sy)
-                                self._handle_touch_down(tid, sx, sy, now)
-                            else:
-                                prev_sx, prev_sy = active_contacts[tid]
-                                if (sx, sy) != (prev_sx, prev_sy):
-                                    active_contacts[tid] = (sx, sy)
-                                    self._handle_touch_move(tid, sx, sy, now)
-
-                        if not live and not active_contacts:
-                            self.gesture.reset_all()
-
+                try:
+                    for frame in parser.feed(data):
+                        self._dispatch_frame(frame)
+                except Exception as err:  # one bad frame must not end touch input while the grab is still held
+                    now = time.monotonic()
+                    if now - last_error_log > 5.0:
+                        last_error_log = now
+                        self.logger.log(DebugCode.ERR_TOUCH_READ, f"touch handler error: {type(err).__name__}: {err}")
 
         self.touch_thread = threading.Thread(target=_reader_loop, daemon=True)
         self.touch_thread.start()
+
+    def _retry_touch_reader(self) -> bool:
+        """One-shot GLib timeout: try again; _start_touch_reader schedules the next try if this one fails."""
+        if not self.touch_stop.is_set() and self.touch_fd < 0:
+            self._start_touch_reader()
+        return False
+
+    def _dispatch_frame(self, frame) -> None:
+        self.gesture.expire_stale(frame.ts)
+        if frame.dropped:
+            self.logger.log(
+                DebugCode.ERR_TOUCH_READ,
+                f"SYN_DROPPED: the kernel's touch buffer overflowed; contact state discarded (engine held {len(self.gesture.active_contacts)})",
+            )
+            self.gesture.reset_all()
+            return
+        for tid in frame.ups:
+            self._handle_touch_up(tid, frame.ts)
+        for tid, x, y in frame.downs:
+            self._handle_touch_down(tid, x, y, frame.ts)
+        for tid, x, y in frame.moves:
+            self._handle_touch_move(tid, x, y, frame.ts)
+        if frame.live == 0 and not frame.downs:
+            self.gesture.reset_all()
+        self._last_frame_ts = frame.ts
+        counts = (frame.live, len(self.gesture.active_contacts))
+        if (frame.downs or frame.ups) and counts != self._last_contacts:
+            self.logger.log(
+                DebugCode.STATUS_TOUCH_DOWN if frame.downs else DebugCode.STATUS_TOUCH_UP,
+                f"digitizer reports {counts[0]} contact(s), gesture engine holds {counts[1]}; downs={[(t, round(x), round(y)) for t, x, y in frame.downs]} ups={frame.ups} mode={self.mode}",
+            )
+        self._last_contacts = counts
+
+    def _device_lost(self) -> bool:
+        self.exit_code = 1
+        Gtk.main_quit()
+        return False
 
     def _find_bottom_touchscreen(self) -> str | None:
         for node in sorted(glob.glob("/dev/input/event*")):
@@ -414,7 +440,7 @@ class ThorApp:
                         return node
             except OSError:
                 pass
-        return "/dev/input/event5" if os.path.exists("/dev/input/event5") else None
+        return None
 
     # -------------------------------------------------------------------------
     # Touch Event Routing
@@ -693,6 +719,8 @@ class ThorApp:
                             res["coords"] = self.gesture.last_coords
                             res["touch_device"] = self.touch_dev_node
                             res["active_fingers"] = len(self.gesture.active_contacts)
+                            res["digitizer_contacts"] = len(self._parser.active) if self._parser else 0
+                            res["engine_contacts"] = {str(t): [round(c["last_x"]), round(c["last_y"]), round(self._last_frame_ts - c["start_t"], 1)] for t, c in self.gesture.active_contacts.items()}
                             res["last_key"] = self.last_key_label
                             res["hardware_stats"] = self.stats.get_stats()
                             res.update(self.gesture.get_settings())
@@ -1257,6 +1285,7 @@ def main():
         Gtk.main()
     finally:
         app.cleanup()
+    sys.exit(app.exit_code)
 
 
 if __name__ == "__main__":
