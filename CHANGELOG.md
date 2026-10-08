@@ -3,6 +3,7 @@
 Dates are 2026. The project was called Touch Master until 2026-10-07. No version numbers have been cut yet.
 
 ## Unreleased
+- **Fixed:** a dim left by a crash or restart is now reliably put back. Found on the Thor: the first write after a restart can fail with "Invalid argument", and recovery gave up. Recovery is retried every 5 s until it works, a `sudo` write that times out is checked by reading the value back (the timeout is 2 s, was 0.4 s), and write failures now log the reason.
 - **Fixed:** the dim mirror's idle tracker listed input devices once at start, so after a boot it saw 3 of 5 (the virtual controllers appear later) and controller input counted as idle. It now rescans every 5 s, picks up and drops devices as they come and go, and never exits when the list is empty.
 - **Fixed:** the bottom-screen idle dim was undone by Armada within seconds, because `armada-control` re-applies its saved bottom level every 2 s. The dim now also sets that saved level, records the pre-dim level for crash recovery, retries a failed restore instead of forgetting it, and treats a charger on the USB supply as AC (a charge limit makes the battery report "Not charging").
 - Opt-in **bottom-screen idle dim** that follows Steam's dim delay (`mirror_dim`, `mirror_dim_floor_percent`), with a Decky toggle, a manager switch, `DBG-610`, an optional narrow sudo rule for backlight writes, and unit tests.

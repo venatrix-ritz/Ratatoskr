@@ -178,17 +178,49 @@ def test_recover_keeps_the_record_if_the_write_fails():
     os.makedirs(os.path.dirname(w.state), exist_ok=True)
     with open(w.state, "w") as f:
         json.dump({"pct": 70}, f)
-    w.mirror.recover()
+    assert w.mirror.recover() is False
     assert w.record() == 70
 
 
-def test_recover_ignores_a_corrupt_record():
+def test_recover_is_retried_until_it_works():
+    w = World(3, ok=False)
+    os.makedirs(os.path.dirname(w.state), exist_ok=True)
+    with open(w.state, "w") as f:
+        json.dump({"pct": 70}, f)
+    assert w.mirror.recover() is False and w.mirror.recover() is False
+    w.stats.ok = True
+    assert w.mirror.recover() is True
+    assert w.record() is None and w.stats.calls[-1] == (70, True, 1)
+
+
+def test_recover_does_nothing_when_the_saved_level_already_matches():
+    w = World(70, saved=70)
+    os.makedirs(os.path.dirname(w.state), exist_ok=True)
+    with open(w.state, "w") as f:
+        json.dump({"pct": 70}, f)
+    assert w.mirror.recover() is True
+    assert w.stats.calls == [] and w.record() is None
+
+
+def test_recover_leaves_a_live_dims_record_alone():
+    w = World(80)
+    real = no_sleep()
+    try:
+        w.mirror._dim(300, 301.0, 3)
+    finally:
+        dm.time.sleep = real
+    n = len(w.stats.calls)
+    assert w.mirror.recover() is True
+    assert len(w.stats.calls) == n and w.record() == 80
+
+
+def test_recover_discards_a_corrupt_record():
     w = World(3)
     os.makedirs(os.path.dirname(w.state), exist_ok=True)
     with open(w.state, "w") as f:
         f.write("not json")
-    w.mirror.recover()
-    assert w.stats.calls == []
+    assert w.mirror.recover() is True
+    assert w.stats.calls == [] and not os.path.exists(w.state)
 
 
 def test_on_ac_power():
