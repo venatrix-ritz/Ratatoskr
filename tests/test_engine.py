@@ -514,6 +514,8 @@ def bridge_with_pipe():
     b.scroll_accum_x = b.scroll_accum_y = 0.0
     b.count_scrolls = b.count_mouse_moves = b.count_pointer_wakes = 0
     b.moved_at = 0.0
+    b.held_buttons = set()
+    b.count_clicks_left = b.count_clicks_right = 0
     return b, r
 
 
@@ -552,6 +554,27 @@ def test_scrolling_right_after_pointer_motion_does_not_nudge():
     ev = read_events(r, 2)
     assert not [e for e in ev if e[0] == E.EV_REL and e[1] == E.REL_X], ev
     assert b.count_pointer_wakes == 0
+
+
+def test_a_click_after_a_still_spell_nudges_first_and_a_release_never_does():
+    b, r = bridge_with_pipe()
+    b.mouse_button(E.BTN_LEFT, True)
+    ev = read_events(r, 6)
+    assert ev == [(E.EV_REL, E.REL_X, 1), (E.EV_SYN, 0, 0), (E.EV_REL, E.REL_X, -1), (E.EV_SYN, 0, 0),
+                  (E.EV_KEY, E.BTN_LEFT, 1), (E.EV_SYN, 0, 0)], ev
+    b.moved_at -= E.POINTER_WAKE_S + 1.0                       # still for ages, then the button comes up
+    b.mouse_button(E.BTN_LEFT, False)
+    assert read_events(r, 2) == [(E.EV_KEY, E.BTN_LEFT, 0), (E.EV_SYN, 0, 0)]
+    assert b.count_pointer_wakes == 1
+
+
+def test_clicker_style_tapping_in_one_place_keeps_the_pointer_awake():
+    b, r = bridge_with_pipe()
+    for i in range(5):                                         # a click every 0.6 s for 3 s
+        b.mouse_button(E.BTN_LEFT, True)
+        b.mouse_button(E.BTN_LEFT, False)
+        b.moved_at -= 0.6
+    assert b.count_pointer_wakes == 2, b.count_pointer_wakes   # the first click, then again once 2 s have passed
 
 
 def test_a_long_scroll_keeps_waking_the_pointer_every_couple_of_seconds():

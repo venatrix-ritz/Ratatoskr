@@ -78,8 +78,10 @@ HI_RES_NOTCH = 120
 # Game Mode's gamescope hides the pointer once it has not moved for --hide-cursor-delay (3000 ms on the Thor,
 # refs/upstream/gamescope steamcompmgr.cpp checkSuspension). Pointer motion and buttons un-hide it, wheel events
 # neither un-hide it nor restart the timer (wlserver.cpp wlserver_mousemotion / wlserver_mousewheel), and a hidden
-# pointer's wheel does not reach Steam. So a scroll after the pointer has been still for this long is preceded by
-# a net-zero one-pixel nudge, the same fix barry-launcher's inputd uses (WAKE_POINTER_S = 2.0).
+# pointer's wheel does not reach Steam. A button press un-hides it only until the next check, because it does not
+# restart the timer either (wlserver_mousebutton), so rapid tapping in one place loses the pointer after 3 s.
+# So a scroll or a button press after the pointer has been still for this long is preceded by a net-zero
+# one-pixel nudge, the same fix barry-launcher's inputd uses for scrolling (WAKE_POINTER_S = 2.0).
 POINTER_WAKE_S = 2.0
 # The Thor's touch controller sometimes loses a finger-lift: the kernel keeps reporting that contact as down
 # (observed: a contact still held 57 s later, with every finger off the glass). A contact that has reported
@@ -198,6 +200,16 @@ class UInputBridge:
                 except OSError as err:
                     self.logger.log(DebugCode.ERR_UINPUT_WRITE, f"emit_mouse_rel: {err}")
 
+    def _wake_pointer_locked(self, sec: int, usec: int) -> None:
+        """Nudge the pointer out and back if it has been still long enough for gamescope to hide it.
+        The caller holds self.lock and has checked that the mouse device is open."""
+        if time.monotonic() - self.moved_at <= POINTER_WAKE_S:
+            return
+        for step in (1, -1):  # out and back: the pointer ends where it started
+            os.write(self.mouse_fd, EVENT_STRUCT.pack(sec, usec, EV_REL, REL_X, step) + EVENT_STRUCT.pack(sec, usec, EV_SYN, SYN_REPORT, 0))
+        self.moved_at = time.monotonic()
+        self.count_pointer_wakes += 1
+
     def emit_scroll(self, dx_units: int, dy_units: int) -> None:
         if not dx_units and not dy_units:
             return
@@ -222,11 +234,7 @@ class UInputBridge:
         with self.lock:
             if self.mouse_fd >= 0:
                 try:
-                    if time.monotonic() - self.moved_at > POINTER_WAKE_S:
-                        for step in (1, -1):  # out and back: the pointer ends where it started
-                            os.write(self.mouse_fd, EVENT_STRUCT.pack(sec, usec, EV_REL, REL_X, step) + EVENT_STRUCT.pack(sec, usec, EV_SYN, SYN_REPORT, 0))
-                        self.moved_at = time.monotonic()
-                        self.count_pointer_wakes += 1
+                    self._wake_pointer_locked(sec, usec)
                     os.write(self.mouse_fd, b"".join(evs))
                     self.count_scrolls += 1
                 except OSError as err:
@@ -255,6 +263,8 @@ class UInputBridge:
                 self.held_buttons.discard(button_code)
             if self.mouse_fd >= 0:
                 try:
+                    if down:
+                        self._wake_pointer_locked(sec, usec)
                     os.write(self.mouse_fd, b"".join(evs))
                 except OSError as err:
                     self.logger.log(DebugCode.ERR_UINPUT_WRITE, f"mouse_button: {err}")
