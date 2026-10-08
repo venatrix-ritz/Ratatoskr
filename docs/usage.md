@@ -39,5 +39,8 @@ The panel also shows service state, hardware stats, input telemetry (moves, scro
 ## The standalone manager
 `touch_master_manager.py` opens a small window with a start/stop button, mode buttons, sensitivity, tap and two-finger switches, brightness sliders and the dim switch. Some of its controls do not take effect live yet; see [Known issues](troubleshooting.md#known-issues-not-yet-fixed). The Decky panel is the complete interface.
 
+## Waking the screens and restarting the sleep timer
+`touch_master_manager.py --wake` sends a harmless key tap (F24) through Ratatoskr's virtual keyboard. Steam sees it as input, so a dimmed top screen lights up and the idle timers start over. It is meant for scripts and SSH sessions that should keep the Thor awake while they work. It cannot help once the Thor has actually suspended (Armada's fake suspend freezes user processes, SSH included, until the power button is pressed).
+
 ## Stopping it
 Turn off "Enable Bottom Screen" in the Decky panel, or `touch_master_manager.py --stop`. This stops and disables the Ratatoskr service and re-enables and starts Armada's own bottom-screen session (`armada-bottom-screen.service`). Turning it back on does the reverse.
