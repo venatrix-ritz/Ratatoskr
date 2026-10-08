@@ -160,6 +160,8 @@ class Plugin:
                     "mirror_dim": cfg.get("mirror_dim", False),
                     "mirror_dim_floor_percent": cfg.get("mirror_dim_floor_percent", 3),
                     "bottom_dimmed": res.get("bottom_dimmed", False),
+                    "cursor_stay_visible": res.get("cursor_stay_visible", False),
+                    "cursor_stay_visible_active": res.get("cursor_stay_visible_active", False),
                     "debug_hud": cfg.get("debug_hud", False),
                     "telemetry": debug_info.get("telemetry", {}),
                     "touch_device": debug_info.get("touch_device", ""),
@@ -269,6 +271,15 @@ class Plugin:
             return {"ok": True, "debug_hud": cfg["debug_hud"]}
 
         return await asyncio.to_thread(_toggle)
+
+    async def set_cursor_override(self, enabled: bool) -> dict:
+        """Keep Game Mode's pointer visible (or restore the 3 s auto-hide). Takes effect when Game Mode next starts."""
+        def _set():
+            if _is_running():
+                return _send_ipc({"action": "set_cursor_override", "enabled": bool(enabled)})
+            return {"ok": False}
+
+        return await asyncio.to_thread(_set)
 
     async def run_diagnostics(self) -> dict:
         return await asyncio.to_thread(run_self_diagnostics)
