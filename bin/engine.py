@@ -88,6 +88,9 @@ POINTER_WAKE_S = 2.0
 # nothing for this long is treated as lifted. Just above the longest long-press delay (1.2 s) so a deliberate
 # press-and-hold is not cut short; real fingers on this panel jitter, a stationary ghost reports nothing.
 STALE_CONTACT_S = 1.5
+# A flick glides only if the finger was still moving when it lifted: the speed is that of the last move, and a finger
+# that stopped and then lifted must not glide at the speed it had before it stopped.
+GLIDE_MAX_IDLE_S = 0.1
 # The controller reports at most five fingers and loses lifts when several are down at once, so this many
 # simultaneous fingers is treated as misuse: no output until every finger has left the glass (or expired).
 MISUSE_FINGERS = 4
@@ -402,6 +405,7 @@ class TouchGestureProcessor:
         # Glide velocity
         self.vel_x: float = 0.0
         self.vel_y: float = 0.0
+        self.vel_time: float = 0.0  # when vel_x / vel_y were last measured (kernel clock)
         self.glide_thread: threading.Thread | None = None
         self.glide_stop = threading.Event()
 
@@ -693,8 +697,10 @@ class TouchGestureProcessor:
 
             if ix or iy:
                 self.bridge.emit_mouse_rel(ix, iy)
-                self.vel_x = (dx * speed * accel) / dt
-                self.vel_y = (dy * speed * accel) / dt
+            # measured on every step, also the sub-pixel ones: a finger that is slowing down must slow the glide too
+            self.vel_x = (dx * speed * accel) / dt
+            self.vel_y = (dy * speed * accel) / dt
+            self.vel_time = now
 
         elif count == 2:
             self._cancel_long_press()
@@ -784,6 +790,9 @@ class TouchGestureProcessor:
                 return
 
             duration = now - self.start_time
+            if now - self.vel_time > GLIDE_MAX_IDLE_S:
+                self.vel_x = 0.0
+                self.vel_y = 0.0  # the finger had stopped before it lifted: that speed is old
 
             if self.long_press_triggered:
                 self.last_state_label = "LONG PRESS DONE"
