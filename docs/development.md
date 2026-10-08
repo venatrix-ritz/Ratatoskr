@@ -32,7 +32,7 @@ bash -n scripts/deploy.sh
 
 ## Changing things
 - **A new setting:** add the key to the gesture processor (`engine.py`) or the app (`_apply_mirror_settings` is the pattern), to `get_status`, to the defaults in `main.py` and `touch_master_manager.py`, to the panel, and to [configuration.md](configuration.md).
-- **A new IPC action:** add it to the `_ipc_loop` chain in `thor_app.py` and to the table in [architecture.md](architecture.md). Remember the manager sends its own action names (see the known issues).
+- **A new IPC action:** add it to the `_ipc_loop` chain in `thor_app.py` and to the table in [architecture.md](architecture.md). The manager builds its requests with `ipc_util.settings_request` / `brightness_request` / `hud_request`, and `tests/test_ipc_util.py` checks that they only use actions the driver handles.
 - **A new diagnostic code:** add it to `DebugCode` and `CODE_DESCRIPTIONS` in `debug_codes.py` and to the README table.
 
 ## Conventions
