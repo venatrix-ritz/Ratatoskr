@@ -151,6 +151,29 @@ def test_with_the_sampler_running_get_stats_never_samples():
     s.stop_sampler()
 
 
+def test_mute_shows_at_once_and_fast_taps_stay_in_step():
+    class MuteStats(CountingStats):
+        def __init__(self, **kw):
+            super().__init__(**kw)
+            self.mutes = []
+
+        def _sample(self):
+            return {"vol_muted": False, "vol_pct": 30}
+
+        def set_mute(self, muted):
+            self.mutes.append(muted)
+            return muted
+
+    s = MuteStats()
+    s.start_sampler(interval=60)
+    assert s.toggle_mute() is True and s.get_stats()["vol_muted"] is True
+    assert s.toggle_mute() is False and s.get_stats()["vol_muted"] is False
+    assert s.toggle_mute() is True
+    assert s.wait_for_writes(1.0)
+    assert s.mutes[-1] is True and len(s.mutes) <= 3
+    s.stop_sampler()
+
+
 def test_requests_are_clamped():
     s = CountingStats()
     assert s.request_bottom_brightness(-30) == 5

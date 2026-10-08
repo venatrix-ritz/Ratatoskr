@@ -161,6 +161,7 @@ class HardwareStats:
             "top": _LatestWriter(self.set_top_brightness, "write-top-backlight"),
             "bottom": _LatestWriter(self.set_bottom_brightness, "write-bottom-backlight"),
             "volume": _LatestWriter(self.set_volume, "write-volume"),
+            "mute": _LatestWriter(self.set_mute, "write-mute"),
         }
 
         # Cache sensor paths
@@ -378,10 +379,10 @@ class HardwareStats:
         cur = self.get_stats().get("vol_pct", 50)
         return self.request_volume(cur + delta)
 
-    def toggle_mute(self) -> bool:
+    def set_mute(self, muted: bool) -> bool:
         try:
             subprocess.run(
-                ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"],
+                ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "1" if muted else "0"],
                 check=False,
                 timeout=0.5,
                 env=_wpctl_env(),
@@ -389,7 +390,15 @@ class HardwareStats:
         except Exception:
             pass
         self._last_sample_time = 0.0
-        return self.get_stats().get("vol_muted", False)
+        return muted
+
+    def toggle_mute(self) -> bool:
+        """Flip the mute state: the new state is drawn at once and a writer sets it explicitly (not 'toggle'),
+        so fast repeated taps cannot get out of step with what is shown."""
+        muted = not self.get_stats().get("vol_muted", False)
+        self._show("vol_muted", muted)
+        self._writers["mute"].submit(muted)
+        return muted
 
     def set_top_brightness(self, pct: int) -> int:
         target = max(5, min(100, int(pct)))
