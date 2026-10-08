@@ -43,6 +43,7 @@ from engine import (
     EV_ABS,
     EV_SYN,
     EVENT_STRUCT,
+    KEY_F24,
     SCREEN_HEIGHT,
     SCREEN_WIDTH,
     TouchGestureProcessor,
@@ -720,6 +721,11 @@ class ThorApp:
                             res["bot_bright_pct"] = self.stats.set_bottom_brightness(msg.get("brightness", 100))
                             self.logger.log(DebugCode.BACKLIGHT_UPDATED, f"bottom={res['bot_bright_pct']}%")
                             GLib.idle_add(self.drawing_area.queue_draw)
+                        elif action == "wake":
+                            # A harmless key tap on the virtual keyboard: Steam and the compositor see it as input,
+                            # so the sleep and dim timers restart and a dimmed top screen wakes.
+                            self.bridge.tap_key(KEY_F24)
+                            self.idle_tracker.poke()
                         elif action == "toggle_hud":
                             self.show_debug_hud = not self.show_debug_hud
                             self.save_config()

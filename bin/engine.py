@@ -47,6 +47,7 @@ KEY_TAB = 15
 KEY_LEFTCTRL = 29
 KEY_LEFTALT = 56
 KEY_LEFTMETA = 125  # Super / Windows key
+KEY_F24 = 194  # no default binding anywhere: used for the harmless 'wake' tap
 
 ABS_MT_SLOT = 0x2F
 ABS_MT_POSITION_X = 0x35
