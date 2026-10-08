@@ -120,6 +120,57 @@ def test_tap_to_click_off_means_no_click():
     assert not clicks(b.log)
 
 
+# --- three-finger swipes ----------------------------------------------------------------------------------
+
+def three_down(g, t, y=500):
+    for tid, x in ((1, 300), (2, 400), (3, 500)):
+        g.touch_down(tid, x, y, t)
+
+
+def three_move(g, t, dx, dy, y=500):
+    for tid, x in ((1, 300), (2, 400), (3, 500)):
+        g.touch_move(tid, x + dx, y + dy, t)
+
+
+def three_up(g, t):
+    for tid in (1, 2, 3):
+        g.touch_up(tid, t)
+
+
+def test_three_finger_swipe_ignores_a_small_move():
+    g, b = fresh(three_finger_swipe_enabled=True)
+    three_down(g, 100.0)
+    three_move(g, 100.02, 2, 2)
+    assert not [e for e in b.log if e[0] in ("tapkey", "key")], b.log
+
+
+def test_three_finger_swipe_up_sends_super_once():
+    g, b = fresh(three_finger_swipe_enabled=True)
+    three_down(g, 100.0)
+    three_move(g, 100.02, 0, -100)
+    three_move(g, 100.04, 0, -140)
+    assert [e for e in b.log if e[0] == "tapkey"] == [("tapkey", E.KEY_LEFTMETA)], b.log
+
+
+def test_three_finger_swipe_down_left_and_a_second_swipe_after_lifting():
+    g, b = fresh(three_finger_swipe_enabled=True)
+    three_down(g, 100.0)
+    three_move(g, 100.02, 0, 100)
+    three_up(g, 100.1)
+    assert ("tapkey", E.KEY_ESC) in b.log
+    b.log.clear()
+    three_down(g, 101.0)
+    three_move(g, 101.02, -100, 0)
+    assert ("key", E.KEY_LEFTALT, True) in b.log and ("tapkey", E.KEY_TAB) in b.log and ("key", E.KEY_LEFTALT, False) in b.log
+
+
+def test_three_finger_swipe_off_does_nothing():
+    g, b = fresh(three_finger_swipe_enabled=False)
+    three_down(g, 100.0)
+    three_move(g, 100.02, 0, -200)
+    assert not [e for e in b.log if e[0] in ("tapkey", "key")]
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
