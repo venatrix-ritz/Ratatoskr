@@ -84,16 +84,84 @@ def _wpctl_env() -> dict[str, str]:
     return env
 
 
-class HardwareStats:
-    """Thread-safe cached sampler for system metrics and quick hardware controls."""
+class _LatestWriter:
+    """Runs fn(value) on its own thread. Values submitted while a write is in progress are folded into the
+    newest one, so a fast slider drag costs one write per finished write instead of one per touch event."""
 
-    def __init__(self, cache_ttl: float = 0.5) -> None:
+    def __init__(self, fn: Any, name: str) -> None:
+        self._fn = fn
+        self._name = name
+        self._cond = threading.Condition()
+        self._value: Any = None
+        self._has_value = False
+        self._busy = False
+        self._thread: threading.Thread | None = None
+        self.writes = 0
+
+    def submit(self, value: Any) -> None:
+        with self._cond:
+            self._value = value
+            self._has_value = True
+            if self._thread is None:
+                self._thread = threading.Thread(target=self._run, name=self._name, daemon=True)
+                self._thread.start()
+            self._cond.notify_all()
+
+    def wait_idle(self, timeout: float = 2.0) -> bool:
+        deadline = time.monotonic() + timeout
+        with self._cond:
+            while self._has_value or self._busy:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._cond.wait(remaining)
+        return True
+
+    def _run(self) -> None:
+        global LAST_WRITE_ERROR
+        while True:
+            with self._cond:
+                while not self._has_value:
+                    self._cond.wait()
+                value, self._has_value = self._value, False
+                self._busy = True
+            try:
+                self._fn(value)
+            except Exception as err:  # a failed write must not end the writer
+                LAST_WRITE_ERROR = f"{self._name} raised {type(err).__name__}: {err}"
+            finally:
+                with self._cond:
+                    self._busy = False
+                    self.writes += 1
+                    self._cond.notify_all()
+
+
+class HardwareStats:
+    """Thread-safe cached sampler for system metrics and quick hardware controls.
+
+    Slider writes go through request_* : they return at once, draw the requested value immediately (an overlay that
+    lasts OPTIMISTIC_HOLD_S) and are written by a background thread. With start_sampler() running, get_stats()
+    never samples on the caller's thread."""
+
+    OPTIMISTIC_HOLD_S = 1.5
+
+    def __init__(self, cache_ttl: float = 0.5, optimistic_hold: float = OPTIMISTIC_HOLD_S) -> None:
         self.cache_ttl = cache_ttl
+        self.optimistic_hold = optimistic_hold
         self._last_sample_time = 0.0
         self.last_write_ok = True
         self.last_error = ""
         self._last_data: dict[str, Any] = {}
         self._lock = threading.Lock()
+        self._sample_lock = threading.Lock()
+        self._optimistic: dict[str, tuple[Any, float]] = {}
+        self._sampler: threading.Thread | None = None
+        self._sampler_stop = threading.Event()
+        self._writers = {
+            "top": _LatestWriter(self.set_top_brightness, "write-top-backlight"),
+            "bottom": _LatestWriter(self.set_bottom_brightness, "write-bottom-backlight"),
+            "volume": _LatestWriter(self.set_volume, "write-volume"),
+        }
 
         # Cache sensor paths
         self._cpu_policies = sorted(glob.glob("/sys/devices/system/cpu/cpufreq/policy*"))
@@ -110,14 +178,73 @@ class HardwareStats:
         self._prev_cpu_total = 0
 
     def get_stats(self) -> dict[str, Any]:
+        now = time.monotonic()
         with self._lock:
-            now = time.monotonic()
-            if now - self._last_sample_time < self.cache_ttl and self._last_data:
-                return self._last_data
+            have = bool(self._last_data)
+            fresh = now - self._last_sample_time < self.cache_ttl
+        if not have or (self._sampler is None and not fresh):
+            self._refresh()
+        with self._lock:
+            data = dict(self._last_data)
+            for key, (value, until) in list(self._optimistic.items()):
+                if until > now:
+                    data[key] = value
+                else:
+                    del self._optimistic[key]
+            return data
 
-            self._last_data = self._sample()
-            self._last_sample_time = now
-            return self._last_data
+    def _refresh(self) -> None:
+        with self._sample_lock:
+            data = self._sample()
+        with self._lock:
+            self._last_data = data
+            self._last_sample_time = time.monotonic()
+
+    def start_sampler(self, interval: float = 1.0) -> None:
+        """Sample on a background thread so get_stats() (called from the draw and IPC threads) never blocks."""
+        if self._sampler is not None:
+            return
+        self._refresh()
+        self._sampler_stop.clear()
+
+        def loop() -> None:
+            while not self._sampler_stop.wait(interval):
+                try:
+                    self._refresh()
+                except Exception:
+                    pass
+
+        self._sampler = threading.Thread(target=loop, name="stats-sampler", daemon=True)
+        self._sampler.start()
+
+    def stop_sampler(self) -> None:
+        self._sampler_stop.set()
+        self._sampler = None
+
+    def _show(self, key: str, value: Any) -> None:
+        with self._lock:
+            self._optimistic[key] = (value, time.monotonic() + self.optimistic_hold)
+
+    def request_volume(self, pct: int) -> int:
+        target = max(0, min(100, int(pct)))
+        self._show("vol_pct", target)
+        self._writers["volume"].submit(target)
+        return target
+
+    def request_top_brightness(self, pct: int) -> int:
+        target = max(5, min(100, int(pct)))
+        self._show("top_bright_pct", target)
+        self._writers["top"].submit(target)
+        return target
+
+    def request_bottom_brightness(self, pct: int) -> int:
+        target = max(5, min(100, int(pct)))
+        self._show("bot_bright_pct", target)
+        self._writers["bottom"].submit(target)
+        return target
+
+    def wait_for_writes(self, timeout: float = 2.0) -> bool:
+        return all(w.wait_idle(timeout) for w in self._writers.values())
 
     def _sample(self) -> dict[str, Any]:
         # 1. CPU
@@ -249,7 +376,7 @@ class HardwareStats:
 
     def adjust_volume(self, delta: int) -> int:
         cur = self.get_stats().get("vol_pct", 50)
-        return self.set_volume(cur + delta)
+        return self.request_volume(cur + delta)
 
     def toggle_mute(self) -> bool:
         try:
@@ -274,7 +401,7 @@ class HardwareStats:
 
     def adjust_top_brightness(self, delta: int) -> int:
         cur = self.get_stats().get("top_bright_pct", 100)
-        return self.set_top_brightness(cur + delta)
+        return self.request_top_brightness(cur + delta)
 
     def set_bottom_brightness(self, pct: int, persist: bool = True, minimum: int = 5) -> int:
         """Write the bottom backlight. persist=False leaves Armada's saved level alone (idle dimming)."""
@@ -291,4 +418,4 @@ class HardwareStats:
 
     def adjust_bottom_brightness(self, delta: int) -> int:
         cur = self.get_stats().get("bot_bright_pct", 100)
-        return self.set_bottom_brightness(cur + delta)
+        return self.request_bottom_brightness(cur + delta)
