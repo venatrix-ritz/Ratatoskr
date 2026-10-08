@@ -9,6 +9,26 @@ sys.path.insert(0, os.path.join(ROOT, "bin"))
 
 import system_stats as ss  # noqa: E402
 
+# These tests also run on the Thor itself (devcheck.sh). Nothing here may reach the real volume, mute, backlight or
+# sudo: an earlier version of test_requests_are_clamped called the real `wpctl set-volume` and set the Thor's volume
+# to 100% on every deploy (seen in Steam's own audio log, 2026-10-08). Real commands and sysfs writes are blocked, and
+# test_zz_nothing_touched_real_hardware fails if any test tried.
+HARDWARE_CALLS = []
+
+
+def _no_real_command(cmd, *a, **k):
+    HARDWARE_CALLS.append(("command", cmd))
+    raise AssertionError(f"a test tried to run a real command: {cmd}")
+
+
+def _no_real_write(path, value):
+    HARDWARE_CALLS.append(("write", path, value))
+    raise AssertionError(f"a test tried to write {path}")
+
+
+ss.subprocess.run = _no_real_command
+ss._write_str = _no_real_write
+
 
 class Done:
     def __init__(self, rc):
@@ -123,6 +143,18 @@ class CountingStats(ss.HardwareStats):
         self.written.append(pct)
         return pct
 
+    def set_top_brightness(self, pct):
+        self.written.append(("top", pct))
+        return pct
+
+    def set_volume(self, pct):
+        self.written.append(("volume", pct))
+        return pct
+
+    def set_mute(self, muted):
+        self.written.append(("mute", muted))
+        return muted
+
 
 def test_the_requested_value_shows_at_once_and_the_real_one_returns_later():
     import time
@@ -179,6 +211,12 @@ def test_requests_are_clamped():
     assert s.request_bottom_brightness(-30) == 5
     assert s.request_bottom_brightness(900) == 100
     assert s.request_volume(-1) == 0 and s.request_volume(400) == 100
+
+
+def test_zz_nothing_touched_real_hardware():
+    import time
+    time.sleep(0.2)                                    # let any writer thread still running reach its call
+    assert not HARDWARE_CALLS, HARDWARE_CALLS
 
 
 if __name__ == "__main__":
