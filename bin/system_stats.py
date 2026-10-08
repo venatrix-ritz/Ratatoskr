@@ -72,6 +72,7 @@ class HardwareStats:
     def __init__(self, cache_ttl: float = 0.5) -> None:
         self.cache_ttl = cache_ttl
         self._last_sample_time = 0.0
+        self.last_write_ok = True
         self._last_data: dict[str, Any] = {}
         self._lock = threading.Lock()
 
@@ -256,12 +257,14 @@ class HardwareStats:
         cur = self.get_stats().get("top_bright_pct", 100)
         return self.set_top_brightness(cur + delta)
 
-    def set_bottom_brightness(self, pct: int) -> int:
-        target = max(5, min(100, int(pct)))
+    def set_bottom_brightness(self, pct: int, persist: bool = True, minimum: int = 5) -> int:
+        """Write the bottom backlight. persist=False leaves Armada's saved level alone (idle dimming)."""
+        target = max(minimum, min(100, int(pct)))
         max_b = _read_int(f"{BOTTOM_BACKLIGHT_PATH}/max_brightness", 255)
-        val = round(target * max_b / 100)
-        _write_str(f"{BOTTOM_BACKLIGHT_PATH}/brightness", str(val))
-        _write_str(ARMADA_BOTTOM_BRIGHTNESS_FILE, str(target))
+        val = max(1, round(target * max_b / 100))
+        self.last_write_ok = _write_str(f"{BOTTOM_BACKLIGHT_PATH}/brightness", str(val))
+        if persist:
+            _write_str(ARMADA_BOTTOM_BRIGHTNESS_FILE, str(target))
         self._last_sample_time = 0.0
         return target
 

@@ -40,6 +40,7 @@ function Content() {
         pinch_zoom_enabled: true,
         three_finger_swipe_enabled: true,
         drag_lock_enabled: true,
+        mirror_dim: false,
         debug_hud: false,
         telemetry: {},
         hardware_stats: {},
@@ -387,6 +388,19 @@ function Content() {
                             description: "Double-tap and drag to hold left mouse button",
                             checked: status.drag_lock_enabled ?? true,
                             onChange: (val) => updateSetting("drag_lock_enabled", val)
+                        })
+                    })
+                ]
+            }),
+            SP_JSX.jsxs(DFL.PanelSection, {
+                title: "Screens",
+                children: [
+                    SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.ToggleField, {
+                            label: "Dim bottom screen with the top",
+                            description: "Dims the bottom screen after Steam's idle-dim delay (Steam > Settings > Display) and restores it on any input",
+                            checked: status.mirror_dim ?? false,
+                            onChange: (val) => updateSetting("mirror_dim", val)
                         })
                     })
                 ]
