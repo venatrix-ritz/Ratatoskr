@@ -5,13 +5,17 @@ Gesture mathematics, coordinate transforms, and physics calculations credit to:
 """
 from __future__ import annotations
 
-import fcntl
 import math
 import os
 import struct
 import threading
 import time
 from typing import Any
+
+try:
+    import fcntl
+except ImportError:  # not Linux: the gesture engine still imports; only UInputBridge needs it
+    fcntl = None
 
 from debug_codes import DebugCode, DebugLogger
 
@@ -63,8 +67,8 @@ SCREEN_WIDTH = 1240
 SCREEN_HEIGHT = 1080
 
 # Gesture thresholds
-TAP_MAX_TIME_S = 0.38
-TAP_MAX_DISTANCE_PX = 36.0
+TAP_MAX_TIME_S = 0.25
+TAP_MAX_DISTANCE_PX = 12.0  # per finger; a tap with more travel than this is a move, not a click
 LONG_PRESS_TIME_S = 0.45
 LONG_PRESS_MAX_DIST_PX = 24.0
 SCROLL_DIVISOR = 10.0
@@ -321,6 +325,7 @@ class TouchGestureProcessor:
         self.accum_dist: float = 0.0
         self.max_fingers: int = 0
         self.is_dragging: bool = False
+        self.pointer_active: bool = False  # False while a one-finger touch could still turn out to be a tap
         self.last_tap_time: float = 0.0
 
         # Long-press right click timer
@@ -454,6 +459,7 @@ class TouchGestureProcessor:
             self.vel_x = 0.0
             self.vel_y = 0.0
             self.long_press_triggered = False
+            self.pointer_active = False
 
             if self.long_press_right_click:
                 self._cancel_long_press()
@@ -484,6 +490,15 @@ class TouchGestureProcessor:
         if count == 1:
             if self.accum_dist > LONG_PRESS_MAX_DIST_PX:
                 self._cancel_long_press()
+
+            if not self.pointer_active:
+                # Hold the cursor still while this could be a tap: otherwise every tap nudges the cursor and
+                # every quick nudge ends in a click. Movement starts once the finger has travelled past the
+                # tap distance or stayed down past the tap time; the travel before that is not replayed.
+                if self.accum_dist < TAP_MAX_DISTANCE_PX and (now - self.start_time) < TAP_MAX_TIME_S:
+                    self.last_state_label = "HOLD"
+                    return
+                self.pointer_active = True
 
             self.last_state_label = "MOVE"
             speed = self.sensitivity
@@ -548,7 +563,7 @@ class TouchGestureProcessor:
 
             if self.long_press_triggered:
                 self.last_state_label = "LONG PRESS DONE"
-            elif self.accum_dist < TAP_MAX_DISTANCE_PX and duration < TAP_MAX_TIME_S:
+            elif not self.pointer_active and self.accum_dist < TAP_MAX_DISTANCE_PX * max(1, self.max_fingers) and duration < TAP_MAX_TIME_S:
                 if self.max_fingers == 1 and self.tap_to_click:
                     # 1-finger Tap: Crisp Left Click (non-blocking)
                     self.last_state_label = "TAP LEFT"
