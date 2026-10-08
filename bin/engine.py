@@ -100,7 +100,7 @@ STRIP_ACCEL_MAX = 2.0      # ...up to this much extra
 # A pen lands, lifts and lands again to reposition (like lifting a mouse), and the landing often registers as a
 # short tap. Pen mode therefore clicks only on a double tap: two taps close together within this time and distance.
 PEN_DOUBLE_TAP_S = 0.45
-PEN_DOUBLE_TAP_DIST_PX = 40.0
+PEN_DOUBLE_TAP_DIST_PX = 60.0
 
 
 def raw_to_screen(raw_x: int, raw_y: int) -> tuple[float, float]:
@@ -371,6 +371,7 @@ class TouchGestureProcessor:
         self.strip_moved: float = 0.0
         self.strip_dir: int = 0
         self._pen_tap_prev: tuple[float, float, float] | None = None  # (time, x, y) of the last pen tap
+        self._pen_note = ""  # why the last pen tap did or did not click, for the touch summary log
         self.last_tap_time: float = 0.0
 
         # Long-press right click timer
@@ -445,6 +446,7 @@ class TouchGestureProcessor:
             self.drag_lock_enabled = bool(drag_lock_enabled)
         if stylus_mode is not None and bool(stylus_mode) != self.stylus_mode:
             self.stylus_mode = bool(stylus_mode)
+            self._pen_tap_prev = None
             self.reset_all()  # fingers down under the old mode must not carry over
         self.logger.log(
             DebugCode.SETTINGS_UPDATED,
@@ -481,7 +483,6 @@ class TouchGestureProcessor:
         self.long_press_triggered = False
         self.misuse_lock = False
         self.strip = None
-        self._pen_tap_prev = None
         self._expired_tids.clear()
         self.last_state_label = "IDLE"
 
@@ -518,12 +519,16 @@ class TouchGestureProcessor:
         """Pen mode: a tap clicks only as the second of two close taps. A lone tap is usually the pen landing."""
         x, y = self.last_coords
         prev = self._pen_tap_prev
-        if prev and now - prev[0] < PEN_DOUBLE_TAP_S and math.hypot(x - prev[1], y - prev[2]) < PEN_DOUBLE_TAP_DIST_PX:
+        gap = now - prev[0] if prev else None
+        dist = math.hypot(x - prev[1], y - prev[2]) if prev else None
+        if prev and gap < PEN_DOUBLE_TAP_S and dist < PEN_DOUBLE_TAP_DIST_PX:
             self.last_state_label = "TAP LEFT (PEN)"
+            self._pen_note = f"second tap {gap * 1000:.0f} ms and {dist:.0f} px after the first"
             self.bridge.tap_button(BTN_LEFT)
             self.last_tap_time = now
         else:
             self.last_state_label = "PEN TAP 1 OF 2"
+            self._pen_note = "first tap" if not prev else f"first tap (previous one was {gap * 1000:.0f} ms and {dist:.0f} px away)"
         self._pen_tap_prev = (now, x, y)
 
     def _strip_scroll(self, dx: float, dy: float, dt: float) -> None:
@@ -717,6 +722,9 @@ class TouchGestureProcessor:
     def touch_up(self, tid: int, now: float) -> None:
         last_of_touch = len(self.active_contacts) == 1 and tid in self.active_contacts
         started, travelled, fingers = self.start_time, self.accum_dist, self.max_fingers
+        down = self.active_contacts.get(tid)
+        where = f"({down['start_x']:.0f}, {down['start_y']:.0f})" if down else "?"
+        self._pen_note = ""
         self._touch_up(tid, now)
         if last_of_touch:
             if self.last_tap_time == now:
@@ -729,7 +737,8 @@ class TouchGestureProcessor:
             self.logger.log(
                 DebugCode.STATUS_TOUCH_UP,
                 f"touch ended: {(now - started) * 1000:.0f} ms down, {travelled:.0f} px travelled, {fingers} finger(s), "
-                f"{gap} since the previous touch ended -> {outcome}{' (pen)' if self.stylus_mode else ''}",
+                f"{gap} since the previous touch ended, at {where} -> {outcome}"
+                f"{' (pen: ' + self._pen_note + ')' if self.stylus_mode and self._pen_note else ' (pen)' if self.stylus_mode else ''}",
             )
             self._last_up_t = now
 

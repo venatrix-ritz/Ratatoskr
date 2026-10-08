@@ -313,6 +313,23 @@ def test_a_double_tap_clicks_once():
     assert clicks(b.log) == [("click", E.BTN_LEFT)], b.log
 
 
+def test_a_double_tap_survives_the_resets_the_app_does_when_the_last_finger_lifts():
+    g, b = fresh(stylus_mode=True)
+    t = pen_tap(g, 100.0)
+    g.reset_all()                                              # thor_app does this whenever the digitizer reports 0 contacts
+    pen_tap(g, t + 0.15)
+    assert clicks(b.log) == [("click", E.BTN_LEFT)], b.log
+
+
+def test_switching_pen_mode_forgets_a_pending_first_tap():
+    g, b = fresh(stylus_mode=True)
+    pen_tap(g, 100.0)
+    g.set_settings(stylus_mode=False)
+    g.set_settings(stylus_mode=True)
+    pen_tap(g, 100.1)
+    assert not clicks(b.log), b.log
+
+
 def test_taps_too_far_apart_in_time_or_space_do_not_click():
     g, b = fresh(stylus_mode=True)
     t = pen_tap(g, 100.0)
