@@ -7,6 +7,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 # Ensure plugin directory is in sys.path
@@ -82,11 +83,44 @@ def _read_config() -> dict:
     return cfg
 
 
-def _save_config(data: dict) -> None:
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+# Copy of bin/atomic_json.py (only main.py is installed here). It runs as root, so it keeps the config file's owner and mode.
+def _write_json_atomic(path, data, indent: int = 2) -> None:
+    path = os.fspath(path)
+    folder = os.path.dirname(path) or "."
+    os.makedirs(folder, exist_ok=True)
+    payload = json.dumps(data, indent=indent)  # serialise first: a failure here leaves the file alone
     try:
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+        ref = os.stat(path)
+    except OSError:
+        ref = os.stat(folder)  # a new file takes the folder's owner
+        ref_mode = None
+    else:
+        ref_mode = ref.st_mode & 0o7777
+    fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + ".", suffix=".tmp", dir=folder)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, ref_mode if ref_mode is not None else 0o644)
+        chown = getattr(os, "chown", None)
+        if chown is not None:
+            try:
+                chown(tmp, ref.st_uid, ref.st_gid)
+            except OSError:
+                pass  # not allowed to (not root) or not needed: the owner is already the caller
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _save_config(data: dict) -> None:
+    try:
+        _write_json_atomic(CONFIG_PATH, data)
     except Exception:
         pass
 
