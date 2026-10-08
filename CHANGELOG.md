@@ -3,6 +3,7 @@
 Dates are 2026. The project was called Touch Master until 2026-10-07. No version numbers have been cut yet.
 
 ## Unreleased
+- **Fixed:** the bottom-screen idle dim was undone by Armada within seconds, because `armada-control` re-applies its saved bottom level every 2 s. The dim now also sets that saved level, records the pre-dim level for crash recovery, retries a failed restore instead of forgetting it, and treats a charger on the USB supply as AC (a charge limit makes the battery report "Not charging").
 - Opt-in **bottom-screen idle dim** that follows Steam's dim delay (`mirror_dim`, `mirror_dim_floor_percent`), with a Decky toggle, a manager switch, `DBG-610`, an optional narrow sudo rule for backlight writes, and unit tests.
 - Renamed **Touch Master to Ratatoskr** (display names only; the `touch-master` / `thor-input` runtime names are unchanged).
 - Made the repo public-ready: no device address in tracked files (`deploy.sh` takes the host from an argument, `THOR_HOST`, `THOR_ENV_FILE` or a git-ignored `local/thor.env`), LF line endings pinned, `deploy.sh` restarts the user service after copying.
