@@ -15,6 +15,7 @@ import sys
 import threading
 from pathlib import Path
 
+import atomic_json
 import ipc_util
 
 # Fix environment for systemd user session if invoked from environments lacking them
@@ -62,10 +63,8 @@ def read_config() -> dict:
 
 
 def save_config(cfg: dict) -> None:
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, indent=2)
+        atomic_json.write_json_atomic(CONFIG_PATH, cfg)
     except Exception:
         pass
 
