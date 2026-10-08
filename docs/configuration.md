@@ -16,9 +16,9 @@ Settings live in one JSON file, `~/.config/thor-input/config.json` (`/var/home/a
 | `long_press_right_click` | `false` | bool | press and hold right-clicks (turning it on turns two-finger right click off) |
 | `long_press_delay_ms` | `450` | 200 to 1200 (the Decky slider offers 250 to 900) | hold time for the long press |
 | `three_finger_middle_click` | `false` | bool | a three-finger tap middle-clicks |
-| `pinch_zoom_enabled` | `false` | bool | two-finger pinch sends Ctrl plus mouse wheel |
+| `pinch_zoom_enabled` | `false` | bool | stored and shown, but **not implemented**: nothing reads it |
 | `three_finger_swipe_enabled` | `false` | bool | three-finger swipes send Super, Escape, Alt+Tab |
-| `drag_lock_enabled` | `false` | bool | double-tap and drag holds the left button |
+| `drag_lock_enabled` | `false` | bool | stored and shown, but **not implemented**: nothing reads it |
 | `pen_mode` | `"off"` | `off`, `pen`, `pen_plus` | Pen mode ([usage](usage.md#pen-mode)); `pen_plus` also writes the Game Mode pointer-visible override |
 | `stylus_mode` | `false` | bool | the engine half of Pen mode (on for `pen` and `pen_plus`); older configs only have this key, and are read as `pen`, or `pen_plus` if the override file exists |
 | `mirror_dim` | `false` | bool | dim the bottom screen on Steam's idle-dim timer ([details](dim-mirror.md)) |
