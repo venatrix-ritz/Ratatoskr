@@ -16,7 +16,7 @@ Switch with the buttons along the top of the bottom screen, from the Decky panel
 | Gesture | Result | Setting |
 |---|---|---|
 | One finger moves | relative pointer movement with acceleration | `sensitivity` |
-| Quick tap (under 0.38 s, under 36 px of travel) | left click | `tap_to_click` |
+| Quick tap (under 0.25 s, under 12 px of travel; the cursor stays put meanwhile) | left click | `tap_to_click` |
 | Two fingers move | scroll | `scroll_speed` |
 | Two-finger tap | right click | `two_finger_right_click` (on) |
 | Press and hold (0.45 s default) | right click | `long_press_right_click` (off; turning it on turns two-finger right click off, and the reverse) |
