@@ -1,6 +1,6 @@
 # Dim the bottom screen with the top (opt-in)
 
-**Status: new and not yet run on a Thor.** It is built from the evidence below and covered by unit tests, but nobody has watched it dim a real screen. Compare its log lines with the top panel before relying on it.
+**Status: the dim write path is verified on a Thor (2026-10-08); its timing against Steam's own dim is still being observed.** The first version dimmed for a moment and was undone by Armada (see below). That is fixed and checked on the hardware: the dim holds, the restore works, and a dim left by a crash is recovered at the next start. Compare the `DBG-610` log lines with the top panel while you use it.
 
 ## The problem
 Steam's idle dim only touches the top panel. Armada deliberately steers every Steam backlight write to the primary panel (`ae96000.dsi.0` on the Thor), so the bottom panel (`ae94000.dsi.0`) keeps its brightness. [src: Armada `system_files/usr/bin/steamos-polkit-helpers/steamos-priv-write`, `devices/ayn-thor.conf`]
@@ -11,7 +11,7 @@ The dim delay is a Steam setting. On the surveyed Thor `config.vdf` held `IdleBa
 1. Reads the delay for the current power source from `~/.local/share/Steam/config/config.vdf` (battery, or charging/full; 0 means never) and re-reads it every 10 s.
 2. Tracks idle time from input on every readable input device: buttons, sticks past about 25 % deflection, triggers, hat, mouse, the top touchscreen. The grabbed bottom touchscreen is reported by the app itself. Haptics, jack, lid and power-key devices and Ratatoskr's own virtual devices are ignored.
 3. After the delay, fades the bottom backlight to `mirror_dim_floor_percent` (default 3 %, about Steam's observed floor of 7/255). On the next input it restores the level it had.
-4. Never writes Armada's saved bottom-screen level (`/etc/armada/bottom-screen-brightness`), so a dim never survives a reboot.
+4. Writes the dimmed level to Armada's saved bottom-screen level (`/etc/armada/bottom-screen-brightness`) as well, because Armada's root service (`armada-control`) re-applies that saved level every 2 seconds whenever the backlight differs from it. Before 2026-10-08 the mirror only changed the backlight, and Armada put it back within about 1.5 seconds (measured on the Thor). The pre-dim level is kept in `~/.local/state/thor-input/dim-restore.json` until it has been restored, so a crash, kill or reboot while dimmed is repaired at the next start instead of leaving the screen dim.
 5. If the backlight is not writable it logs `DBG-701` and retries after a minute.
 6. Logs `DBG-610` lines for each dim and restore, **and every time the top backlight really drops or rises**, with the idle time at that moment and Steam's delay, so you can check the timer against Steam.
 
