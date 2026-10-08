@@ -115,7 +115,7 @@ class UInputBridge:
 
     def __init__(self, logger: DebugLogger | None = None) -> None:
         self.logger = logger or DebugLogger("uinput")
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()  # release_all() holds it while calling mouse_button() and key(), which take it again
         self.mouse_fd = -1
         self.kb_fd = -1
         self.held_buttons: set[int] = set()

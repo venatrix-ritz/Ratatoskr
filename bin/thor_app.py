@@ -76,6 +76,7 @@ class ThorApp:
         self.show_debug_hud = False
         self.touch_dev_node = ""
         self.exit_code = 0
+        self._cleaned = False
         self._parser = None
         self._last_contacts = (0, 0)
         self._last_frame_ts = 0.0
@@ -343,26 +344,51 @@ class ThorApp:
         self.cleanup()
         Gtk.main_quit()
 
+    def request_quit(self, signum: int = 0) -> bool:
+        """Leave the main loop so that cleanup() runs. Used for SIGTERM (what systemd sends on stop and restart) and SIGINT."""
+        name = signal.Signals(signum).name if signum else "quit request"
+        self.logger.log(DebugCode.DAEMON_STOPPING, f"{name} received")
+        Gtk.main_quit()
+        return False  # remove the signal source
+
+    def _release_touch_device(self) -> None:
+        if self.touch_fd < 0:
+            return
+        try:
+            EVIOCGRAB = (1 << 30) | (struct.calcsize("i") << 16) | (ord("E") << 8) | 0x90
+            fcntl.ioctl(self.touch_fd, EVIOCGRAB, 0)
+        except OSError:
+            pass
+        try:
+            os.close(self.touch_fd)
+        except OSError:
+            pass
+        self.touch_fd = -1
+
     def cleanup(self) -> None:
+        """Stop everything and give the hardware back: restore a dimmed bottom screen, release the touchscreen grab and
+        any held button or key, remove the IPC socket. Safe to call more than once, and each step is guarded so that one
+        failure cannot skip the rest."""
+        if self._cleaned:
+            return
+        self._cleaned = True
         self.logger.log(DebugCode.DAEMON_STOPPING)
-        self.dim_mirror.stop()
-        self.idle_tracker.stop()
-        self.stats.stop_sampler()
-        self._stop_key_repeat()
+
+        def step(name: str, fn) -> None:
+            try:
+                fn()
+            except Exception as err:
+                self.logger.log(DebugCode.ERR_SERVICE_STOP, f"cleanup step '{name}' failed: {type(err).__name__}: {err}")
+
+        step("restore the bottom screen", self.dim_mirror.stop)
+        step("idle tracker", self.idle_tracker.stop)
+        step("stats sampler", self.stats.stop_sampler)
+        step("key repeat", self._stop_key_repeat)
         self.touch_stop.set()
         self.ipc_stop.set()
-        if self.touch_fd >= 0:
-            try:
-                EVIOCGRAB = (1 << 30) | (struct.calcsize("i") << 16) | (ord("E") << 8) | 0x90
-                fcntl.ioctl(self.touch_fd, EVIOCGRAB, 0)
-            except OSError:
-                pass
-            try:
-                os.close(self.touch_fd)
-            except OSError:
-                pass
-            self.touch_fd = -1
-        self.bridge.close()
+        step("ipc socket", lambda: os.path.exists(SOCKET_PATH) and os.remove(SOCKET_PATH))
+        step("touchscreen grab", self._release_touch_device)
+        step("virtual devices", self.bridge.close)
         self.logger.log(DebugCode.DAEMON_STOPPED)
 
     # -------------------------------------------------------------------------
@@ -401,7 +427,12 @@ class ThorApp:
             self._parser = parser
             last_error_log = 0.0
             while not self.touch_stop.is_set():
-                r, _, _ = select.select([self.touch_fd], [], [], 0.1)
+                try:
+                    r, _, _ = select.select([self.touch_fd], [], [], 0.1)
+                except (OSError, ValueError):
+                    if self.touch_stop.is_set():
+                        return  # cleanup() closed the descriptor under us: shutting down, not a lost device
+                    raise
                 if not r:
                     self.gesture.expire_stale(time.time())  # kernel event timestamps are wall-clock
                     continue
@@ -410,6 +441,8 @@ class ThorApp:
                 except BlockingIOError:
                     continue
                 except OSError as err:
+                    if self.touch_stop.is_set():
+                        return  # shutting down: cleanup() closed the descriptor
                     if err.errno in (errno.ENODEV, errno.EIO, errno.EBADF, errno.ENOENT):
                         # The digitizer went away (resume, re-enumeration). Exit so systemd restarts the service,
                         # which finds and grabs it again; spinning on a dead descriptor would burn a core.
@@ -1387,9 +1420,17 @@ class ThorApp:
 
 
 def main():
-    signal.signal(signal.SIGINT, signal.SIG_DFL)
-    signal.signal(signal.SIGTERM, signal.SIG_DFL)
     app = ThorApp()
+    # systemd stops the service with SIGTERM. The default action ends the process on the spot and skips cleanup(), which
+    # left a dimmed bottom screen dim and held buttons held. Leave the main loop instead.
+    try:
+        from gi.repository import GLibUnix  # GLib.unix_signal_add is deprecated in favour of this
+
+        signal_add = GLibUnix.signal_add
+    except (ImportError, AttributeError):
+        signal_add = GLib.unix_signal_add
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal_add(GLib.PRIORITY_HIGH, sig, app.request_quit, sig)
     app.start()
     try:
         Gtk.main()
