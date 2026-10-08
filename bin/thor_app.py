@@ -47,6 +47,8 @@ from engine import (
     KEY_F24,
     SCREEN_HEIGHT,
     SCREEN_WIDTH,
+    STRIP_BOTTOM_H,
+    STRIP_RIGHT_W,
     TouchGestureProcessor,
     UInputBridge,
     raw_to_screen,
@@ -609,6 +611,10 @@ class ThorApp:
             self.held_ui_button_tid = tid
             self.bridge.mouse_button(BTN_RIGHT, True)
             GLib.idle_add(self.drawing_area.queue_draw)
+        elif 980 <= x <= 1080:
+            self.gesture.set_settings(stylus_mode=not self.gesture.stylus_mode)
+            self.save_config()
+            GLib.idle_add(self.drawing_area.queue_draw)
 
     def _handle_settings_touch(self, tid: int, x: float, y: float) -> None:
         # Card 1: Volume (y = 120 .. 230)
@@ -865,6 +871,7 @@ class ThorApp:
         right_active = self.held_ui_button == "right"
         self._draw_button(cr, 680, 6, 140, 36, "Left Click", left_active, accent_color=(0.3, 0.45, 0.95))
         self._draw_button(cr, 828, 6, 140, 36, "Right Click", right_active, accent_color=(0.85, 0.35, 0.35))
+        self._draw_button(cr, 980, 6, 100, 36, "Pen", self.gesture.stylus_mode, accent_color=(0.95, 0.65, 0.20))
 
     def _draw_status_ribbon(self, cr: cairo.Context) -> None:
         """Render live system monitoring ribbon across top of AMOLED display."""
@@ -981,9 +988,43 @@ class ThorApp:
         cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
         cr.set_font_size(18.0)
         hint = "Ratatoskr: 1 finger moves · Tap clicks · 2 fingers scroll · Flick glides"
+        if self.gesture.stylus_mode:
+            hint = "Pen mode: touch moves · Tap clicks · Hold right-clicks · Edge strips scroll"
         extents = cr.text_extents(hint)
         cr.move_to(pad_x + (pad_w - extents.width) / 2.0, pad_y + (pad_h + extents.height) / 2.0)
         cr.show_text(hint)
+
+        if self.gesture.stylus_mode:
+            self._draw_scroll_strips(cr, pad_y, pad_h, show_bottom=(y + h) >= SCREEN_HEIGHT - 1)
+
+    def _draw_scroll_strips(self, cr: cairo.Context, pad_y: float, pad_h: float, show_bottom: bool) -> None:
+        """Pen mode's scroll strips: drag along the right edge to scroll up and down, along the bottom to scroll sideways."""
+        right_x = SCREEN_WIDTH - STRIP_RIGHT_W
+        bottom_y = SCREEN_HEIGHT - STRIP_BOTTOM_H
+        strips = [(right_x, pad_y + 8.0, STRIP_RIGHT_W - 28.0, (bottom_y - pad_y - 16.0) if show_bottom else (pad_h - 16.0), "▲  scroll  ▼")]
+        if show_bottom:
+            strips.append((28.0, bottom_y + 8.0, right_x - 40.0, STRIP_BOTTOM_H - 28.0, "◀  scroll  ▶"))
+        for sx, sy, sw, sh, label in strips:
+            self._round_rect(cr, sx, sy, sw, sh, 14.0)
+            cr.set_source_rgb(0.09, 0.10, 0.14)
+            cr.fill_preserve()
+            cr.set_source_rgb(0.95, 0.65, 0.20)
+            cr.set_line_width(1.2)
+            cr.stroke()
+            cr.new_path()
+            cr.set_source_rgb(0.95, 0.65, 0.20)
+            cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+            cr.set_font_size(15.0)
+            ext = cr.text_extents(label)
+            if sh > sw:  # vertical strip: write the label sideways
+                cr.save()
+                cr.translate(sx + sw / 2.0 + ext.height / 2.0, sy + sh / 2.0 + ext.width / 2.0)
+                cr.rotate(-1.5707963)
+                cr.show_text(label)
+                cr.restore()
+            else:
+                cr.move_to(sx + (sw - ext.width) / 2.0, sy + (sh + ext.height) / 2.0)
+                cr.show_text(label)
 
     def _draw_keyboard(self, cr: cairo.Context) -> None:
         """Render virtual keyboard with clean key highlighting, vector arrows, and dual symbol labels."""
