@@ -75,6 +75,14 @@ SCROLL_DIVISOR = 10.0
 PINCH_THRESHOLD_PX = 35.0
 SWIPE_THRESHOLD_PX = 85.0
 HI_RES_NOTCH = 120
+# Game Mode's gamescope hides the pointer once it has not moved for --hide-cursor-delay (3000 ms on the Thor,
+# refs/upstream/gamescope steamcompmgr.cpp checkSuspension). Pointer motion and buttons un-hide it, wheel events
+# neither un-hide it nor restart the timer (wlserver.cpp wlserver_mousemotion / wlserver_mousewheel), and a hidden
+# pointer's wheel does not reach Steam. A button press un-hides it only until the next check, because it does not
+# restart the timer either (wlserver_mousebutton), so rapid tapping in one place loses the pointer after 3 s.
+# So a scroll or a button press after the pointer has been still for this long is preceded by a net-zero
+# one-pixel nudge, the same fix barry-launcher's inputd uses for scrolling (WAKE_POINTER_S = 2.0).
+POINTER_WAKE_S = 2.0
 # The Thor's touch controller sometimes loses a finger-lift: the kernel keeps reporting that contact as down
 # (observed: a contact still held 57 s later, with every finger off the glass). A contact that has reported
 # nothing for this long is treated as lifted. Just above the longest long-press delay (1.2 s) so a deliberate
@@ -83,6 +91,18 @@ STALE_CONTACT_S = 1.5
 # The controller reports at most five fingers and loses lifts when several are down at once, so this many
 # simultaneous fingers is treated as misuse: no output until every finger has left the glass (or expired).
 MISUSE_FINGERS = 4
+# Stylus mode has no two-finger scroll, so a touch that starts in the right-hand strip scrolls vertically and one
+# that starts in the bottom strip scrolls horizontally.
+STRIP_RIGHT_W = 110.0
+STRIP_BOTTOM_H = 100.0
+STRIP_START_PX = 4.0       # a strip touch scrolls nothing until it has travelled this far (landing wiggle)
+STRIP_REVERSE_PX = 1.5     # a step against the current direction smaller than this is pen jitter, not a reversal
+STRIP_ACCEL_SPEED = 600.0  # px/s that adds one extra unit of gain...
+STRIP_ACCEL_MAX = 2.0      # ...up to this much extra
+# A pen lands, lifts and lands again to reposition (like lifting a mouse), and the landing often registers as a
+# short tap. Pen mode therefore clicks only on a double tap: two taps close together within this time and distance.
+PEN_DOUBLE_TAP_S = 0.45
+PEN_DOUBLE_TAP_DIST_PX = 60.0
 
 
 def raw_to_screen(raw_x: int, raw_y: int) -> tuple[float, float]:
@@ -107,6 +127,9 @@ class UInputBridge:
         self.count_clicks_right = 0
         self.count_scrolls = 0
         self.count_keystrokes = 0
+        self.count_pointer_wakes = 0
+        self.moved_at = 0.0  # monotonic time of the last pointer motion we sent
+        self.wake_pointer = True  # False once the running Game Mode no longer hides the pointer (Pen +)
 
         # Scroll accumulators for high-res wheel to notch conversion
         self.scroll_accum_y = 0.0
@@ -174,8 +197,19 @@ class UInputBridge:
                 try:
                     os.write(self.mouse_fd, b"".join(evs))
                     self.count_mouse_moves += 1
+                    self.moved_at = time.monotonic()
                 except OSError as err:
                     self.logger.log(DebugCode.ERR_UINPUT_WRITE, f"emit_mouse_rel: {err}")
+
+    def _wake_pointer_locked(self, sec: int, usec: int) -> None:
+        """Nudge the pointer out and back if it has been still long enough for gamescope to hide it.
+        The caller holds self.lock and has checked that the mouse device is open."""
+        if not self.wake_pointer or time.monotonic() - self.moved_at <= POINTER_WAKE_S:
+            return
+        for step in (1, -1):  # out and back: the pointer ends where it started
+            os.write(self.mouse_fd, EVENT_STRUCT.pack(sec, usec, EV_REL, REL_X, step) + EVENT_STRUCT.pack(sec, usec, EV_SYN, SYN_REPORT, 0))
+        self.moved_at = time.monotonic()
+        self.count_pointer_wakes += 1
 
     def emit_scroll(self, dx_units: int, dy_units: int) -> None:
         if not dx_units and not dy_units:
@@ -201,6 +235,7 @@ class UInputBridge:
         with self.lock:
             if self.mouse_fd >= 0:
                 try:
+                    self._wake_pointer_locked(sec, usec)
                     os.write(self.mouse_fd, b"".join(evs))
                     self.count_scrolls += 1
                 except OSError as err:
@@ -229,6 +264,8 @@ class UInputBridge:
                 self.held_buttons.discard(button_code)
             if self.mouse_fd >= 0:
                 try:
+                    if down:
+                        self._wake_pointer_locked(sec, usec)
                     os.write(self.mouse_fd, b"".join(evs))
                 except OSError as err:
                     self.logger.log(DebugCode.ERR_UINPUT_WRITE, f"mouse_button: {err}")
@@ -283,6 +320,7 @@ class UInputBridge:
                 "clicks_left": self.count_clicks_left,
                 "clicks_right": self.count_clicks_right,
                 "scrolls": self.count_scrolls,
+                "pointer_wakes": self.count_pointer_wakes,
                 "keystrokes": self.count_keystrokes,
                 "held_buttons": list(self.held_buttons),
                 "held_keys": list(self.held_keys),
@@ -325,6 +363,7 @@ class TouchGestureProcessor:
         self.pinch_zoom_enabled = False  # Disabled to eliminate accidental key 29 (Ctrl) spam
         self.three_finger_swipe_enabled = False  # Disabled to eliminate accidental gesture triggers
         self.drag_lock_enabled = False  # Permanently disabled to eliminate sticky left-click drag traps
+        self.stylus_mode = False  # one pointer, no gestures, long press right-clicks, edge strips scroll
 
         # Touch tracking state
         self.active_contacts: dict[int, dict] = {}  # tid -> info
@@ -336,6 +375,14 @@ class TouchGestureProcessor:
         self.pointer_active: bool = False  # False while a one-finger touch could still turn out to be a tap
         self.misuse_lock: bool = False  # True from the MISUSE_FINGERS-th finger until no contact is left
         self._expired_tids: set[int] = set()  # contacts dropped as stale: the kernel may reuse their slot
+        self.strip: str | None = None  # 'v' / 'h' while the current stylus touch is a strip scroll
+        self._last_up_t: float = 0.0  # when the previous touch ended, for the touch summary log
+        self.strip_rest: float = 0.0
+        self.strip_live: bool = False  # past the landing dead zone
+        self.strip_moved: float = 0.0
+        self.strip_dir: int = 0
+        self._pen_tap_prev: tuple[float, float, float] | None = None  # (time, x, y) of the last pen tap
+        self._pen_note = ""  # why the last pen tap did or did not click, for the touch summary log
         self.last_tap_time: float = 0.0
 
         # Long-press right click timer
@@ -376,6 +423,7 @@ class TouchGestureProcessor:
         pinch_zoom_enabled: bool | None = None,
         three_finger_swipe_enabled: bool | None = None,
         drag_lock_enabled: bool | None = None,
+        stylus_mode: bool | None = None,
         **kwargs: Any,
     ) -> None:
         if sensitivity is not None:
@@ -407,6 +455,10 @@ class TouchGestureProcessor:
             self.three_finger_swipe_enabled = bool(three_finger_swipe_enabled)
         if drag_lock_enabled is not None:
             self.drag_lock_enabled = bool(drag_lock_enabled)
+        if stylus_mode is not None and bool(stylus_mode) != self.stylus_mode:
+            self.stylus_mode = bool(stylus_mode)
+            self._pen_tap_prev = None
+            self.reset_all()  # fingers down under the old mode must not carry over
         self.logger.log(
             DebugCode.SETTINGS_UPDATED,
             f"sens={self.sensitivity}, friction={self.friction}, 2f_right={self.two_finger_right_click}",
@@ -426,6 +478,7 @@ class TouchGestureProcessor:
             "pinch_zoom_enabled": self.pinch_zoom_enabled,
             "three_finger_swipe_enabled": self.three_finger_swipe_enabled,
             "drag_lock_enabled": self.drag_lock_enabled,
+            "stylus_mode": self.stylus_mode,
         }
 
     def reset_all(self) -> None:
@@ -440,6 +493,7 @@ class TouchGestureProcessor:
         self.vel_y = 0.0
         self.long_press_triggered = False
         self.misuse_lock = False
+        self.strip = None
         self._expired_tids.clear()
         self.last_state_label = "IDLE"
 
@@ -462,7 +516,58 @@ class TouchGestureProcessor:
             self.vel_y = 0.0
             self.pointer_active = False
             self.misuse_lock = False
+            self.strip = None
             self._cancel_long_press()
+
+    def _strip_at(self, x: float, y: float) -> str | None:
+        if x >= SCREEN_WIDTH - STRIP_RIGHT_W:
+            return "v"
+        if y >= SCREEN_HEIGHT - STRIP_BOTTOM_H:
+            return "h"
+        return None
+
+    def _pen_tap(self, now: float) -> None:
+        """Pen mode: a tap clicks only as the second of two close taps. A lone tap is usually the pen landing."""
+        x, y = self.last_coords
+        prev = self._pen_tap_prev
+        gap = now - prev[0] if prev else None
+        dist = math.hypot(x - prev[1], y - prev[2]) if prev else None
+        if prev and gap < PEN_DOUBLE_TAP_S and dist < PEN_DOUBLE_TAP_DIST_PX:
+            self.last_state_label = "TAP LEFT (PEN)"
+            self._pen_note = f"second tap {gap * 1000:.0f} ms and {dist:.0f} px after the first"
+            self.bridge.tap_button(BTN_LEFT)
+            self.last_tap_time = now
+        else:
+            self.last_state_label = "PEN TAP 1 OF 2"
+            self._pen_note = "first tap" if not prev else f"first tap (previous one was {gap * 1000:.0f} ms and {dist:.0f} px away)"
+        self._pen_tap_prev = (now, x, y)
+
+    def _strip_scroll(self, dx: float, dy: float, dt: float) -> None:
+        along = dy if self.strip == "v" else dx
+        if not self.strip_live:
+            self.strip_moved += along
+            if abs(self.strip_moved) < STRIP_START_PX:
+                return
+            self.strip_live = True
+            self.strip_dir = 1 if self.strip_moved > 0 else -1
+            return
+        direction = 1 if along > 0 else -1 if along < 0 else 0
+        if direction and self.strip_dir and direction != self.strip_dir and abs(along) < STRIP_REVERSE_PX:
+            return  # jitter
+        if direction:
+            self.strip_dir = direction
+        boost = 1.0 + min(STRIP_ACCEL_MAX, (abs(along) / dt) / STRIP_ACCEL_SPEED)
+        divisor = max(4.0, 22.0 - (self.scroll_speed * 4.0))
+        gain = HI_RES_NOTCH / divisor
+        self.strip_rest += (-along if self.strip == "v" else along) * gain * boost
+        step = int(self.strip_rest)
+        if step:
+            self.strip_rest -= step
+            if self.strip == "v":
+                self.bridge.emit_scroll(0, step)
+            else:
+                self.bridge.emit_scroll(step, 0)
+            self.last_state_label = "PEN SCROLL"
 
     def _cancel_long_press(self) -> None:
         if self.long_press_timer and self.long_press_timer.is_alive():
@@ -480,6 +585,8 @@ class TouchGestureProcessor:
     def touch_down(self, tid: int, x: float, y: float, now: float) -> None:
         self.glide_stop.set()
         self._drop_stale_contacts(now)
+        if self.stylus_mode and self.active_contacts:
+            return  # one pointer only: a resting palm or a second hand is ignored for as long as the first touch lasts
         contact = {"id": tid, "start_x": x, "start_y": y, "last_x": x, "last_y": y, "start_t": now, "seen_t": now}
         self.active_contacts[tid] = contact
         count = len(self.active_contacts)
@@ -506,8 +613,15 @@ class TouchGestureProcessor:
             self.vel_y = 0.0
             self.long_press_triggered = False
             self.pointer_active = False
+            self.strip = self._strip_at(x, y) if self.stylus_mode else None
+            self.strip_rest = 0.0
+            self.strip_live = False
+            self.strip_moved = 0.0
+            self.strip_dir = 0
+            if self.strip:
+                self.last_state_label = "PEN SCROLL"
 
-            if self.long_press_right_click:
+            if (self.long_press_right_click or self.stylus_mode) and not self.strip:
                 self._cancel_long_press()
                 delay_s = self.long_press_delay_ms / 1000.0
                 self.long_press_timer = threading.Timer(delay_s, self._on_long_press)
@@ -549,6 +663,10 @@ class TouchGestureProcessor:
         self.last_move_time = now
 
         if count == 1:
+            if self.strip:
+                self._strip_scroll(dx, dy, dt)
+                return
+
             if self.accum_dist > LONG_PRESS_MAX_DIST_PX:
                 self._cancel_long_press()
 
@@ -613,6 +731,29 @@ class TouchGestureProcessor:
                         self.bridge.key(KEY_LEFTALT, False)
 
     def touch_up(self, tid: int, now: float) -> None:
+        last_of_touch = len(self.active_contacts) == 1 and tid in self.active_contacts
+        started, travelled, fingers = self.start_time, self.accum_dist, self.max_fingers
+        down = self.active_contacts.get(tid)
+        where = f"({down['start_x']:.0f}, {down['start_y']:.0f})" if down else "?"
+        self._pen_note = ""
+        self._touch_up(tid, now)
+        if last_of_touch:
+            if self.last_tap_time == now:
+                outcome = "left click"
+            elif self.long_press_triggered:
+                outcome = "long-press right click"
+            else:
+                outcome = "no click"
+            gap = f"{(started - self._last_up_t) * 1000:.0f} ms" if self._last_up_t else "n/a"
+            self.logger.log(
+                DebugCode.STATUS_TOUCH_UP,
+                f"touch ended: {(now - started) * 1000:.0f} ms down, {travelled:.0f} px travelled, {fingers} finger(s), "
+                f"{gap} since the previous touch ended, at {where} -> {outcome}"
+                f"{' (pen: ' + self._pen_note + ')' if self.stylus_mode and self._pen_note else ' (pen)' if self.stylus_mode else ''}",
+            )
+            self._last_up_t = now
+
+    def _touch_up(self, tid: int, now: float) -> None:
         self._cancel_long_press()
         self._expired_tids.discard(tid)
         contact = self.active_contacts.pop(tid, None)
@@ -636,12 +777,20 @@ class TouchGestureProcessor:
 
         if len(self.active_contacts) == 0:
 
+            if self.strip:
+                self.strip = None
+                self.max_fingers = 0
+                self.last_state_label = "IDLE"
+                return
+
             duration = now - self.start_time
 
             if self.long_press_triggered:
                 self.last_state_label = "LONG PRESS DONE"
             elif not self.pointer_active and self.accum_dist < TAP_MAX_DISTANCE_PX * max(1, self.max_fingers) and duration < TAP_MAX_TIME_S:
-                if self.max_fingers == 1 and self.tap_to_click:
+                if self.max_fingers == 1 and self.tap_to_click and self.stylus_mode:
+                    self._pen_tap(now)
+                elif self.max_fingers == 1 and self.tap_to_click:
                     # 1-finger Tap: Crisp Left Click (non-blocking)
                     self.last_state_label = "TAP LEFT"
                     self.bridge.tap_button(BTN_LEFT)
@@ -654,7 +803,7 @@ class TouchGestureProcessor:
                     # 3-finger Tap: Crisp Middle Click (non-blocking)
                     self.last_state_label = "TAP MIDDLE (3-FINGER)"
                     self.bridge.tap_button(BTN_MIDDLE)
-            elif self.glide_enabled and self.max_fingers == 1:
+            elif self.glide_enabled and self.max_fingers == 1 and not self.stylus_mode:
                 speed = math.hypot(self.vel_x, self.vel_y)
                 if speed > 140.0:
                     self.last_state_label = "GLIDE"
