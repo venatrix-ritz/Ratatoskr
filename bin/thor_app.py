@@ -75,6 +75,11 @@ class ThorApp:
         self._parser = None
         self._last_contacts = (0, 0)
         self._last_frame_ts = 0.0
+        self._slider_drag: tuple[int, str] | None = None  # (touch id, 'vol' | 'top' | 'bot') while a slider is held
+        self._draw_ms_sum = 0.0
+        self._draw_ms_max = 0.0
+        self._draws = 0
+        self._lag_ms_max = 0.0  # worst age of a touch frame when it was handled
 
         # Hardware stats & control sampler
         self.stats = HardwareStats(cache_ttl=0.4)
@@ -172,6 +177,7 @@ class ThorApp:
     def set_mode(self, mode: str) -> None:
         if mode not in ("trackpad", "split", "keyboard", "settings"):
             return
+        self._slider_drag = None
         self.mode = mode
         self.update_mode_bounds()
         self.save_config()
@@ -284,6 +290,7 @@ class ThorApp:
         self._repeat_thread = None
 
     def start(self) -> None:
+        self.stats.start_sampler()
         self._start_touch_reader()
         self._start_ipc_server()
         self.idle_tracker.start()
@@ -307,6 +314,7 @@ class ThorApp:
         self.logger.log(DebugCode.DAEMON_STOPPING)
         self.dim_mirror.stop()
         self.idle_tracker.stop()
+        self.stats.stop_sampler()
         self._stop_key_repeat()
         self.touch_stop.set()
         self.ipc_stop.set()
@@ -401,6 +409,7 @@ class ThorApp:
         return False
 
     def _dispatch_frame(self, frame) -> None:
+        self._lag_ms_max = max(self._lag_ms_max, (time.time() - frame.ts) * 1000.0)
         self.gesture.expire_stale(frame.ts)
         if frame.dropped:
             self.logger.log(
@@ -464,7 +473,7 @@ class ThorApp:
 
         # 3. Quick Settings Mode
         if self.mode == "settings":
-            self._handle_settings_touch(x, y)
+            self._handle_settings_touch(tid, x, y)
             return
 
         # 4. Keyboard / Split Mode
@@ -535,17 +544,20 @@ class ThorApp:
                     GLib.idle_add(self.drawing_area.queue_draw)
             return
 
+        if self.mode == "settings":
+            self._handle_settings_drag(tid, x, y)
+            return
+
         if y >= HEADER_HEIGHT:
-            if self.mode == "settings":
-                # Continuous slider drag in settings
-                self._handle_settings_drag(x, y)
-            elif self.mode == "trackpad" or (self.mode == "split" and y < 500.0):
+            if self.mode == "trackpad" or (self.mode == "split" and y < 500.0):
                 self.gesture.touch_move(tid, x, y, now)
                 if self.show_debug_hud:
                     GLib.idle_add(self.drawing_area.queue_draw)
 
     def _handle_touch_up(self, tid: int, now: float) -> None:
         self.last_event_time = time.time()
+        if self._slider_drag and self._slider_drag[0] == tid:
+            self._slider_drag = None
         if self.held_ui_button and (tid == self.held_ui_button_tid or len(self.gesture.active_contacts) == 0):
             if self.held_ui_button == "left":
                 self.bridge.mouse_button(BTN_LEFT, False)
@@ -598,14 +610,15 @@ class ThorApp:
             self.bridge.mouse_button(BTN_RIGHT, True)
             GLib.idle_add(self.drawing_area.queue_draw)
 
-    def _handle_settings_touch(self, x: float, y: float) -> None:
+    def _handle_settings_touch(self, tid: int, x: float, y: float) -> None:
         # Card 1: Volume (y = 120 .. 230)
         if 160 <= y <= 220:
             if 30 <= x <= 120:
                 self.stats.adjust_volume(-5)
             elif 130 <= x <= 950:
                 pct = round((x - 130) / (950 - 130) * 100)
-                self.stats.set_volume(pct)
+                self.stats.request_volume(pct)
+                self._slider_drag = (tid, "vol")
             elif 960 <= x <= 1050:
                 self.stats.adjust_volume(5)
             elif 1060 <= x <= 1210:
@@ -619,7 +632,8 @@ class ThorApp:
                 self.stats.adjust_top_brightness(-10)
             elif 130 <= x <= 1090:
                 pct = round((x - 130) / (1090 - 130) * 100)
-                self.stats.set_top_brightness(pct)
+                self.stats.request_top_brightness(pct)
+                self._slider_drag = (tid, "top")
             elif 1100 <= x <= 1210:
                 self.stats.adjust_top_brightness(10)
             GLib.idle_add(self.drawing_area.queue_draw)
@@ -631,7 +645,8 @@ class ThorApp:
                 self.stats.adjust_bottom_brightness(-10)
             elif 130 <= x <= 1090:
                 pct = round((x - 130) / (1090 - 130) * 100)
-                self.stats.set_bottom_brightness(pct)
+                self.stats.request_bottom_brightness(pct)
+                self._slider_drag = (tid, "bot")
             elif 1100 <= x <= 1210:
                 self.stats.adjust_bottom_brightness(10)
             GLib.idle_add(self.drawing_area.queue_draw)
@@ -659,19 +674,22 @@ class ThorApp:
             GLib.idle_add(self.drawing_area.queue_draw)
 
 
-    def _handle_settings_drag(self, x: float, y: float) -> None:
-        if 160 <= y <= 220 and 130 <= x <= 950:
-            pct = round((x - 130) / (950 - 130) * 100)
-            self.stats.set_volume(pct)
-            GLib.idle_add(self.drawing_area.queue_draw)
-        elif 310 <= y <= 370 and 130 <= x <= 1090:
-            pct = round((x - 130) / (1090 - 130) * 100)
-            self.stats.set_top_brightness(pct)
-            GLib.idle_add(self.drawing_area.queue_draw)
-        elif 460 <= y <= 520 and 130 <= x <= 1090:
-            pct = round((x - 130) / (1090 - 130) * 100)
-            self.stats.set_bottom_brightness(pct)
-            GLib.idle_add(self.drawing_area.queue_draw)
+    SLIDER_SPAN = {"vol": (130.0, 950.0), "top": (130.0, 1090.0), "bot": (130.0, 1090.0)}
+
+    def _handle_settings_drag(self, tid: int, x: float, y: float) -> None:
+        """A slider keeps following the finger that grabbed it, wherever that finger goes: only x matters."""
+        drag = self._slider_drag
+        if drag is None or drag[0] != tid:
+            return
+        lo, hi = self.SLIDER_SPAN[drag[1]]
+        pct = round((min(max(x, lo), hi) - lo) / (hi - lo) * 100)
+        if drag[1] == "vol":
+            self.stats.request_volume(pct)
+        elif drag[1] == "top":
+            self.stats.request_top_brightness(pct)
+        else:
+            self.stats.request_bottom_brightness(pct)
+        GLib.idle_add(self.drawing_area.queue_draw)
 
     # -------------------------------------------------------------------------
     # IPC Server for Decky Loader
@@ -722,6 +740,11 @@ class ThorApp:
                             res["digitizer_contacts"] = len(self._parser.active) if self._parser else 0
                             res["engine_contacts"] = {str(t): [round(c["last_x"]), round(c["last_y"]), round(self._last_frame_ts - c["start_t"], 1)] for t, c in self.gesture.active_contacts.items()}
                             res["last_key"] = self.last_key_label
+                            res["draws"] = self._draws
+                            res["draw_ms_avg"] = round(self._draw_ms_sum / self._draws, 1) if self._draws else 0.0
+                            res["draw_ms_max"] = round(self._draw_ms_max, 1)
+                            res["frame_lag_ms_max"] = round(self._lag_ms_max, 1)
+                            self._draws, self._draw_ms_sum, self._draw_ms_max, self._lag_ms_max = 0, 0.0, 0.0, 0.0
                             res["hardware_stats"] = self.stats.get_stats()
                             res.update(self.gesture.get_settings())
                         elif action == "set_mode":
@@ -734,7 +757,7 @@ class ThorApp:
                             self.save_config()
                             GLib.idle_add(self.drawing_area.queue_draw)
                         elif action == "set_volume":
-                            res["vol_pct"] = self.stats.set_volume(msg.get("volume", 50))
+                            res["vol_pct"] = self.stats.request_volume(msg.get("volume", 50))
                             self.logger.log(DebugCode.VOLUME_UPDATED, f"volume={res['vol_pct']}%")
                             GLib.idle_add(self.drawing_area.queue_draw)
                         elif action == "toggle_mute":
@@ -742,11 +765,11 @@ class ThorApp:
                             self.logger.log(DebugCode.VOLUME_UPDATED, f"muted={res['vol_muted']}")
                             GLib.idle_add(self.drawing_area.queue_draw)
                         elif action == "set_top_brightness":
-                            res["top_bright_pct"] = self.stats.set_top_brightness(msg.get("brightness", 100))
+                            res["top_bright_pct"] = self.stats.request_top_brightness(msg.get("brightness", 100))
                             self.logger.log(DebugCode.BACKLIGHT_UPDATED, f"top={res['top_bright_pct']}%")
                             GLib.idle_add(self.drawing_area.queue_draw)
                         elif action == "set_bottom_brightness":
-                            res["bot_bright_pct"] = self.stats.set_bottom_brightness(msg.get("brightness", 100))
+                            res["bot_bright_pct"] = self.stats.request_bottom_brightness(msg.get("brightness", 100))
                             self.logger.log(DebugCode.BACKLIGHT_UPDATED, f"bottom={res['bot_bright_pct']}%")
                             GLib.idle_add(self.drawing_area.queue_draw)
                         elif action == "wake":
@@ -777,6 +800,16 @@ class ThorApp:
     # -------------------------------------------------------------------------
 
     def on_draw(self, _, cr: cairo.Context) -> bool:
+        started = time.perf_counter()
+        try:
+            return self._paint(cr)
+        finally:
+            took = (time.perf_counter() - started) * 1000.0
+            self._draw_ms_sum += took
+            self._draw_ms_max = max(self._draw_ms_max, took)
+            self._draws += 1
+
+    def _paint(self, cr: cairo.Context) -> bool:
         self.frame_count += 1
         now = time.time()
         if now - self.last_fps_calc >= 1.0:

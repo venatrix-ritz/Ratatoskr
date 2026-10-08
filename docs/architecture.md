@@ -20,7 +20,7 @@
 - **`bin/thor_app.py`** is the whole driver: it finds the bottom touchscreen, grabs it exclusively (`EVIOCGRAB`) so touches do not reach the desktop, draws the UI, runs the gesture engine, serves the IPC socket and starts the idle tracker and dim mirror. It runs inside the bottom screen's gamescope through Armada's `armada-run-bottom` helper, which loads that session's environment.
 - **`bin/engine.py`** holds `UInputBridge` (creates the virtual devices) and `TouchGestureProcessor` (turns finger contacts into pointer, scroll, click and key events).
 - **`bin/keyboard_layout.py`** is the on-glass keyboard: key geometry and hit testing.
-- **`bin/system_stats.py`** reads battery, CPU, GPU, RAM, backlights and volume (PipeWire through `wpctl`), and writes volume and brightness.
+- **`bin/system_stats.py`** reads battery, CPU, GPU, RAM, backlights and volume (PipeWire through `wpctl`), and writes volume and brightness. A background thread samples once a second, so drawing and IPC never wait on a sample (a sample took about 29 ms on the Thor, 2026-10-08). Slider writes go through `request_*`: the requested value is drawn at once and a writer thread per control writes only the newest value (each `sudo tee` write took about 25 ms, and the bottom slider needs two).
 - **`bin/dim_mirror.py`** is the optional idle-dim follower ([dim-mirror.md](dim-mirror.md)).
 - **`bin/touch_master_manager.py`** is the standalone GTK window and CLI.
 - **`main.py`** is the Decky backend; **`dist/index.js`** is the panel (plain JavaScript written for Decky's `DFL` and `SP_REACT` globals, no build step).
