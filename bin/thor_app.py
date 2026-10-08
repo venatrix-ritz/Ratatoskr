@@ -50,6 +50,7 @@ from engine import (
     raw_to_screen,
 )
 from keyboard_layout import Key, KeyboardLayout
+from dim_mirror import DimMirror, IdleTracker
 from system_stats import HardwareStats
 
 SOCKET_PATH = f"/run/user/{os.getuid()}/thor-input.sock"
@@ -70,6 +71,11 @@ class ThorApp:
 
         # Hardware stats & control sampler
         self.stats = HardwareStats(cache_ttl=0.4)
+
+        # Bottom screen follows Steam's idle-dim timer (off until switched on)
+        self.mirror_cfg: dict = {"mirror_dim": False, "mirror_dim_floor_percent": 3}
+        self.idle_tracker = IdleTracker(self.logger)
+        self.dim_mirror = DimMirror(self.stats, self.idle_tracker, self.logger, lambda: self.mirror_cfg)
 
         # Bridge & processors
         self.bridge = UInputBridge(self.logger)
@@ -129,6 +135,7 @@ class ThorApp:
                     self.mode = cfg.get("mode", self.mode)
                     self.show_debug_hud = cfg.get("debug_hud", self.show_debug_hud)
                     self.gesture.set_settings(**cfg)
+                    self._apply_mirror_settings(cfg)
             except Exception as err:
                 self.logger.log(DebugCode.ERR_SOCKET_PROTOCOL, f"load_config: {err}")
 
@@ -139,11 +146,21 @@ class ThorApp:
                 "mode": self.mode,
                 "debug_hud": self.show_debug_hud,
                 **self.gesture.get_settings(),
+                **self.mirror_cfg,
             }
             with open(CONFIG_PATH, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, indent=2)
         except Exception as err:
             self.logger.log(DebugCode.ERR_SOCKET_PROTOCOL, f"save_config: {err}")
+
+    def _apply_mirror_settings(self, msg: dict) -> None:
+        if "mirror_dim" in msg:
+            self.mirror_cfg["mirror_dim"] = bool(msg["mirror_dim"])
+        if "mirror_dim_floor_percent" in msg:
+            try:
+                self.mirror_cfg["mirror_dim_floor_percent"] = max(1, min(50, int(msg["mirror_dim_floor_percent"])))
+            except (TypeError, ValueError):
+                pass
 
     def set_mode(self, mode: str) -> None:
         if mode not in ("trackpad", "split", "keyboard", "settings"):
@@ -262,6 +279,8 @@ class ThorApp:
     def start(self) -> None:
         self._start_touch_reader()
         self._start_ipc_server()
+        self.idle_tracker.start()
+        self.dim_mirror.start()
         self.window.show_all()
         # Periodic 1-second refresh for live system monitor ribbon
         GLib.timeout_add(1000, self._on_stats_tick)
@@ -279,6 +298,8 @@ class ThorApp:
 
     def cleanup(self) -> None:
         self.logger.log(DebugCode.DAEMON_STOPPING)
+        self.dim_mirror.stop()
+        self.idle_tracker.stop()
         self._stop_key_repeat()
         self.touch_stop.set()
         self.ipc_stop.set()
@@ -333,6 +354,7 @@ class ThorApp:
                     data = os.read(self.touch_fd, EVENT_STRUCT.size * 256)
                 except (BlockingIOError, OSError):
                     continue
+                self.idle_tracker.poke()  # the grabbed bottom touchscreen is invisible to the tracker
 
                 for off in range(0, len(data) - EVENT_STRUCT.size + 1, EVENT_STRUCT.size):
                     sec, usec, etype, code, value = EVENT_STRUCT.unpack_from(data, off)
@@ -662,6 +684,8 @@ class ThorApp:
                             res["debug_hud"] = self.show_debug_hud
                             res["hardware_stats"] = self.stats.get_stats()
                             res.update(self.gesture.get_settings())
+                            res.update(self.mirror_cfg)
+                            res["bottom_dimmed"] = self.dim_mirror.dimmed
                         elif action == "get_debug":
                             res["telemetry"] = self.bridge.get_telemetry()
                             res["state"] = self.gesture.last_state_label
@@ -675,6 +699,7 @@ class ThorApp:
                             self.set_mode(msg.get("mode", "trackpad"))
                         elif action == "set_settings":
                             self.gesture.set_settings(**msg)
+                            self._apply_mirror_settings(msg)
                             if "debug_hud" in msg:
                                 self.show_debug_hud = bool(msg["debug_hud"])
                             self.save_config()

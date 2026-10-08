@@ -55,6 +55,8 @@ def _default_config() -> dict:
         "pinch_zoom_enabled": False,
         "three_finger_swipe_enabled": False,
         "drag_lock_enabled": False,
+        "mirror_dim": False,
+        "mirror_dim_floor_percent": 3,
         "debug_hud": False,
     }
 
@@ -155,6 +157,9 @@ class Plugin:
                     "pinch_zoom_enabled": cfg.get("pinch_zoom_enabled", False),
                     "three_finger_swipe_enabled": cfg.get("three_finger_swipe_enabled", False),
                     "drag_lock_enabled": cfg.get("drag_lock_enabled", False),
+                    "mirror_dim": cfg.get("mirror_dim", False),
+                    "mirror_dim_floor_percent": cfg.get("mirror_dim_floor_percent", 3),
+                    "bottom_dimmed": res.get("bottom_dimmed", False),
                     "debug_hud": cfg.get("debug_hud", False),
                     "telemetry": debug_info.get("telemetry", {}),
                     "touch_device": debug_info.get("touch_device", ""),

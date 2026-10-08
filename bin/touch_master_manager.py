@@ -42,6 +42,8 @@ DEFAULT_CONFIG = {
     "pinch_zoom_enabled": False,
     "three_finger_swipe_enabled": False,
     "drag_lock_enabled": False,
+    "mirror_dim": False,
+    "mirror_dim_floor_percent": 3,
     "debug_hud": False,
 }
 
@@ -228,6 +230,13 @@ def launch_gui() -> None:
             self.two_finger_switch.connect("notify::active", lambda s, p: self.on_cfg_switch(s, "two_finger_right_click"))
             two_row = self._make_switch_row("Two-Finger Tap Right Click", self.two_finger_switch)
             dyn_box.pack_start(two_row, False, False, 0)
+
+            # Dim the bottom screen on Steam's idle-dim timer
+            self.mirror_switch = Gtk.Switch()
+            self.mirror_switch.set_active(self.cfg.get("mirror_dim", False))
+            self.mirror_switch.connect("notify::active", lambda s, p: self.on_cfg_switch(s, "mirror_dim"))
+            mirror_row = self._make_switch_row("Dim bottom screen with Steam's idle dim", self.mirror_switch)
+            dyn_box.pack_start(mirror_row, False, False, 0)
 
             # Debug HUD
             self.hud_switch = Gtk.Switch()

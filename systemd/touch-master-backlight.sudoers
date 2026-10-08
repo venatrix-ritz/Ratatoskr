@@ -1,0 +1,8 @@
+# Optional. Lets Touch Master (user "armada") write the two backlight files without a password.
+# Stock Armada deliberately gives no unprivileged write access to backlights (Steam would then write the
+# wrong panel: /usr/libexec/armada/backlight-acl), so Touch Master falls back to `sudo -n tee <file>`.
+# Without this file, the brightness sliders and the idle-dim mirror cannot change a backlight.
+# Install: sudo visudo -cf systemd/touch-master-backlight.sudoers && \
+#          sudo install -m 0440 -o root -g root systemd/touch-master-backlight.sudoers /etc/sudoers.d/92-touch-master-backlight
+armada ALL=(root) NOPASSWD: /usr/bin/tee /sys/class/backlight/ae94000.dsi.0/brightness
+armada ALL=(root) NOPASSWD: /usr/bin/tee /sys/class/backlight/ae96000.dsi.0/brightness

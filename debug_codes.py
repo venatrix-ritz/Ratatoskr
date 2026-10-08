@@ -63,6 +63,7 @@ class DebugCode(IntEnum):
     SETTINGS_UPDATED = 600
     BACKLIGHT_UPDATED = 601
     VOLUME_UPDATED = 602
+    DIM_MIRROR = 610            # bottom screen follows Steam's idle-dim timer
 
     # 7xx: Hardware Controls Errors
     ERR_BACKLIGHT_SYSFS = 701
@@ -110,6 +111,7 @@ CODE_DESCRIPTIONS: dict[DebugCode, str] = {
     DebugCode.SETTINGS_UPDATED: "Settings successfully updated",
     DebugCode.BACKLIGHT_UPDATED: "Display backlight brightness adjusted",
     DebugCode.VOLUME_UPDATED: "System volume level adjusted",
+    DebugCode.DIM_MIRROR: "Bottom screen idle-dim mirror event",
     DebugCode.ERR_BACKLIGHT_SYSFS: "Backlight sysfs write failure",
     DebugCode.ERR_PIPEWIRE_WPCTL: "PipeWire wpctl execution failure",
 }
