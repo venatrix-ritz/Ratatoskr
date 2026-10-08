@@ -210,6 +210,78 @@ def test_on_ac_power():
     assert dm.on_ac_power("/nonexistent", "/nonexistent") is False
 
 
+def _tracker(devices):
+    """A tracker whose device list is `devices` (a mutable list of (node, name)); its 'fds' are real, closable descriptors."""
+    log = FakeLogger()
+
+    def opener(node):
+        return os.open(os.devnull, os.O_RDONLY)
+
+    return dm.IdleTracker(log, scan_interval=0.0, lister=lambda: list(devices), opener=opener), log
+
+
+def test_tracker_picks_up_devices_that_appear_later():
+    devices = [("/dev/input/event2", "gpio-keys")]
+    t, log = _tracker(devices)
+    t._scan()
+    assert t.devices == ["gpio-keys (/dev/input/event2)"]
+    devices.append(("/dev/input/event9", "Microsoft Xbox Series S|X Controller"))  # InputPlumber's pad shows up after start
+    devices.append(("/dev/input/event10", "AYN-Thor Headset Jack"))                  # ignored by name
+    t._scan()
+    assert len(t.devices) == 2 and any("Xbox" in d for d in t.devices) and not any("Jack" in d for d in t.devices)
+    announcements = [m for c, m in log.lines if "watching" in m]
+    assert len(announcements) == 2, announcements
+    t._scan()
+    assert len([m for c, m in log.lines if "watching" in m]) == 2, "an unchanged list is not announced again"
+    for fd in list(t._fds):
+        t._drop(fd)
+
+
+def test_tracker_forgets_devices_that_go_away():
+    devices = [("/dev/input/event2", "gpio-keys"), ("/dev/input/event9", "Xbox pad")]
+    t, _ = _tracker(devices)
+    t._scan()
+    assert len(t.devices) == 2
+    del devices[1]
+    t._scan()
+    assert t.devices == ["gpio-keys (/dev/input/event2)"] and len(t._fds) == 1
+    for fd in list(t._fds):
+        t._drop(fd)
+
+
+def test_tracker_skips_its_own_exclusive_node_and_survives_a_bad_listing():
+    devices = [("/dev/input/event5", "bottom_touchscreen"), ("/dev/input/event14", "Thor Virtual Keyboard")]
+    t, log = _tracker(devices)
+    t._scan()
+    assert t.devices == []
+    t._lister = lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+    t._scan()
+    assert any("could not list" in m for c, m in log.lines)
+
+
+def test_tracker_sees_activity_on_a_device_added_after_start():
+    if os.name != "posix":
+        print("skip test_tracker_sees_activity_on_a_device_added_after_start (needs select on pipes)")
+        return
+    import struct
+    r, w = os.pipe()
+    os.set_blocking(r, False)
+    devices = []
+    log = FakeLogger()
+    t = dm.IdleTracker(log, scan_interval=0.1, lister=lambda: list(devices), opener=lambda node: r)
+    t.start()
+    time.sleep(0.4)                                   # started with no devices at all
+    devices.append(("pipe", "Xbox pad"))
+    time.sleep(0.4)                                   # the rescan finds it
+    idle_before = t.idle_seconds()
+    os.write(w, struct.pack("llHHi", 0, 0, dm.EV_KEY, 304, 1))
+    time.sleep(0.3)
+    assert t.idle_seconds() < min(idle_before, 0.35), (t.idle_seconds(), idle_before)
+    t.stop()
+    time.sleep(1.2)
+    os.close(w)
+
+
 def test_idle_tracker_poke():
     t = dm.IdleTracker(FakeLogger())
     time.sleep(0.2)
