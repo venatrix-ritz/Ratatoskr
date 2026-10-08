@@ -262,9 +262,10 @@ class HardwareStats:
         target = max(minimum, min(100, int(pct)))
         max_b = _read_int(f"{BOTTOM_BACKLIGHT_PATH}/max_brightness", 255)
         val = max(1, round(target * max_b / 100))
-        self.last_write_ok = _write_str(f"{BOTTOM_BACKLIGHT_PATH}/brightness", str(val))
+        ok = _write_str(f"{BOTTOM_BACKLIGHT_PATH}/brightness", str(val))
         if persist:
-            _write_str(ARMADA_BOTTOM_BRIGHTNESS_FILE, str(target))
+            ok = _write_str(ARMADA_BOTTOM_BRIGHTNESS_FILE, str(target)) and ok
+        self.last_write_ok = ok
         self._last_sample_time = 0.0
         return target
 
