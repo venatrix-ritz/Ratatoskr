@@ -407,6 +407,7 @@ def main():
     parser.add_argument("--stop", action="store_true", help="Stop and disable Ratatoskr service")
     parser.add_argument("--toggle", action="store_true", help="Toggle Ratatoskr service on/off")
     parser.add_argument("--status", action="store_true", help="Query service and driver status")
+    parser.add_argument("--wake", action="store_true", help="Send a harmless key tap so the Thor's sleep and dim timers restart")
     parser.add_argument("--mode", choices=["trackpad", "keyboard", "settings"], help="Switch input mode")
     args = parser.parse_args()
 
@@ -422,6 +423,10 @@ def main():
         ok = toggle_service()
         print("Toggled" if ok else "Failed to toggle")
         sys.exit(0 if ok else 1)
+    elif args.wake:
+        res = send_ipc({"action": "wake"})
+        print(json.dumps(res))
+        sys.exit(0 if res.get("ok") else 1)
     elif args.status:
         active = is_service_active()
         cfg = read_config()
