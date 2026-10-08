@@ -7,8 +7,10 @@ panel keeps its brightness. The dim delay is a Steam setting, stored in
 `IdleBacklightDimACSeconds` (0 = never). This module reads that setting, tracks
 input idle time itself, and dims/restores the bottom panel on the same schedule.
 
-Sleep needs nothing here: Armada's fake-suspend already writes `bl_power` on every
-backlight (`/usr/libexec/armada/fake-suspend`).
+Sleep is not handled here: Armada's fake-suspend sends `drm_sleep_internal_screen` to every
+gamescope instance in the session (falling back to `bl_power` on every backlight), which should
+cover the bottom panel too (`/usr/libexec/armada/fake-suspend`, `display_off`; not yet confirmed by
+a test on the Thor).
 """
 from __future__ import annotations
 
