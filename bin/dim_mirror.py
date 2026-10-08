@@ -15,6 +15,7 @@ a test on the Thor).
 from __future__ import annotations
 
 import glob
+import json
 import os
 import re
 import select
@@ -28,6 +29,12 @@ from debug_codes import DebugCode
 STEAM_CONFIG = os.path.expanduser("~/.local/share/Steam/config/config.vdf")
 BATTERY_STATUS = "/sys/class/power_supply/battery/status"
 TOP_BACKLIGHT = "/sys/class/backlight/ae96000.dsi.0"
+USB_ONLINE = "/sys/class/power_supply/qcom-battmgr-usb/online"
+# Armada's root service re-applies this saved level every 2 s whenever the backlight differs from it
+# (armada-control: BOTTOM_SCREEN_BRIGHTNESS_RESTORE_INTERVAL), so a dim that does not change it is undone at once.
+ARMADA_SAVED = "/etc/armada/bottom-screen-brightness"
+STATE_DIR = os.path.expanduser("~/.local/state/thor-input")
+RECOVERY_FILE = os.path.join(STATE_DIR, "dim-restore.json")  # the pre-dim level, so a crash cannot strand a dim
 
 EV_KEY, EV_REL, EV_ABS = 0x01, 0x02, 0x03
 ABS_X, ABS_Y, ABS_Z, ABS_RX, ABS_RY, ABS_RZ = 0x00, 0x01, 0x02, 0x03, 0x04, 0x05
@@ -54,12 +61,29 @@ def read_dim_seconds(on_ac: bool, path: str = STEAM_CONFIG) -> int:
     return found.get("AC" if on_ac else "Battery", 0)
 
 
-def on_ac_power(status_path: str = BATTERY_STATUS) -> bool:
+def on_ac_power(status_path: str = BATTERY_STATUS, usb_path: str = USB_ONLINE) -> bool:
+    """True on a charger: the USB supply is online, or the battery reports Charging/Full."""
+    try:
+        with open(usb_path, encoding="utf-8") as f:
+            if f.read().strip() == "1":
+                return True
+    except OSError:
+        pass
     try:
         with open(status_path, encoding="utf-8") as f:
             return f.read().strip() in ("Charging", "Full")
     except OSError:
         return False
+
+
+def read_saved_bottom_level(path: str = ARMADA_SAVED) -> int | None:
+    """Armada's saved bottom-screen brightness (0-100), or None if absent or unreadable."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            value = int(f.read().strip())
+    except (OSError, ValueError):
+        return None
+    return value if 0 <= value <= 100 else None
 
 
 def _is_activity(ev_type: int, code: int, value: int, name: str) -> bool:
@@ -159,24 +183,33 @@ class IdleTracker:
 
 
 class DimMirror:
-    """Dims the bottom panel after Steam's idle-dim delay and restores it on the next input."""
+    """Dims the bottom panel after Steam's idle-dim delay and restores it on the next input.
 
-    def __init__(self, stats, tracker: IdleTracker, logger, get_config: Callable[[], dict]) -> None:
+    The dimmed level is also written to Armada's saved level, otherwise armada-control puts the old
+    level straight back. The pre-dim level is kept in a recovery file until it has been restored.
+    """
+
+    def __init__(self, stats, tracker: IdleTracker, logger, get_config: Callable[[], dict],
+                 state_file: str = RECOVERY_FILE, saved_path: str = ARMADA_SAVED) -> None:
         self._stats = stats
         self._tracker = tracker
         self._logger = logger
         self._get_config = get_config
+        self._state_file = state_file
+        self._saved_path = saved_path
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._saved: int | None = None  # bottom brightness percent before the dim, None while not dimmed
         self._top_prev: int | None = None
         self._retry_after = 0.0
+        self._restore_fail_logged = 0.0
 
     @property
     def dimmed(self) -> bool:
         return self._saved is not None
 
     def start(self) -> None:
+        self.recover()
         self._thread = threading.Thread(target=self._run, name="dim-mirror", daemon=True)
         self._thread.start()
 
@@ -184,32 +217,85 @@ class DimMirror:
         self._stop.set()
         self.restore("stopping")
 
-    def restore(self, why: str) -> None:
-        if self._saved is None:
+    # -- recovery record -------------------------------------------------------------------------------
+    def _write_record(self, pct: int) -> None:
+        try:
+            os.makedirs(os.path.dirname(self._state_file), exist_ok=True)
+            tmp = self._state_file + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"pct": pct, "ts": time.time()}, f)
+            os.replace(tmp, self._state_file)
+        except OSError as err:
+            self._logger.log(DebugCode.ERR_BACKLIGHT_SYSFS, f"could not write the dim recovery record: {err}")
+
+    def _clear_record(self) -> None:
+        try:
+            os.remove(self._state_file)
+        except FileNotFoundError:
+            pass
+        except OSError as err:
+            self._logger.log(DebugCode.ERR_BACKLIGHT_SYSFS, f"could not remove the dim recovery record: {err}")
+
+    def recover(self) -> None:
+        """A dim left over from a crash, kill or reboot: put the recorded level back."""
+        try:
+            with open(self._state_file, encoding="utf-8") as f:
+                pct = int(json.load(f)["pct"])
+        except (OSError, ValueError, KeyError, TypeError):
             return
-        pct, self._saved = self._saved, None
-        self._stats.set_bottom_brightness(pct, persist=False, minimum=1)
+        if 1 <= pct <= 100:
+            self._stats.set_bottom_brightness(pct, persist=True, minimum=1)
+            if not self._stats.last_write_ok:
+                self._logger.log(DebugCode.ERR_BACKLIGHT_SYSFS, f"could not recover the bottom level {pct}% after an earlier dim")
+                return
+            self._logger.log(DebugCode.DIM_MIRROR, f"recovered the bottom level {pct}% left by an earlier dim")
+        self._clear_record()
+
+    # -- dim and restore -------------------------------------------------------------------------------
+    def restore(self, why: str) -> bool:
+        """Put the pre-dim level back (backlight and Armada's saved level). Keeps the state if the write failed."""
+        if self._saved is None:
+            return True
+        pct = self._saved
+        self._stats.set_bottom_brightness(pct, persist=True, minimum=1)
+        if not self._stats.last_write_ok:
+            now = time.monotonic()
+            if now - self._restore_fail_logged > 30:
+                self._restore_fail_logged = now
+                self._logger.log(DebugCode.ERR_BACKLIGHT_SYSFS, f"could not restore the bottom level {pct}% ({why}); will retry")
+            return False
+        self._saved = None
+        self._clear_record()
         self._logger.log(DebugCode.DIM_MIRROR, f"bottom restored to {pct}% ({why})")
+        return True
 
     def _dim(self, delay: int, idle: float, floor_pct: int) -> None:
-        current = self._stats.get_stats().get("bot_bright_pct", 100)
+        saved = read_saved_bottom_level(self._saved_path)
+        current = saved if saved is not None else self._stats.get_stats().get("bot_bright_pct", 100)
         target = max(1, min(current, floor_pct))
         if target >= current:
             return  # already at or below the floor
+        self._write_record(current)
         self._saved = current
-        for step in range(1, 7):  # short fade so the change is not a hard cut
+        steps = 6
+        for step in range(1, steps + 1):  # short fade so the change is not a hard cut
+            last = step == steps
+            # Only the last step changes Armada's saved level; the fade is shorter than its 2 s restore interval.
             self._stats.set_bottom_brightness(
-                round(current + (target - current) * step / 6), persist=False, minimum=1
+                round(current + (target - current) * step / steps), persist=last, minimum=1
             )
             if not self._stats.last_write_ok:
                 self._saved = None
+                self._clear_record()
                 self._retry_after = time.monotonic() + 60
+                self._stats.set_bottom_brightness(current, persist=True, minimum=1)
                 self._logger.log(
                     DebugCode.ERR_BACKLIGHT_SYSFS,
-                    "bottom backlight is not writable (needs `sudo -n tee` on it; see systemd/touch-master-backlight.sudoers)",
+                    "bottom backlight is not writable (needs `sudo -n tee` on it and on Armada's saved level; see systemd/touch-master-backlight.sudoers)",
                 )
                 return
-            time.sleep(0.15)
+            if not last:
+                time.sleep(0.15)
         self._logger.log(
             DebugCode.DIM_MIRROR,
             f"bottom dimmed {current}% -> {target}% (idle {idle:.0f}s >= Steam dim delay {delay}s)",
