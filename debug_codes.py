@@ -1,4 +1,4 @@
-"""Touch Master Diagnostic & Debug Code Registry."""
+"""Ratatoskr Diagnostic & Debug Code Registry."""
 from __future__ import annotations
 
 import glob

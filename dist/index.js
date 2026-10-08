@@ -1,4 +1,4 @@
-const manifest = { "name": "Touch Master" };
+const manifest = { "name": "Ratatoskr" };
 const API_VERSION = 2;
 const internalAPIConnection = window.__DECKY_SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED_deckyLoaderAPIInit;
 if (!internalAPIConnection) {
@@ -76,7 +76,7 @@ function Content() {
             const res = await setEnabled(val);
             if (res) setStatus((prev) => ({ ...prev, ...res }));
         } catch (e) {
-            toaster.toast({ title: "Touch Master", body: "Failed to toggle: " + String(e) });
+            toaster.toast({ title: "Ratatoskr", body: "Failed to toggle: " + String(e) });
             refreshStatus();
         } finally {
             setInFlight(false);
@@ -88,7 +88,7 @@ function Content() {
         try {
             await setMode(newMode);
         } catch (e) {
-            toaster.toast({ title: "Touch Master", body: "Failed to set mode: " + String(e) });
+            toaster.toast({ title: "Ratatoskr", body: "Failed to set mode: " + String(e) });
             refreshStatus();
         }
     };
@@ -162,7 +162,7 @@ function Content() {
                 setStatus((prev) => ({ ...prev, debug_hud: res.debug_hud }));
             }
         } catch (e) {
-            toaster.toast({ title: "Touch Master", body: "Failed to toggle HUD: " + String(e) });
+            toaster.toast({ title: "Ratatoskr", body: "Failed to toggle HUD: " + String(e) });
         }
     };
 
@@ -202,7 +202,7 @@ function Content() {
     return SP_JSX.jsxs(SP_JSX.Fragment, {
         children: [
             SP_JSX.jsxs(DFL.PanelSection, {
-                title: "Touch Master: Mode & Status",
+                title: "Ratatoskr: Mode & Status",
                 children: [
                     SP_JSX.jsx(DFL.PanelSectionRow, {
                         children: SP_JSX.jsx(DFL.ToggleField, {
@@ -444,7 +444,7 @@ function Content() {
 
 const index = definePlugin((serverApi) => {
     return {
-        name: "Touch Master",
+        name: "Ratatoskr",
         content: SP_JSX.jsx(Content, {}),
         icon: SP_JSX.jsx("svg", {
             xmlns: "http://www.w3.org/2000/svg",

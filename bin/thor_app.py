@@ -113,7 +113,7 @@ class ThorApp:
 
         # UI Window
         self.window = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
-        self.window.set_title("Touch Master")
+        self.window.set_title("Ratatoskr")
         self.window.set_decorated(False)
         self.window.set_resizable(False)
         self.window.set_default_size(SCREEN_WIDTH, SCREEN_HEIGHT)
@@ -190,7 +190,7 @@ class ThorApp:
 
             menu = Gtk.Menu()
 
-            hdr = Gtk.MenuItem(label="Touch Master")
+            hdr = Gtk.MenuItem(label="Ratatoskr")
             hdr.set_sensitive(False)
             menu.append(hdr)
             menu.append(Gtk.SeparatorMenuItem())
@@ -207,13 +207,13 @@ class ThorApp:
 
             menu.append(Gtk.SeparatorMenuItem())
 
-            mgr_item = Gtk.MenuItem(label="Touch Master Manager...")
+            mgr_item = Gtk.MenuItem(label="Ratatoskr Manager...")
             mgr_item.connect("activate", self._launch_manager)
             menu.append(mgr_item)
 
             menu.append(Gtk.SeparatorMenuItem())
 
-            stop_item = Gtk.MenuItem(label="Stop Touch Master")
+            stop_item = Gtk.MenuItem(label="Stop Ratatoskr")
             stop_item.connect("activate", self._stop_via_indicator)
             menu.append(stop_item)
 
@@ -913,7 +913,7 @@ class ThorApp:
         cr.set_source_rgb(0.30, 0.34, 0.42)
         cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
         cr.set_font_size(18.0)
-        hint = "Touch Master: 1 finger moves · Tap clicks · 2 fingers scroll · Flick glides"
+        hint = "Ratatoskr: 1 finger moves · Tap clicks · 2 fingers scroll · Flick glides"
         extents = cr.text_extents(hint)
         cr.move_to(pad_x + (pad_w - extents.width) / 2.0, pad_y + (pad_h + extents.height) / 2.0)
         cr.show_text(hint)
