@@ -45,6 +45,7 @@ One request per connection on the stream socket `/run/user/<uid>/thor-input.sock
 | `toggle_mute` | | `vol_muted` |
 | `set_top_brightness` | `brightness` (percent) | `top_bright_pct` |
 | `set_bottom_brightness` | `brightness` (percent) | `bot_bright_pct` |
+| `wake` | | taps `KEY_F24` on the virtual keyboard (no default binding anywhere) and counts as input for the dim mirror. Steam and the compositor treat it as input: a Steam-dimmed top screen is restored within about a second and the idle and sleep timers restart (verified on the Thor 2026-10-08) |
 | `toggle_hud` | | `debug_hud` |
 | `run_diagnostics` | | `diagnostics` |
 | `quit` | | |
