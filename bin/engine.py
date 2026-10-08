@@ -129,6 +129,7 @@ class UInputBridge:
         self.count_keystrokes = 0
         self.count_pointer_wakes = 0
         self.moved_at = 0.0  # monotonic time of the last pointer motion we sent
+        self.wake_pointer = True  # False once the running Game Mode no longer hides the pointer (Pen +)
 
         # Scroll accumulators for high-res wheel to notch conversion
         self.scroll_accum_y = 0.0
@@ -203,7 +204,7 @@ class UInputBridge:
     def _wake_pointer_locked(self, sec: int, usec: int) -> None:
         """Nudge the pointer out and back if it has been still long enough for gamescope to hide it.
         The caller holds self.lock and has checked that the mouse device is open."""
-        if time.monotonic() - self.moved_at <= POINTER_WAKE_S:
+        if not self.wake_pointer or time.monotonic() - self.moved_at <= POINTER_WAKE_S:
             return
         for step in (1, -1):  # out and back: the pointer ends where it started
             os.write(self.mouse_fd, EVENT_STRUCT.pack(sec, usec, EV_REL, REL_X, step) + EVENT_STRUCT.pack(sec, usec, EV_SYN, SYN_REPORT, 0))

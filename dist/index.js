@@ -22,7 +22,7 @@ const setVolume = (volume) => call("set_volume", volume);
 const toggleMute = () => call("toggle_mute");
 const setBrightness = (target, percent) => call("set_brightness", target, percent);
 const toggleHud = () => call("toggle_hud");
-const setCursorOverride = (enabled) => call("set_cursor_override", enabled);
+const setPenMode = (mode) => call("set_pen_mode", mode);
 const runDiagnostics = () => call("run_diagnostics");
 
 function Content() {
@@ -116,12 +116,12 @@ function Content() {
         }
     };
 
-    const handleCursorToggle = async (val) => {
-        setStatus((prev) => ({ ...prev, cursor_stay_visible: val }));
+    const handlePenMode = async (mode) => {
+        setStatus((prev) => ({ ...prev, pen_mode: mode }));
         try {
-            await setCursorOverride(val);
+            await setPenMode(mode);
         } catch (e) {
-            console.error("[touch-master] setCursorOverride error:", e);
+            console.error("[touch-master] setPenMode error:", e);
         }
     };
 
@@ -416,20 +416,26 @@ function Content() {
                 ]
             }),
             status.enabled && SP_JSX.jsxs(DFL.PanelSection, {
-                title: "Pointer",
+                title: "Pen",
                 children: [
                     SP_JSX.jsx(DFL.PanelSectionRow, {
                         children: SP_JSX.jsx(DFL.ToggleField, {
-                            label: "Keep the pointer visible",
-                            description: status.cursor_stay_visible
+                            label: "Pen mode",
+                            description: "For a stylus: one touch moves the pointer, double-tap clicks, hold right-clicks, the edge strips scroll. Gestures are off.",
+                            checked: (status.pen_mode ?? "off") !== "off",
+                            onChange: (val) => handlePenMode(val ? ((status.pen_mode ?? "off") === "pen_plus" ? "pen_plus" : "pen") : "off")
+                        })
+                    }),
+                    SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.ToggleField, {
+                            label: "Pen +",
+                            description: (status.pen_mode ?? "off") === "pen_plus"
                                 ? (status.cursor_stay_visible_active
-                                    ? "On: Game Mode no longer hides the pointer."
-                                    : "On. Takes effect the next time Game Mode starts (reboot, or restart Game Mode).")
-                                : (status.cursor_stay_visible_active
-                                    ? "Off. Takes effect the next time Game Mode starts."
-                                    : "Game Mode hides the pointer after 3 s without motion. Turn on to keep it visible; applies the next time Game Mode starts."),
-                            checked: status.cursor_stay_visible ?? false,
-                            onChange: handleCursorToggle
+                                    ? "On: Game Mode no longer hides the pointer, so no nudges are needed."
+                                    : "On, but the running Game Mode still has the old setting. Reboot or restart Game Mode to apply; until then Pen's nudges stay on.")
+                                : "Also keeps Game Mode's pointer visible so scrolling needs no nudges. Takes effect the next time Game Mode starts.",
+                            checked: (status.pen_mode ?? "off") === "pen_plus",
+                            onChange: (val) => handlePenMode(val ? "pen_plus" : ((status.pen_mode ?? "off") === "off" ? "off" : "pen"))
                         })
                     })
                 ]

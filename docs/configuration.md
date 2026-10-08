@@ -19,6 +19,8 @@ Settings live in one JSON file, `~/.config/thor-input/config.json` (`/var/home/a
 | `pinch_zoom_enabled` | `false` | bool | two-finger pinch sends Ctrl plus mouse wheel |
 | `three_finger_swipe_enabled` | `false` | bool | three-finger swipes send Super, Escape, Alt+Tab |
 | `drag_lock_enabled` | `false` | bool | double-tap and drag holds the left button |
+| `pen_mode` | `"off"` | `off`, `pen`, `pen_plus` | Pen mode ([usage](usage.md#pen-mode)); `pen_plus` also writes the Game Mode pointer-visible override |
+| `stylus_mode` | `false` | bool | the engine half of Pen mode (on for `pen` and `pen_plus`); older configs only have this key, and are read as `pen`, or `pen_plus` if the override file exists |
 | `mirror_dim` | `false` | bool | dim the bottom screen on Steam's idle-dim timer ([details](dim-mirror.md)) |
 | `mirror_dim_floor_percent` | `3` | 1 to 50 | brightness the bottom screen dims to |
 
