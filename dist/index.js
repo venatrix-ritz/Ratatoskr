@@ -25,6 +25,68 @@ const toggleHud = () => call("toggle_hud");
 const setPenMode = (mode) => call("set_pen_mode", mode);
 const runDiagnostics = () => call("run_diagnostics");
 
+// --- panel logic (pure functions, tested by tests/test_panel_logic.cjs) ---
+const HOLD_MS = 3000;
+const HARDWARE_KEYS = ["vol_pct", "vol_muted", "top_bright_pct", "bot_bright_pct"];
+
+// The 2 s status poll must not undo a change that was just made: for HOLD_MS after a control is touched, the value
+// the user set wins over what the poll brought back (the driver may not have applied it yet).
+function mergeStatus(prev, next, editedAt, now) {
+    const held = (key) => key in editedAt && now - editedAt[key] < HOLD_MS;
+    const out = { ...prev, ...next };
+    for (const key of Object.keys(next)) {
+        if (key !== "hardware_stats" && held(key)) out[key] = prev[key];
+    }
+    if (next.hardware_stats) {
+        const before = prev.hardware_stats || {};
+        const hw = { ...before, ...next.hardware_stats };
+        for (const key of HARDWARE_KEYS) {
+            if (held(key) && key in before) hw[key] = before[key];
+        }
+        out.hardware_stats = hw;
+    }
+    return out;
+}
+
+// A slider fires onChange for every step. Send the first value at once, then at most one more per gapMs, always the
+// latest, so a drag costs a handful of backend calls instead of dozens. flush() sends what is still waiting.
+function makeThrottle(setTimer, gapMs) {
+    const slots = {};
+    function next(key) {
+        const slot = slots[key];
+        if (!slot) return;
+        if (slot.pending) {
+            const send = slot.pending;
+            slot.pending = null;
+            slot.timer = setTimer(() => next(key), gapMs);
+            send();
+        } else {
+            delete slots[key];
+        }
+    }
+    function throttled(key, send) {
+        const slot = slots[key];
+        if (slot) {
+            slot.pending = send;
+            return;
+        }
+        slots[key] = { pending: null, timer: setTimer(() => next(key), gapMs) };
+        send();
+    }
+    throttled.flush = () => {
+        for (const key of Object.keys(slots)) {
+            const slot = slots[key];
+            if (slot.pending) {
+                const send = slot.pending;
+                slot.pending = null;
+                send();
+            }
+        }
+    };
+    return throttled;
+}
+// --- end panel logic ---
+
 function Content() {
     const [status, setStatus] = SP_REACT.useState({
         enabled: false,
@@ -34,14 +96,15 @@ function Content() {
         friction: 5,
         scroll_speed: 3,
         tap_to_click: true,
-        long_press_right_click: true,
+        long_press_right_click: false,
         long_press_delay_ms: 450,
         two_finger_right_click: true,
-        three_finger_middle_click: true,
-        pinch_zoom_enabled: true,
-        three_finger_swipe_enabled: true,
-        drag_lock_enabled: true,
+        three_finger_middle_click: false,
+        pinch_zoom_enabled: false,
+        three_finger_swipe_enabled: false,
+        drag_lock_enabled: false,
         mirror_dim: false,
+        pen_mode: "off",
         debug_hud: false,
         telemetry: {},
         hardware_stats: {},
@@ -51,12 +114,16 @@ function Content() {
     const [loading, setLoading] = SP_REACT.useState(true);
     const [inFlight, setInFlight] = SP_REACT.useState(false);
     const [diagRunning, setDiagRunning] = SP_REACT.useState(false);
+    const editedAt = SP_REACT.useRef({});
+    const sendRef = SP_REACT.useRef(null);
+    if (sendRef.current === null) sendRef.current = makeThrottle((fn, ms) => setTimeout(fn, ms), 120);
+    const markEdited = (key) => { editedAt.current[key] = Date.now(); };
 
     const refreshStatus = SP_REACT.useCallback(async () => {
         if (inFlight) return;
         try {
             const s = await getStatus();
-            if (s && !inFlight) setStatus((prev) => ({ ...prev, ...s }));
+            if (s && !inFlight) setStatus((prev) => mergeStatus(prev, s, editedAt.current, Date.now()));
         } catch (e) {
             console.error("[touch-master] getStatus error:", e);
         } finally {
@@ -67,7 +134,10 @@ function Content() {
     SP_REACT.useEffect(() => {
         refreshStatus();
         const interval = setInterval(refreshStatus, 2000);
-        return () => clearInterval(interval);
+        return () => {
+            clearInterval(interval);
+            sendRef.current.flush();
+        };
     }, [refreshStatus]);
 
     const handleToggleEnabled = async (val) => {
@@ -85,6 +155,7 @@ function Content() {
     };
 
     const handleModeChange = async (newMode) => {
+        markEdited("mode");
         setStatus((prev) => ({ ...prev, mode: newMode }));
         try {
             await setMode(newMode);
@@ -95,28 +166,37 @@ function Content() {
     };
 
     const updateSetting = async (key, val) => {
+        markEdited(key);
         setStatus((prev) => ({ ...prev, [key]: val }));
-        try {
-            await setSettings({ [key]: val });
-        } catch (e) {
-            console.error(`[touch-master] setSettings (${key}) error:`, e);
-        }
+        sendRef.current(key, async () => {
+            try {
+                await setSettings({ [key]: val });
+            } catch (e) {
+                console.error(`[touch-master] setSettings (${key}) error:`, e);
+            }
+            // two settings exclude each other in the driver (press-and-hold / two-finger right click): pick up the other one
+            setTimeout(refreshStatus, 700);
+        });
     };
 
     const handleVolumeChange = async (val) => {
         const rounded = Math.round(val);
+        markEdited("vol_pct");
         setStatus((prev) => ({
             ...prev,
             hardware_stats: { ...prev.hardware_stats, vol_pct: rounded }
         }));
-        try {
-            await setVolume(rounded);
-        } catch (e) {
-            console.error("[touch-master] setVolume error:", e);
-        }
+        sendRef.current("vol_pct", async () => {
+            try {
+                await setVolume(rounded);
+            } catch (e) {
+                console.error("[touch-master] setVolume error:", e);
+            }
+        });
     };
 
     const handlePenMode = async (mode) => {
+        markEdited("pen_mode");
         setStatus((prev) => ({ ...prev, pen_mode: mode }));
         try {
             await setPenMode(mode);
@@ -126,6 +206,11 @@ function Content() {
     };
 
     const handleMuteToggle = async () => {
+        markEdited("vol_muted");
+        setStatus((prev) => ({
+            ...prev,
+            hardware_stats: { ...prev.hardware_stats, vol_muted: !(prev.hardware_stats || {}).vol_muted }
+        }));
         try {
             const res = await toggleMute();
             if (res && res.vol_muted !== undefined) {
@@ -141,31 +226,39 @@ function Content() {
 
     const handleTopBrightnessChange = async (val) => {
         const rounded = Math.round(val);
+        markEdited("top_bright_pct");
         setStatus((prev) => ({
             ...prev,
             hardware_stats: { ...prev.hardware_stats, top_bright_pct: rounded }
         }));
-        try {
-            await setBrightness("top", rounded);
-        } catch (e) {
-            console.error("[touch-master] setBrightness top error:", e);
-        }
+        sendRef.current("top_bright_pct", async () => {
+            try {
+                await setBrightness("top", rounded);
+            } catch (e) {
+                console.error("[touch-master] setBrightness top error:", e);
+            }
+        });
     };
 
     const handleBotBrightnessChange = async (val) => {
         const rounded = Math.round(val);
+        markEdited("bot_bright_pct");
         setStatus((prev) => ({
             ...prev,
             hardware_stats: { ...prev.hardware_stats, bot_bright_pct: rounded }
         }));
-        try {
-            await setBrightness("bottom", rounded);
-        } catch (e) {
-            console.error("[touch-master] setBrightness bot error:", e);
-        }
+        sendRef.current("bot_bright_pct", async () => {
+            try {
+                await setBrightness("bottom", rounded);
+            } catch (e) {
+                console.error("[touch-master] setBrightness bot error:", e);
+            }
+        });
     };
 
     const handleHudToggle = async () => {
+        markEdited("debug_hud");
+        setStatus((prev) => ({ ...prev, debug_hud: !prev.debug_hud }));
         try {
             const res = await toggleHud();
             if (res && res.debug_hud !== undefined) {
@@ -345,11 +438,11 @@ function Content() {
                         children: SP_JSX.jsx(DFL.ToggleField, {
                             label: "Long-Press for Right Click",
                             description: "Hold 1 finger still to trigger secondary right click",
-                            checked: status.long_press_right_click ?? true,
+                            checked: status.long_press_right_click ?? false,
                             onChange: (val) => updateSetting("long_press_right_click", val)
                         })
                     }),
-                    (status.long_press_right_click ?? true) && SP_JSX.jsx(DFL.PanelSectionRow, {
+                    (status.long_press_right_click ?? false) && SP_JSX.jsx(DFL.PanelSectionRow, {
                         children: SP_JSX.jsx(DFL.SliderField, {
                             label: `Long-Press Delay: ${status.long_press_delay_ms ?? 450} ms`,
                             value: status.long_press_delay_ms ?? 450,
@@ -372,7 +465,7 @@ function Content() {
                         children: SP_JSX.jsx(DFL.ToggleField, {
                             label: "Three-Finger Middle Click Tap",
                             description: "3-finger tap emits middle click",
-                            checked: status.three_finger_middle_click ?? true,
+                            checked: status.three_finger_middle_click ?? false,
                             onChange: (val) => updateSetting("three_finger_middle_click", val)
                         })
                     }),
@@ -380,7 +473,7 @@ function Content() {
                         children: SP_JSX.jsx(DFL.ToggleField, {
                             label: "Pinch to Zoom",
                             description: "2-finger pinch emits Ctrl+Wheel zoom",
-                            checked: status.pinch_zoom_enabled ?? true,
+                            checked: status.pinch_zoom_enabled ?? false,
                             onChange: (val) => updateSetting("pinch_zoom_enabled", val)
                         })
                     }),
@@ -388,7 +481,7 @@ function Content() {
                         children: SP_JSX.jsx(DFL.ToggleField, {
                             label: "Three-Finger Navigation Swipes",
                             description: "Up = Super/Steam, Down = Escape, Left/Right = Alt+Tab",
-                            checked: status.three_finger_swipe_enabled ?? true,
+                            checked: status.three_finger_swipe_enabled ?? false,
                             onChange: (val) => updateSetting("three_finger_swipe_enabled", val)
                         })
                     }),
@@ -396,7 +489,7 @@ function Content() {
                         children: SP_JSX.jsx(DFL.ToggleField, {
                             label: "Drag Lock",
                             description: "Double-tap and drag to hold left mouse button",
-                            checked: status.drag_lock_enabled ?? true,
+                            checked: status.drag_lock_enabled ?? false,
                             onChange: (val) => updateSetting("drag_lock_enabled", val)
                         })
                     })
