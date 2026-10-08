@@ -390,6 +390,47 @@ def test_strip_scroll_goes_further_for_a_fast_drag():
     assert total(10) > total(40) * 1.4                         # same distance, 4x the speed
 
 
+def stop_glide(g):
+    g.glide_stop.set()
+    if g.glide_thread is not None:
+        g.glide_thread.join(2.0)
+
+
+def test_a_flick_that_lifts_while_moving_glides():
+    g, b = fresh(sensitivity=1.5, glide=True)
+    t = finger_path(g, 1, 300, 300, 12, 20, 0, 100.0, 0.01)         # 2000 px/s
+    g.touch_up(1, t + 0.005)
+    try:
+        assert g.last_state_label == "GLIDE", g.last_state_label
+    finally:
+        stop_glide(g)
+
+
+def test_a_finger_that_stopped_before_lifting_does_not_glide():
+    g, b = fresh(sensitivity=1.5, glide=True)
+    t = finger_path(g, 1, 300, 300, 12, 20, 0, 100.0, 0.01)         # a fast stroke...
+    g.touch_up(1, t + 0.4)                                           # ...then it rested for 0.4 s before the lift
+    try:
+        assert g.last_state_label != "GLIDE", g.last_state_label
+        assert g.vel_x == 0.0 and g.vel_y == 0.0
+    finally:
+        stop_glide(g)
+    assert g.glide_thread is None or not g.glide_thread.is_alive()
+
+
+def test_a_finger_that_slows_down_before_lifting_does_not_glide_fast():
+    g, b = fresh(sensitivity=1.5, glide=True)
+    t = finger_path(g, 1, 300, 300, 10, 20, 0, 100.0, 0.01)         # fast
+    for i in range(1, 3):                                            # then crawling in sub-pixel steps: no whole pixel is emitted
+        t += 0.015
+        g.touch_move(1, 300 + 200 + 0.3 * i, 300, t)
+    g.touch_up(1, t + 0.005)
+    try:
+        assert g.last_state_label != "GLIDE", (g.last_state_label, g.vel_x)
+    finally:
+        stop_glide(g)
+
+
 def test_stylus_mode_has_no_glide():
     g, b = fresh(stylus_mode=True, sensitivity=1.5, glide=True)
     t = finger_path(g, 1, 300, 300, 12, 20, 0, 100.0, 0.01)      # a fast flick
