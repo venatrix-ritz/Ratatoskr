@@ -22,6 +22,7 @@ const setVolume = (volume) => call("set_volume", volume);
 const toggleMute = () => call("toggle_mute");
 const setBrightness = (target, percent) => call("set_brightness", target, percent);
 const toggleHud = () => call("toggle_hud");
+const setCursorOverride = (enabled) => call("set_cursor_override", enabled);
 const runDiagnostics = () => call("run_diagnostics");
 
 function Content() {
@@ -112,6 +113,15 @@ function Content() {
             await setVolume(rounded);
         } catch (e) {
             console.error("[touch-master] setVolume error:", e);
+        }
+    };
+
+    const handleCursorToggle = async (val) => {
+        setStatus((prev) => ({ ...prev, cursor_stay_visible: val }));
+        try {
+            await setCursorOverride(val);
+        } catch (e) {
+            console.error("[touch-master] setCursorOverride error:", e);
         }
     };
 
@@ -401,6 +411,25 @@ function Content() {
                             description: "Dims the bottom screen after Steam's idle-dim delay (Steam > Settings > Display) and restores it on any input",
                             checked: status.mirror_dim ?? false,
                             onChange: (val) => updateSetting("mirror_dim", val)
+                        })
+                    })
+                ]
+            }),
+            status.enabled && SP_JSX.jsxs(DFL.PanelSection, {
+                title: "Pointer",
+                children: [
+                    SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.ToggleField, {
+                            label: "Keep the pointer visible",
+                            description: status.cursor_stay_visible
+                                ? (status.cursor_stay_visible_active
+                                    ? "On: Game Mode no longer hides the pointer."
+                                    : "On. Takes effect the next time Game Mode starts (reboot, or restart Game Mode).")
+                                : (status.cursor_stay_visible_active
+                                    ? "Off. Takes effect the next time Game Mode starts."
+                                    : "Game Mode hides the pointer after 3 s without motion. Turn on to keep it visible; applies the next time Game Mode starts."),
+                            checked: status.cursor_stay_visible ?? false,
+                            onChange: handleCursorToggle
                         })
                     })
                 ]
