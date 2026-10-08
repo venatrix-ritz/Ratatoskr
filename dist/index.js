@@ -472,7 +472,7 @@ function Content() {
                     SP_JSX.jsx(DFL.PanelSectionRow, {
                         children: SP_JSX.jsx(DFL.ToggleField, {
                             label: "Pinch to Zoom",
-                            description: "2-finger pinch emits Ctrl+Wheel zoom",
+                            description: "Not implemented yet: this switch is saved but does nothing",
                             checked: status.pinch_zoom_enabled ?? false,
                             onChange: (val) => updateSetting("pinch_zoom_enabled", val)
                         })
@@ -488,7 +488,7 @@ function Content() {
                     SP_JSX.jsx(DFL.PanelSectionRow, {
                         children: SP_JSX.jsx(DFL.ToggleField, {
                             label: "Drag Lock",
-                            description: "Double-tap and drag to hold left mouse button",
+                            description: "Not implemented yet: this switch is saved but does nothing",
                             checked: status.drag_lock_enabled ?? false,
                             onChange: (val) => updateSetting("drag_lock_enabled", val)
                         })
