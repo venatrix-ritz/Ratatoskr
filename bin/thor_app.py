@@ -71,9 +71,9 @@ CONFIG_PATH = os.path.expanduser("~/.config/thor-input/config.json")
 # The bottom panel is 3.92" at 1240x1080, about 16.5 px per mm: the old 48 px header (36 px buttons, 15 px text) was
 # about 2 mm tall. 80 / 64 px buttons are about 4 mm, still leaving most of the screen to the trackpad and keyboard.
 HEADER_BUTTONS_H = 80.0
-STATUS_RIBBON_H = 52.0
+STATUS_RIBBON_H = 88.0  # two rows of three status items
 BUTTON_TEXT_MAX_PX = 26.0
-RIBBON_TEXT_MAX_PX = 20.0
+RIBBON_TEXT_MAX_PX = 28.0
 HEADER_HEIGHT = HEADER_BUTTONS_H + STATUS_RIBBON_H
 SPLIT_Y = 500.0  # split mode: trackpad above, keyboard below
 
@@ -89,7 +89,7 @@ QC_CARD_Y = (HEADER_HEIGHT + 28.0, HEADER_HEIGHT + 178.0, HEADER_HEIGHT + 328.0)
 QC_CARD_H = 120.0
 QC_CTRL_DY, QC_CTRL_H = 46.0, 56.0  # the -, slider, + row inside a card
 QC_HEALTH_Y, QC_HEALTH_H = HEADER_HEIGHT + 478.0, 220.0
-QC_BUTTONS_Y, QC_BUTTONS_H = 856.0, 64.0
+QC_BUTTONS_Y, QC_BUTTONS_H = HEADER_HEIGHT + 724.0, 64.0
 
 # <linux/input.h> (include/uapi/linux/input.h): EVIOCGABS(abs) = _IOR('E', 0x40 + abs, struct input_absinfo), 24 bytes;
 # EVIOCGMTSLOTS(len) = _IOC(_IOC_READ, 'E', 0x0a, len) with a buffer of one u32 code and one s32 per slot.
@@ -142,6 +142,7 @@ class ThorApp:
         self.held_ui_button: str | None = None
         self.held_ui_button_tid: int | None = None
         self.active_key_press: int | None = None
+        self.active_key_tid: int | None = None  # the touch that pressed active_key_press; its lift clears the highlight
         self.last_key_label = ""
         self.last_event_time = time.time()
         self.fps = 60.0
@@ -683,11 +684,13 @@ class ThorApp:
             window_s = self.keyboard_cfg["keyboard_caps_window_ms"] / 1000.0
             self._send_keys(self.mods.press(key.special, tid, time.monotonic(), window_s))
             self.active_key_press = key.code
+            self.active_key_tid = tid
         else:
             if self.held_key is not None:
                 self._end_key_press()  # a second finger types while the first still holds a key
             self.mods.key_typed()
             self.active_key_press = key.code
+            self.active_key_tid = tid
             self.held_key = key
             self.held_key_tid = tid
             self.last_key_label = key.shift_label if self.mods.active("shift") else key.label
@@ -720,10 +723,13 @@ class ThorApp:
         if owner == "keyboard":
             if self.mods.is_modifier_touch(tid):
                 self._send_keys(self.mods.release(tid))
-                self.active_key_press = None
-                GLib.idle_add(self.drawing_area.queue_draw)
             elif tid == self.held_key_tid:
                 self._end_key_press()
+            # A tap that turns a modifier off is no longer a modifier touch, so clear the pressed look by touch id
+            if tid == self.active_key_tid:
+                self.active_key_press = None
+                self.active_key_tid = None
+            GLib.idle_add(self.drawing_area.queue_draw)
         elif owner == "trackpad" or (owner is None and self.mode != "settings"):
             self.gesture.touch_up(tid, now)
             if self.show_debug_hud:
@@ -1068,25 +1074,21 @@ class ThorApp:
             (brt_txt, (1.0, 0.85, 0.4)),
         ]
 
-        gap = 26.0
+        # Two rows of three cells; one font size for all, as large as the widest text allows
+        cols, pad = 3, 20.0
+        cell_w = (SCREEN_WIDTH - 2 * pad) / cols
         cr.set_font_size(RIBBON_TEXT_MAX_PX)
-        natural = sum(cr.text_extents(t).x_advance for t, _ in pills) + gap * (len(pills) - 1)
-        cr.set_font_size(RIBBON_TEXT_MAX_PX * min(1.0, (SCREEN_WIDTH - 40.0) / natural))
-        baseline = ry + (rh + cr.text_extents("H").height) / 2.0
-        cur_x = 20.0
+        widest = max(cr.text_extents(t).x_advance for t, _ in pills)
+        cr.set_font_size(RIBBON_TEXT_MAX_PX * min(1.0, (cell_w - 16.0) / widest))
+        cap = cr.text_extents("H").height
+        row_h = rh / 2.0
         for i, (text, col) in enumerate(pills):
-            cr.set_source_rgb(*col)
-            cr.move_to(cur_x, baseline)
-            cr.show_text(text)
+            cx = pad + cell_w * (i % cols) + cell_w / 2.0
+            cy = ry + row_h * (i // cols) + row_h / 2.0
             ext = cr.text_extents(text)
-            cur_x += ext.x_advance + gap
-
-            # Divider dot
-            if i < len(pills) - 1:
-                cr.set_source_rgb(0.25, 0.28, 0.35)
-                cr.arc(cur_x - gap / 2.0, ry + rh / 2.0, 2.0, 0, 6.28)
-                cr.fill()
-                cr.new_path()
+            cr.set_source_rgb(*col)
+            cr.move_to(cx - ext.x_advance / 2.0, cy + cap / 2.0)
+            cr.show_text(text)
 
     def _draw_button(
         self,

@@ -65,7 +65,7 @@ def make(mode="keyboard"):
     app.bridge, app.gesture = Bridge(), Gesture()
     app.keyboard_cfg = dict(keyboard_settings.DEFAULTS)
     app.mods, app._touch_owner, app.input_lock = ModifierState(), {}, threading.RLock()
-    app.held_key = app.held_key_tid = app.active_key_press = None
+    app.held_key = app.held_key_tid = app.active_key_press = app.active_key_tid = None
     app.held_ui_button = app.held_ui_button_tid = app._slider_drag = None
     app.last_key_label, app.last_event_time, app.show_debug_hud = "", 0.0, False
     app._repeat_stop, app._repeat_thread = threading.Event(), None
@@ -133,6 +133,18 @@ def test_split_drag_across_the_line_keeps_moving_the_pointer():
     thor_app.ThorApp._handle_touch_up(app, 9, 0.2)
     check("the drag stays with the trackpad", app.gesture.calls == [("touch_down", 9), ("touch_move", 9), ("touch_up", 9)], app.gesture.calls)
     check("no key was typed", app.bridge.ev == [], app.bridge.ev)
+
+
+def test_turning_shift_off_clears_its_highlight():
+    app = make()
+    tap(app, "Shift", 1)
+    app.mods.last_tap["shift"] -= 10.0  # the handler reads the real clock: make the first tap long ago
+    k = keys(app)["Shift"]
+    thor_app.ThorApp._handle_touch_down(app, 2, k.x + k.w / 2, k.y + k.h / 2, 5.0)  # slow second tap: turns it off
+    check("shift went up", app.bridge.ev[-1] == (SHIFT, "up"), app.bridge.ev)
+    thor_app.ThorApp._handle_touch_up(app, 2, 5.1)
+    check("no key is drawn pressed after the lift", app.active_key_press is None, app.active_key_press)
+    check("shift is not drawn active", not app.kb_layout.shift_active and not app.kb_layout.caps_lock)
 
 
 if __name__ == "__main__":
