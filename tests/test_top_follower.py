@@ -113,7 +113,7 @@ def test_a_suspend_between_samples_is_not_a_fall():
     # The same samples on a clock that stood still across the suspend DO look like a steep fall: why the boot clock matters.
     g = TopFollower()
     run(g, 0.0, [1.0] * 80)
-    bad, _ = run(g, 20.0 + 0.25, [0.6, 0.3, FLOOR, FLOOR])
+    bad, _ = run(g, 20.0 + 0.25, [0.8, 0.6, 0.4, 0.2, FLOOR, FLOOR])
     assert [a for _t, a in bad] == ["dim"], bad
 
 
@@ -132,7 +132,9 @@ def test_sleep_blank_then_wake():
     f = TopFollower()
     run(f, 0.0, [1.0] * 80)
     out, t = run(f, 20.0, [1.0, 0.5, 0.08, 0.027, 0.027, 0.027, 0.027, 0.027])
-    assert f.dimmed or out == [], out        # a 1-2 s drop may or may not look like a ramp; either is harmless
+    assert out == [], out        # the blank before a suspend is a one-second drop of most of the range: not a dim
+    out, t = run(f, t, [1.0, 0.98, 0.5, 0.027, 0.027, 0.027])
+    assert out == [], out        # at 4 Hz it is a couple of samples: the same
     out, _ = run(f, t + 1000, [1.0, 1.0, 1.0])
     assert not f.dimmed
 
