@@ -1,11 +1,15 @@
-"""Mirror the top screen's idle dimming onto the bottom screen.
+"""Make the bottom panel follow the top panel's idle dim.
 
 Steam dims only the top panel: Armada steers every Steam backlight write to the
 primary panel (`steamos-priv-write`, `ARMADA_PRIMARY_BACKLIGHT`), so the bottom
-panel keeps its brightness. The dim delay is a Steam setting, stored in
-`~/.local/share/Steam/config/config.vdf` as `IdleBacklightDimBatterySeconds` and
-`IdleBacklightDimACSeconds` (0 = never). This module reads that setting, tracks
-input idle time itself, and dims/restores the bottom panel on the same schedule.
+panel keeps its brightness. This module watches the top panel's backlight and, when
+it starts falling the way Steam's idle ramp does (about 260 writes over 30 s, 254 down
+to 7), fades the bottom panel down; when the top comes back, or the bottom is touched,
+it restores it. It does not read Steam's delay or track input to guess when Steam
+will dim: the first version did, and on the Thor its idle clock ran up to 55 s ahead
+of Steam's, because the physical controller (`/dev/input/event7`) is mode `c---------`
+root:root and cannot be read (observed 2026-10-08). The top backlight is what Steam
+actually decided.
 
 Sleep is not handled here: Armada's fake-suspend sends `drm_sleep_internal_screen` to every
 gamescope instance in the session (falling back to `bl_power` on every backlight), which should
@@ -17,7 +21,6 @@ from __future__ import annotations
 import glob
 import json
 import os
-import re
 import select
 import struct
 import threading
@@ -25,11 +28,24 @@ import time
 from typing import Callable
 
 from debug_codes import DebugCode
+from top_follower import TopFollower
 
-STEAM_CONFIG = os.path.expanduser("~/.local/share/Steam/config/config.vdf")
-BATTERY_STATUS = "/sys/class/power_supply/battery/status"
 TOP_BACKLIGHT = "/sys/class/backlight/ae96000.dsi.0"
-USB_ONLINE = "/sys/class/power_supply/qcom-battmgr-usb/online"
+# A fall of the top backlight only counts as Steam's idle dim after this long without input (a slider drag has input).
+INPUT_QUIET_S = 5.0
+
+
+def input_says_slider(idle: float, tracker_age: float) -> bool:
+    """True when a falling top backlight is probably a slider drag: there was input within INPUT_QUIET_S. A tracker that
+    has only just started has seen no input yet, so its idle time says nothing; then the guard does not apply (a restart
+    during Steam's idle dim must still dim the bottom)."""
+    return tracker_age >= INPUT_QUIET_S and idle < INPUT_QUIET_S
+
+
+def _boot_now() -> float:
+    """Seconds on a clock that keeps counting while the system sleeps (CLOCK_MONOTONIC stops). The follower must see
+    the real gap across a suspend, or the last samples before it and the first after it look like one steep fall."""
+    return time.clock_gettime(time.CLOCK_BOOTTIME) if hasattr(time, "CLOCK_BOOTTIME") else time.monotonic()
 # Armada's root service re-applies this saved level every 2 s whenever the backlight differs from it
 # (armada-control: BOTTOM_SCREEN_BRIGHTNESS_RESTORE_INTERVAL), so a dim that does not change it is undone at once.
 ARMADA_SAVED = "/etc/armada/bottom-screen-brightness"
@@ -42,38 +58,12 @@ ABS_HAT0X, ABS_HAT0Y = 0x10, 0x11
 ABS_MT_FIRST = 0x2F  # ABS_MT_SLOT; the multitouch axes start here
 
 _EVENT = struct.Struct("llHHi")
-_VDF_KEY = re.compile(r'"IdleBacklightDim(Battery|AC)Seconds"\s+"(\d+)"')
 
 # Devices that are not the user: haptics, jack/lid switches, our own virtual devices.
 _IGNORED_NAMES = ("haptics", "Jack", "lid", "Thor Virtual", "pmic_")
 # Sticks and triggers count as activity only past this deflection (drift stays idle).
 _STICK_THRESHOLD = 8000
 _TRIGGER_THRESHOLD = 100
-
-
-def read_dim_seconds(on_ac: bool, path: str = STEAM_CONFIG) -> int:
-    """Steam's idle-dim delay for the current power source, in seconds (0 = never or unreadable)."""
-    try:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            found = {k: int(v) for k, v in _VDF_KEY.findall(f.read())}
-    except OSError:
-        return 0
-    return found.get("AC" if on_ac else "Battery", 0)
-
-
-def on_ac_power(status_path: str = BATTERY_STATUS, usb_path: str = USB_ONLINE) -> bool:
-    """True on a charger: the USB supply is online, or the battery reports Charging/Full."""
-    try:
-        with open(usb_path, encoding="utf-8") as f:
-            if f.read().strip() == "1":
-                return True
-    except OSError:
-        pass
-    try:
-        with open(status_path, encoding="utf-8") as f:
-            return f.read().strip() in ("Charging", "Full")
-    except OSError:
-        return False
 
 
 def read_saved_bottom_level(path: str = ARMADA_SAVED) -> int | None:
@@ -227,7 +217,7 @@ class IdleTracker:
 
 
 class DimMirror:
-    """Dims the bottom panel after Steam's idle-dim delay and restores it on the next input.
+    """Dims the bottom panel while the top panel's idle dim is on and restores it when it ends or the bottom is touched.
 
     The dimmed level is also written to Armada's saved level, otherwise armada-control puts the old
     level straight back. The pre-dim level is kept in a recovery file until it has been restored.
@@ -333,7 +323,7 @@ class DimMirror:
         self._logger.log(DebugCode.DIM_MIRROR, f"bottom restored to {pct}% ({why})")
         return True
 
-    def _dim(self, delay: int, idle: float, floor_pct: int) -> None:
+    def _dim(self, why: str, floor_pct: int) -> None:
         saved = read_saved_bottom_level(self._saved_path)
         current = saved if saved is not None else self._stats.get_stats().get("bot_bright_pct", 100)
         target = max(1, min(current, floor_pct))
@@ -362,43 +352,46 @@ class DimMirror:
                 time.sleep(0.15)
         self._logger.log(
             DebugCode.DIM_MIRROR,
-            f"bottom dimmed {current}% -> {target}% (idle {idle:.0f}s >= Steam dim delay {delay}s)",
+            f"bottom dimmed {current}% -> {target}% ({why})",
         )
 
-    def _watch_top(self, idle: float, delay: int) -> None:
-        """Diagnostic only: log when the top backlight really drops, to compare with the timer above."""
+    def _read_top_level(self) -> float | None:
+        """Top backlight as a fraction of its maximum, or None when it cannot be read."""
         try:
             with open(f"{TOP_BACKLIGHT}/brightness", encoding="utf-8") as f:
                 top = int(f.read().strip())
+            with open(f"{TOP_BACKLIGHT}/max_brightness", encoding="utf-8") as f:
+                top_max = int(f.read().strip())
         except (OSError, ValueError):
-            return
-        prev, self._top_prev = self._top_prev, top
-        if prev is not None and prev > 0 and top < prev * 0.7:
-            self._logger.log(
-                DebugCode.DIM_MIRROR,
-                f"top backlight dropped {prev} -> {top} at idle {idle:.0f}s (Steam delay {delay}s)",
-            )
-        elif prev is not None and top > prev * 1.5 and prev > 0:
-            self._logger.log(DebugCode.DIM_MIRROR, f"top backlight rose {prev} -> {top} at idle {idle:.0f}s")
+            return None
+        return top / top_max if top_max > 0 else None
 
     def _run(self) -> None:
-        delay, last_read, was_ac = 0, 0.0, None
-        while not self._stop.wait(0.25 if self.dimmed else 1.0):
+        follower = TopFollower()
+        started = time.monotonic()
+        while not self._stop.wait(0.25):
             if self._recover_pending and time.monotonic() >= self._next_recover:
                 self._recover_pending = not self.recover()
                 self._next_recover = time.monotonic() + 5.0
             cfg = self._get_config()
-            idle = self._tracker.idle_seconds()
-            ac = on_ac_power()
-            now = time.monotonic()
-            if ac != was_ac or now - last_read > 10:
-                delay, last_read, was_ac = read_dim_seconds(ac), now, ac
-            self._watch_top(idle, delay)
-            if not cfg.get("mirror_dim", False) or delay <= 0:
-                self.restore("mirror off or Steam dim delay is 0")
+            if not cfg.get("mirror_dim", False):
+                self.restore("mirror off")
+                follower.reset()
                 continue
-            if self.dimmed:
-                if idle < 1.0:
-                    self.restore("input")
-            elif idle >= delay and time.monotonic() >= self._retry_after:
-                self._dim(delay, idle, int(cfg.get("mirror_dim_floor_percent", 3)))
+            level = self._read_top_level()
+            if level is None:
+                continue
+            now = time.monotonic()
+            action = follower.update(_boot_now(), level)
+            if action == "dim" and input_says_slider(self._tracker.idle_seconds(), now - started):
+                follower.reject()  # the user is dragging the brightness slider, not Steam's idle ramp (needs a minute of quiet)
+            elif action == "dim" and now >= self._retry_after:
+                self._dim(f"top backlight falling, now {level * 100:.0f}% of its maximum",
+                          int(cfg.get("mirror_dim_floor_percent", 3)))
+                if not self.dimmed:
+                    follower.reset()  # the write failed; wait for the next ramp
+            elif action == "restore":
+                self.restore(f"top backlight {'rose' if level > 0.5 else 'stopped falling'}, now {level * 100:.0f}%")
+            elif self.dimmed and self._tracker.idle_seconds() < 1.0:
+                self.restore("input")
+                follower.suppress()

@@ -18,9 +18,10 @@
 
 ## Running the tests
 ```bash
-python tests/test_dim_mirror.py
+for t in tests/test_*.py; do python "$t" || break; done
+node tests/test_panel_logic.cjs
 ```
-The dim-mirror tests use fake hardware and run on any OS. The driver itself needs GTK, cairo, `/dev/uinput` and the Thor's bottom-screen session, so it can only be exercised on the device. Syntax checks that work anywhere:
+The Python tests use fake hardware, pipes and socket pairs and run on any OS (except `tests/test_driver_sync.py`, which needs `os.chown` and skips itself on Windows); they are also run on the Thor by the deploy routine, so none of them may touch the real volume, backlight or sudo (`tests/test_system_stats.py` blocks real commands and fails if anything slips through). `tests/test_panel_logic.cjs` runs the Decky panel's pure helpers (`mergeStatus`, `makeThrottle`) under Node. The driver itself needs GTK, cairo, `/dev/uinput` and the Thor's bottom-screen session, so it can only be exercised on the device. Syntax checks that work anywhere:
 ```bash
 python -m py_compile main.py debug_codes.py bin/*.py
 node --check dist/index.js
@@ -32,7 +33,7 @@ bash -n scripts/deploy.sh
 
 ## Changing things
 - **A new setting:** add the key to the gesture processor (`engine.py`) or the app (`_apply_mirror_settings` is the pattern), to `get_status`, to the defaults in `main.py` and `touch_master_manager.py`, to the panel, and to [configuration.md](configuration.md).
-- **A new IPC action:** add it to the `_ipc_loop` chain in `thor_app.py` and to the table in [architecture.md](architecture.md). Remember the manager sends its own action names (see the known issues).
+- **A new IPC action:** add it to the `_ipc_loop` chain in `thor_app.py` and to the table in [architecture.md](architecture.md). The manager builds its requests with `ipc_util.settings_request` / `brightness_request` / `hud_request`, and `tests/test_ipc_util.py` checks that they only use actions the driver handles.
 - **A new diagnostic code:** add it to `DebugCode` and `CODE_DESCRIPTIONS` in `debug_codes.py` and to the README table.
 
 ## Conventions

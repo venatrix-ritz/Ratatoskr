@@ -263,6 +263,235 @@ def test_ghosts_left_by_a_five_finger_press_expire_and_release_the_lock():
     assert moves(b.log) and not [e for e in b.log if e[0] == "scroll"]
 
 
+# --- stylus mode ------------------------------------------------------------------------------------------
+
+def scrolls(log):
+    return [e for e in log if e[0] == "scroll"]
+
+
+def test_stylus_mode_ignores_a_second_contact_and_every_multi_finger_gesture():
+    g, b = fresh(stylus_mode=True, two_finger_right_click=True, three_finger_middle_click=True,
+                 three_finger_swipe_enabled=True, sensitivity=1.5, glide=False)
+    g.touch_down(1, 300, 300, 100.0)
+    for i, tid in enumerate((2, 3, 4)):            # a palm and two more fingers land while the pen is down
+        g.touch_down(tid, 500 + 40 * i, 500, 100.01)
+    for i in range(1, 15):
+        t = 100.02 + 0.015 * i
+        g.touch_move(1, 300 + 4 * i, 300, t)
+        for tid in (2, 3, 4):
+            g.touch_move(tid, 520, 500 + 6 * i, t)
+    for tid in (2, 3, 4, 1):
+        g.touch_up(tid, 100.5)
+    assert moves(b.log) and not scrolls(b.log) and not clicks(b.log), b.log
+    assert not [e for e in b.log if e[0] in ("tapkey", "key")], b.log
+    assert not g.active_contacts
+
+
+def pen_tap(g, t, x=300, y=300, held=0.08):
+    g.touch_down(9, x, y, t)
+    g.touch_up(9, t + held)
+    return t + held
+
+
+def test_stylus_mode_still_moves():
+    g, b = fresh(stylus_mode=True, sensitivity=1.5, glide=False)
+    t = finger_path(g, 2, 300, 300, 30, 4, 0, 101.0, 0.015)
+    g.touch_up(2, t + 0.01)
+    assert len(moves(b.log)) > 15 and not clicks(b.log)
+
+
+def test_a_single_pen_tap_does_not_click():
+    g, b = fresh(stylus_mode=True)
+    pen_tap(g, 100.0)
+    assert not clicks(b.log), b.log
+
+
+def test_a_double_tap_clicks_once():
+    g, b = fresh(stylus_mode=True)
+    t = pen_tap(g, 100.0)
+    pen_tap(g, t + 0.15, x=310, y=305)
+    assert clicks(b.log) == [("click", E.BTN_LEFT)], b.log
+
+
+def test_a_double_tap_survives_the_resets_the_app_does_when_the_last_finger_lifts():
+    g, b = fresh(stylus_mode=True)
+    t = pen_tap(g, 100.0)
+    g.reset_all()                                              # thor_app does this whenever the digitizer reports 0 contacts
+    pen_tap(g, t + 0.15)
+    assert clicks(b.log) == [("click", E.BTN_LEFT)], b.log
+
+
+def test_switching_pen_mode_forgets_a_pending_first_tap():
+    g, b = fresh(stylus_mode=True)
+    pen_tap(g, 100.0)
+    g.set_settings(stylus_mode=False)
+    g.set_settings(stylus_mode=True)
+    pen_tap(g, 100.1)
+    assert not clicks(b.log), b.log
+
+
+def test_taps_too_far_apart_in_time_or_space_do_not_click():
+    g, b = fresh(stylus_mode=True)
+    t = pen_tap(g, 100.0)
+    t = pen_tap(g, t + 0.8)                                    # too slow
+    pen_tap(g, t + 0.1, x=700, y=700)                          # too far away
+    assert not clicks(b.log), b.log
+
+
+def test_a_landing_tap_followed_by_a_stroke_never_clicks():
+    g, b = fresh(stylus_mode=True, sensitivity=1.5, glide=False)
+    t = pen_tap(g, 100.0)                                      # the pen lands and bounces
+    end = finger_path(g, 5, 300, 300, 30, 4, 0, t + 0.3, 0.015)   # then the real stroke
+    g.touch_up(5, end + 0.01)
+    assert not clicks(b.log) and moves(b.log), b.log
+
+
+def test_a_third_quick_tap_after_a_click_clicks_again_for_a_double_click():
+    g, b = fresh(stylus_mode=True)
+    t = pen_tap(g, 100.0)
+    t = pen_tap(g, t + 0.1)
+    pen_tap(g, t + 0.1)
+    assert len(clicks(b.log)) == 2, b.log
+
+
+def test_pen_taps_respect_tap_to_click_off():
+    g, b = fresh(stylus_mode=True, tap_to_click=False)
+    t = pen_tap(g, 100.0)
+    pen_tap(g, t + 0.1)
+    assert not clicks(b.log)
+
+
+def test_strip_scroll_ignores_landing_wiggle_and_jitter():
+    g, b = fresh(stylus_mode=True, scroll_speed=3)
+    x = E.SCREEN_WIDTH - 50
+    g.touch_down(1, x, 300, 100.0)
+    for i, dy in enumerate((1, -1, 1, -1, 1, -1)):             # wiggle, net zero, under the start distance
+        g.touch_move(1, x, 300 + dy, 100.02 + 0.015 * i)
+    assert not scrolls(b.log), b.log
+    y = 300
+    for i in range(1, 30):                                     # a steady drag
+        y += 3
+        g.touch_move(1, x, y, 100.2 + 0.015 * i)
+        if i % 2 == 0:
+            g.touch_move(1, x, y - 1, 100.2 + 0.015 * i + 0.005)   # pen jitter against the direction
+            g.touch_move(1, x, y, 100.2 + 0.015 * i + 0.01)
+    s = scrolls(b.log)
+    assert s and all(e[2] < 0 for e in s), s                   # never a step back
+
+
+def test_strip_scroll_goes_further_for_a_fast_drag():
+    def total(step_ms):
+        g, b = fresh(stylus_mode=True, scroll_speed=3)
+        x = E.SCREEN_WIDTH - 50
+        g.touch_down(1, x, 100, 100.0)
+        for i in range(1, 41):
+            g.touch_move(1, x, 100 + 6 * i, 100.0 + step_ms / 1000.0 * i)
+        return -sum(e[2] for e in scrolls(b.log))
+    assert total(10) > total(40) * 1.4                         # same distance, 4x the speed
+
+
+def stop_glide(g):
+    g.glide_stop.set()
+    if g.glide_thread is not None:
+        g.glide_thread.join(2.0)
+
+
+def test_a_flick_that_lifts_while_moving_glides():
+    g, b = fresh(sensitivity=1.5, glide=True)
+    t = finger_path(g, 1, 300, 300, 12, 20, 0, 100.0, 0.01)         # 2000 px/s
+    g.touch_up(1, t + 0.005)
+    try:
+        assert g.last_state_label == "GLIDE", g.last_state_label
+    finally:
+        stop_glide(g)
+
+
+def test_a_finger_that_stopped_before_lifting_does_not_glide():
+    g, b = fresh(sensitivity=1.5, glide=True)
+    t = finger_path(g, 1, 300, 300, 12, 20, 0, 100.0, 0.01)         # a fast stroke...
+    g.touch_up(1, t + 0.4)                                           # ...then it rested for 0.4 s before the lift
+    try:
+        assert g.last_state_label != "GLIDE", g.last_state_label
+        assert g.vel_x == 0.0 and g.vel_y == 0.0
+    finally:
+        stop_glide(g)
+    assert g.glide_thread is None or not g.glide_thread.is_alive()
+
+
+def test_a_finger_that_slows_down_before_lifting_does_not_glide_fast():
+    g, b = fresh(sensitivity=1.5, glide=True)
+    t = finger_path(g, 1, 300, 300, 10, 20, 0, 100.0, 0.01)         # fast
+    for i in range(1, 3):                                            # then crawling in sub-pixel steps: no whole pixel is emitted
+        t += 0.015
+        g.touch_move(1, 300 + 200 + 0.3 * i, 300, t)
+    g.touch_up(1, t + 0.005)
+    try:
+        assert g.last_state_label != "GLIDE", (g.last_state_label, g.vel_x)
+    finally:
+        stop_glide(g)
+
+
+def test_stylus_mode_has_no_glide():
+    g, b = fresh(stylus_mode=True, sensitivity=1.5, glide=True)
+    t = finger_path(g, 1, 300, 300, 12, 20, 0, 100.0, 0.01)      # a fast flick
+    g.touch_up(1, t + 0.005)
+    assert g.last_state_label != "GLIDE" and g.glide_stop.is_set()
+
+
+def test_stylus_mode_long_press_right_clicks_even_with_long_press_off():
+    import time
+    g, b = fresh(stylus_mode=True, long_press_right_click=False, long_press_delay_ms=200)
+    g.touch_down(1, 300, 300, time.time())
+    time.sleep(0.35)
+    g.touch_up(1, time.time())
+    assert ("click", E.BTN_RIGHT) in b.log and ("click", E.BTN_LEFT) not in b.log, b.log
+
+
+def test_stylus_mode_right_edge_strip_scrolls_vertically_only():
+    g, b = fresh(stylus_mode=True, scroll_speed=3, sensitivity=1.5)
+    x = E.SCREEN_WIDTH - 50
+    t = finger_path(g, 1, x, 300, 20, 0, 12, 100.0, 0.015)       # drag down the strip
+    g.touch_up(1, t + 0.01)
+    s = scrolls(b.log)
+    assert s and all(e[1] == 0 and e[2] < 0 for e in s), s        # same direction as two-finger scrolling
+    assert not moves(b.log) and not clicks(b.log), b.log
+    b.log.clear()
+    finger_path(g, 2, x, 700, 20, 0, -12, 101.0, 0.015)           # and back up
+    assert [e for e in scrolls(b.log) if e[2] > 0] and not moves(b.log)
+
+
+def test_stylus_mode_bottom_strip_scrolls_sideways():
+    g, b = fresh(stylus_mode=True, scroll_speed=3)
+    y = E.SCREEN_HEIGHT - 40
+    finger_path(g, 1, 400, y, 20, 12, 0, 100.0, 0.015)
+    s = scrolls(b.log)
+    assert s and all(e[2] == 0 and e[1] > 0 for e in s), s
+    assert not moves(b.log)
+
+
+def test_a_touch_that_leaves_the_strip_keeps_scrolling_and_a_pen_lift_does_not_click():
+    g, b = fresh(stylus_mode=True, scroll_speed=3)
+    x = E.SCREEN_WIDTH - 50
+    g.touch_down(1, x, 300, 100.0)
+    for i in range(1, 15):
+        g.touch_move(1, x - 15 * i, 300 + 10 * i, 100.0 + 0.015 * i)   # drifts far out of the strip
+    g.touch_up(1, 100.3)
+    assert scrolls(b.log) and not moves(b.log) and not clicks(b.log), b.log
+
+
+def test_the_strips_only_exist_in_stylus_mode():
+    g, b = fresh(sensitivity=1.5, glide=False)
+    finger_path(g, 1, E.SCREEN_WIDTH - 50, 300, 20, 0, 6, 100.0, 0.015)
+    assert moves(b.log) and not scrolls(b.log), b.log
+
+
+def test_switching_stylus_mode_drops_the_touches_in_progress():
+    g, b = fresh()
+    g.touch_down(1, 300, 300, 100.0)
+    g.set_settings(stylus_mode=True)
+    assert not g.active_contacts and g.stylus_mode and g.get_settings()["stylus_mode"] is True
+
+
 # --- three-finger swipes ----------------------------------------------------------------------------------
 
 def three_down(g, t, y=500):
@@ -326,6 +555,7 @@ def bridge_with_pipe():
     b.scroll_accum_x = b.scroll_accum_y = 0.0
     b.count_scrolls = b.count_mouse_moves = b.count_pointer_wakes = 0
     b.moved_at = 0.0
+    b.wake_pointer = True
     b.held_buttons = set()
     b.count_clicks_left = b.count_clicks_right = 0
     return b, r
@@ -346,6 +576,27 @@ def read_events(r, n):
         _, _, etype, code, value = E.EVENT_STRUCT.unpack_from(data, off)
         out.append((etype, code, value))
     return out
+
+
+def test_closing_the_bridge_with_a_button_held_releases_it_instead_of_deadlocking():
+    import threading
+    r, w = os.pipe()
+    real = E.UInputBridge._init_devices
+    E.UInputBridge._init_devices = lambda self: None          # no /dev/uinput here: use the real constructor, a pipe for the device
+    try:
+        b = E.UInputBridge(E.DebugLogger("test"))
+    finally:
+        E.UInputBridge._init_devices = real
+    b.mouse_fd = w
+    b.wake_pointer = False                                    # keep the pointer nudge out of this test
+    b.mouse_button(E.BTN_LEFT, True)
+    read_events(r, 2)
+    t = threading.Thread(target=b.release_all, daemon=True)
+    t.start()
+    t.join(3.0)
+    assert not t.is_alive(), "release_all() deadlocked on its own lock"
+    assert read_events(r, 2) == [(E.EV_KEY, E.BTN_LEFT, 0), (E.EV_SYN, 0, 0)]
+    assert not b.held_buttons
 
 
 def test_the_first_scroll_after_a_still_spell_nudges_the_pointer_out_and_back():
@@ -387,6 +638,17 @@ def test_clicker_style_tapping_in_one_place_keeps_the_pointer_awake():
         b.mouse_button(E.BTN_LEFT, False)
         b.moved_at -= 0.6
     assert b.count_pointer_wakes == 2, b.count_pointer_wakes   # the first click, then again once 2 s have passed
+
+
+def test_no_nudges_when_game_mode_keeps_the_pointer_visible():
+    b, r = bridge_with_pipe()
+    b.wake_pointer = False                                     # Pen +: the running Game Mode has the override
+    b.emit_scroll(0, -120)
+    ev = read_events(r, 3)                                     # hi-res wheel, whole notch, sync: nothing before them
+    assert not [e for e in ev if e[0] == E.EV_REL and e[1] == E.REL_X], ev
+    b.mouse_button(E.BTN_LEFT, True)
+    assert read_events(r, 2) == [(E.EV_KEY, E.BTN_LEFT, 1), (E.EV_SYN, 0, 0)]
+    assert b.count_pointer_wakes == 0
 
 
 def test_a_long_scroll_keeps_waking_the_pointer_every_couple_of_seconds():

@@ -1,19 +1,27 @@
 # Dim the bottom screen with the top (opt-in)
 
-**Status: the dim write path is verified on a Thor (2026-10-08); its timing against Steam's own dim is still being observed.** The first version dimmed for a moment and was undone by Armada (see below). That is fixed and checked on the hardware: the dim holds, the restore works, and a dim left by a crash is recovered at the next start. Compare the `DBG-610` log lines with the top panel while you use it.
+**Status: follows the top panel's backlight (2026-10-08). The first version guessed Steam's idle timing and was wrong; this one watches what Steam did. Verified by tests against Steam's real ramp; on-device timing is being observed.**
 
 ## The problem
-Steam's idle dim only touches the top panel. Armada deliberately steers every Steam backlight write to the primary panel (`ae96000.dsi.0` on the Thor), so the bottom panel (`ae94000.dsi.0`) keeps its brightness. [src: Armada `system_files/usr/bin/steamos-polkit-helpers/steamos-priv-write`, `devices/ayn-thor.conf`]
+Steam's idle dim only touches the top panel. Armada deliberately steers every Steam backlight write to the primary panel (`ae96000.dsi.0` on the Thor), so the bottom panel (`ae94000.dsi.0`) keeps its brightness. [src: Armada `system_files/usr/bin/steamos-polkit-helpers`]
 
-The dim delay is a Steam setting. On the surveyed Thor `config.vdf` held `IdleBacklightDimBatterySeconds` = 300 and `IdleBacklightDimACSeconds` = 0 (never), and the journal (`armada-steamos-priv-write` tag) showed a ramp of about 265 writes from 254 down to 7 starting exactly 300 s after the previous wake. [observed 2026-10-07, details in the AynThor repo's `docs/armada/dual-screen-dimming.md`]
+Steam's idle ramp, read from the Thor's journal (`armada-steamos-priv-write` tag): about 260 writes over 30 s, value 254 down to 7 of 255 (panel value 4079 down to 112 of 4096). Sampled once a second on 2026-10-08 it falls 4079, 4015, 3838, 3614, 3324, 3003, 2666 ... 112. [observed 2026-10-08]
 
 ## What the mirror does
-1. Reads the delay for the current power source from `~/.local/share/Steam/config/config.vdf` (battery, or charging/full; 0 means never) and re-reads it every 10 s.
-2. Tracks idle time from input on every readable input device: buttons, sticks past about 25 % deflection, triggers, hat, mouse, the top touchscreen. The grabbed bottom touchscreen is reported by the app itself. Haptics, jack, lid and power-key devices and Ratatoskr's own virtual devices are ignored.
-3. After the delay, fades the bottom backlight to `mirror_dim_floor_percent` (default 3 %, about Steam's observed floor of 7/255). On the next input it restores the level it had.
-4. Writes the dimmed level to Armada's saved bottom-screen level (`/etc/armada/bottom-screen-brightness`) as well, because Armada's root service (`armada-control`) re-applies that saved level every 2 seconds whenever the backlight differs from it. Before 2026-10-08 the mirror only changed the backlight, and Armada put it back within about 1.5 seconds (measured on the Thor). The pre-dim level is kept in `~/.local/state/thor-input/dim-restore.json` until it has been restored, so a crash, kill or reboot while dimmed is repaired at the next start instead of leaving the screen dim.
+1. Reads the top backlight four times a second (`brightness` over `max_brightness`). It does not read Steam's delay and does not guess idle time from input.
+2. When the top has been falling steadily for about 2.5 s, by at least 6 % of where it started, and is below 95 % of its recent peak, it fades the bottom backlight to `mirror_dim_floor_percent` (default 3 %). That is about 4 s after Steam's ramp starts.
+3. It restores the bottom when the top comes back (back to 97 % of the peak, or up by 15 points), or when the top stops falling above 6 % for 4 s (a brightness-slider move ended, not an idle ramp), or when the bottom screen is touched. After a touch it will not dim again until the top has recovered.
+4. Writes the dimmed level to Armada's saved bottom-screen level (`/etc/armada/bottom-screen-brightness`) as well, because Armada's root service (`armada-control`) re-applies that saved level every 2 seconds whenever the backlight differs from it.
 5. If the backlight is not writable it logs `DBG-701` and retries after a minute.
-6. Logs `DBG-610` lines for each dim and restore, **and every time the top backlight really drops or rises**, with the idle time at that moment and Steam's delay, so you can check the timer against Steam.
+6. If the service starts while the top is already at its floor (a restart during an idle dim), it treats that as a dim and follows it, assuming the normal level is full.
+7. Logs a `DBG-610` line for each dim and restore, with the reason.
+
+The logic is in `bin/top_follower.py` (pure, no I/O) and `DimMirror._run` in `bin/dim_mirror.py`.
+
+## Why not Steam's delay and input
+The first version read `IdleBacklightDim*Seconds` from `config.vdf` and tracked input itself. On the Thor its clock disagreed with Steam's, by up to 55 s with the bottom first (2026-10-08: bottom dimmed 19:37:33, top ramp began 19:38:28; again 19:47:50 against 19:48:00). One cause is certain: the physical controller `/dev/input/event7` ("AYN Odin2 Gamepad") is mode `c---------` root:root, so the tracker cannot open it ("Permission denied") and never counts its input, while Steam does. Whether other input is missed too is not established. [observed 2026-10-08]
+
+A second guess, that Steam dims on the charger at the battery delay although the AC value reads 0, was written into the earlier version of this page and is withdrawn: with the charger in and AC at 0, nothing dimmed for an hour (18:03 to 19:03), and earlier dims on the charger are not explained by it.
 
 ## Turn it on
 Decky panel, **Screens**, "Dim bottom screen with the top"; or `"mirror_dim": true` in `config.json`. It needs permission to write the bottom backlight; see the sudo note in [installation.md](installation.md).

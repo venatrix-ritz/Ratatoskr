@@ -10,10 +10,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import socket
 import subprocess
 import sys
+import threading
 from pathlib import Path
+
+import atomic_json
+import ipc_util
 
 # Fix environment for systemd user session if invoked from environments lacking them
 os.environ.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
@@ -31,17 +34,15 @@ DEFAULT_CONFIG = {
     "enabled": True,
     "mode": "trackpad",
     "sensitivity": 1.5,
-    "glide": False,
-    "friction": 7,
+    "glide": True,
+    "friction": 5,
     "scroll_speed": 3,
     "tap_to_click": True,
     "long_press_right_click": False,
     "long_press_delay_ms": 450,
     "two_finger_right_click": True,
     "three_finger_middle_click": False,
-    "pinch_zoom_enabled": False,
     "three_finger_swipe_enabled": False,
-    "drag_lock_enabled": False,
     "mirror_dim": False,
     "mirror_dim_floor_percent": 3,
     "debug_hud": False,
@@ -60,28 +61,14 @@ def read_config() -> dict:
 
 
 def save_config(cfg: dict) -> None:
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, indent=2)
+        atomic_json.write_json_atomic(CONFIG_PATH, cfg)
     except Exception:
         pass
 
 
-def send_ipc(request: dict, timeout: float = 0.5) -> dict:
-    if not os.path.exists(SOCKET_PATH):
-        return {"ok": False, "error": "Socket not found"}
-    try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-            s.settimeout(timeout)
-            s.connect(SOCKET_PATH)
-            s.sendall(json.dumps(request).encode("utf-8"))
-            data = s.recv(4096)
-            if not data:
-                return {"ok": False, "error": "Empty response"}
-            return json.loads(data.decode("utf-8"))
-    except Exception as err:
-        return {"ok": False, "error": str(err)}
+def send_ipc(request: dict, timeout: float = 1.0) -> dict:
+    return ipc_util.request(SOCKET_PATH, request, timeout=timeout)
 
 
 def is_service_active() -> bool:
@@ -147,6 +134,7 @@ def launch_gui() -> None:
             self.set_border_width(16)
 
             self.updating_ui = False
+            self._refreshing = False
             self.cfg = read_config()
 
             # Main vertical container with scroll
@@ -302,14 +290,32 @@ def launch_gui() -> None:
             return row
 
         def refresh_status(self) -> bool:
-            active = is_service_active()
+            """Poll on a worker thread: systemctl and the socket can each take seconds, and the window must not freeze."""
+            if self._refreshing:
+                return True
+            self._refreshing = True
+
+            def work():
+                active, res, debug_info = False, {}, {}
+                try:
+                    active = is_service_active()
+                    if active:
+                        res = send_ipc({"action": "get_status"})
+                        debug_info = send_ipc({"action": "get_debug"})
+                except Exception:
+                    pass
+                GLib.idle_add(self._apply_status, active, res, debug_info)
+
+            threading.Thread(target=work, daemon=True).start()
+            return True
+
+        def _apply_status(self, active: bool, res: dict, debug_info: dict) -> bool:
+            self._refreshing = False
             self.updating_ui = True
 
             if active:
                 self.status_lbl.set_markup("<span color='#2ecc71' weight='bold'>● Running</span> (Driver Active on Bottom Screen)")
                 self.toggle_btn.set_label("Stop Driver")
-                res = send_ipc({"action": "get_status"})
-                debug_info = send_ipc({"action": "get_debug"})
 
                 if res.get("ok"):
                     mode = res.get("mode", "trackpad")
@@ -345,14 +351,21 @@ def launch_gui() -> None:
                 self.stats_lbl.set_text("")
 
             self.updating_ui = False
-            return True
+            return False
 
         def on_toggle_clicked(self, _btn):
-            if is_service_active():
-                stop_service()
-            else:
-                start_service()
+            self.toggle_btn.set_sensitive(False)
+
+            def work():
+                toggle_service()
+                GLib.idle_add(self._after_toggle)
+
+            threading.Thread(target=work, daemon=True).start()
+
+        def _after_toggle(self) -> bool:
+            self.toggle_btn.set_sensitive(True)
             self.refresh_status()
+            return False
 
         def on_mode_toggled(self, btn, mode: str):
             if btn.get_active() and not self.updating_ui:
@@ -367,7 +380,7 @@ def launch_gui() -> None:
             self.sens_lbl.set_text(f"Sensitivity: {val:.1f}x")
             self.cfg["sensitivity"] = val
             save_config(self.cfg)
-            send_ipc({"action": "set_settings", "settings": {"sensitivity": val}})
+            send_ipc(ipc_util.settings_request(sensitivity=val))
 
         def on_cfg_switch(self, switch, key: str):
             if self.updating_ui:
@@ -375,7 +388,7 @@ def launch_gui() -> None:
             active = switch.get_active()
             self.cfg[key] = active
             save_config(self.cfg)
-            send_ipc({"action": "set_settings", "settings": {key: active}})
+            send_ipc(ipc_util.settings_request(**{key: active}))
 
         def on_hud_toggled(self, switch, _param):
             if self.updating_ui:
@@ -383,7 +396,7 @@ def launch_gui() -> None:
             active = switch.get_active()
             self.cfg["debug_hud"] = active
             save_config(self.cfg)
-            send_ipc({"action": "set_debug_hud", "enabled": active})
+            send_ipc(ipc_util.hud_request(active))
 
         def on_brightness_changed(self, target: str, scale):
             if self.updating_ui:
@@ -393,7 +406,7 @@ def launch_gui() -> None:
                 self.top_lbl.set_text(f"Top Screen: {pct}%")
             else:
                 self.bot_lbl.set_text(f"Bottom Screen: {pct}%")
-            send_ipc({"action": "set_brightness", "target": target, "percent": pct})
+            send_ipc(ipc_util.brightness_request(target, pct))
 
     win = TouchMasterWindow()
     win.connect("destroy", Gtk.main_quit)

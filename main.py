@@ -4,9 +4,11 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 # Ensure plugin directory is in sys.path
@@ -14,9 +16,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from debug_codes import DebugCode, DebugLogger, run_self_diagnostics
 
+PLUGIN_DIR = Path(__file__).resolve().parent
+# The user whose session the driver runs in. RATATOSKR_HOME exists so tests can point the installer at a temp directory.
+HOME = Path(os.environ.get("RATATOSKR_HOME", "/var/home/armada"))
 SOCKET_PATH = "/run/user/1000/thor-input.sock"
-CONFIG_PATH = Path("/var/home/armada/.config/thor-input/config.json")
-APP_PATH = "/var/home/armada/.local/share/thor-input/bin/thor_app.py"
+CONFIG_PATH = HOME / ".config/thor-input/config.json"
+APP_DIR = HOME / ".local/share/thor-input"
+APP_PATH = str(APP_DIR / "bin/thor_app.py")
+
+# Release zip only (the Armada Store unpacks the plugin folder and nothing else): driver files shipped inside the plugin
+# under driver/. With deploy.sh there is no driver/ folder and the installer does nothing.
+DRIVER_SRC = PLUGIN_DIR / "driver"
 
 
 def _send_ipc(request: dict) -> dict:
@@ -27,12 +37,69 @@ def _send_ipc(request: dict) -> dict:
             s.settimeout(2.0)
             s.connect(SOCKET_PATH)
             s.sendall(json.dumps(request).encode("utf-8"))
-            data = s.recv(4096)
+            chunks, total = [], 0
+            while True:  # the driver closes the connection after replying, and a status reply is several KB
+                chunk = s.recv(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+                if total > 1024 * 1024:
+                    raise ValueError("reply too large")
+            data = b"".join(chunks)
             if not data:
                 return {"ok": False, "code": int(DebugCode.ERR_SOCKET_PROTOCOL), "error": "empty response"}
             return json.loads(data.decode("utf-8"))
     except Exception as err:
         return {"ok": False, "code": int(DebugCode.ERR_SOCKET_TIMEOUT), "error": str(err)}
+
+
+def _driver_files() -> list[tuple[Path, Path, int]]:
+    """(source, destination, mode) for every driver file the plugin ships. Empty when there is no driver/ folder."""
+    if not DRIVER_SRC.is_dir():
+        return []
+    files: list[tuple[Path, Path, int]] = []
+    for src in sorted((DRIVER_SRC / "bin").glob("*.py")):
+        mode = 0o755 if src.name in ("thor_app.py", "touch_master_manager.py") else 0o644
+        files.append((src, APP_DIR / "bin" / src.name, mode))
+    files.append((PLUGIN_DIR / "debug_codes.py", APP_DIR / "debug_codes.py", 0o644))
+    files.append((DRIVER_SRC / "systemd/touch-master.service", HOME / ".config/systemd/user/touch-master.service", 0o644))
+    for name in ("touch-master.desktop", "touch-master-stop.desktop"):
+        files.append((DRIVER_SRC / "share" / name, HOME / ".local/share/applications" / name, 0o755))
+    files.append((DRIVER_SRC / "share/touch-master.svg", HOME / ".local/share/icons/hicolor/scalable/apps/touch-master.svg", 0o644))
+    return [f for f in files if f[0].is_file()]
+
+
+def _sync_driver() -> dict:
+    """Copy the shipped driver files into the user's home when they are missing or differ. Returns what changed."""
+    changed = {"bin": False, "unit": False, "any": False, "errors": []}
+    try:
+        st = HOME.stat()
+    except OSError:
+        return changed
+    for src, dst, mode in _driver_files():
+        try:
+            data = src.read_bytes()
+            if dst.is_file() and dst.read_bytes() == data:
+                continue
+            made = []
+            p = dst.parent
+            while not p.exists():
+                made.append(p)
+                p = p.parent
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            for d in made:
+                os.chown(d, st.st_uid, st.st_gid)
+            tmp = dst.with_name(dst.name + ".tmp")
+            tmp.write_bytes(data)
+            os.chmod(tmp, mode)
+            os.chown(tmp, st.st_uid, st.st_gid)
+            os.replace(tmp, dst)
+            changed["any"] = True
+            changed["bin" if APP_DIR in dst.parents else "unit" if dst.suffix == ".service" else "any"] = True
+        except Exception as exc:  # one bad file must not stop the plugin from loading
+            changed["errors"].append(f"{dst}: {exc}")
+    return changed
 
 
 def _is_running() -> bool:
@@ -52,9 +119,7 @@ def _default_config() -> dict:
         "long_press_delay_ms": 450,
         "two_finger_right_click": True,
         "three_finger_middle_click": False,
-        "pinch_zoom_enabled": False,
         "three_finger_swipe_enabled": False,
-        "drag_lock_enabled": False,
         "mirror_dim": False,
         "mirror_dim_floor_percent": 3,
         "debug_hud": False,
@@ -73,11 +138,44 @@ def _read_config() -> dict:
     return cfg
 
 
-def _save_config(data: dict) -> None:
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+# Copy of bin/atomic_json.py (only main.py is installed here). It runs as root, so it keeps the config file's owner and mode.
+def _write_json_atomic(path, data, indent: int = 2) -> None:
+    path = os.fspath(path)
+    folder = os.path.dirname(path) or "."
+    os.makedirs(folder, exist_ok=True)
+    payload = json.dumps(data, indent=indent)  # serialise first: a failure here leaves the file alone
     try:
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+        ref = os.stat(path)
+    except OSError:
+        ref = os.stat(folder)  # a new file takes the folder's owner
+        ref_mode = None
+    else:
+        ref_mode = ref.st_mode & 0o7777
+    fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + ".", suffix=".tmp", dir=folder)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, ref_mode if ref_mode is not None else 0o644)
+        chown = getattr(os, "chown", None)
+        if chown is not None:
+            try:
+                chown(tmp, ref.st_uid, ref.st_gid)
+            except OSError:
+                pass  # not allowed to (not root) or not needed: the owner is already the caller
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _save_config(data: dict) -> None:
+    try:
+        _write_json_atomic(CONFIG_PATH, data)
     except Exception:
         pass
 
@@ -89,22 +187,32 @@ class Plugin:
     async def _main(self) -> None:
         """Called automatically by Decky Loader on startup."""
         self.logger.log(DebugCode.DAEMON_STARTING, "Decky initialized Ratatoskr plugin")
+        changed = _sync_driver()
+        for err in changed["errors"]:
+            self.logger.log(DebugCode.ERR_SERVICE_START, f"driver install: {err}")
+        if changed["any"]:
+            self.logger.log(DebugCode.DAEMON_STARTING, "Installed or updated the shipped driver files in the user's home")
+            if changed["unit"]:
+                self._run_systemctl("daemon-reload", None)
         cfg = _read_config()
         if cfg.get("enabled", True):
             if not _is_running():
                 self._start_service()
+            elif changed["bin"] or changed["unit"]:
+                self._run_systemctl("restart")
         else:
             if _is_running():
                 self._stop_service()
 
-    def _run_systemctl(self, action: str, unit: str = "touch-master.service") -> bool:
+    def _run_systemctl(self, action: str, unit: str | None = "touch-master.service") -> bool:
         env = dict(os.environ)
         env["XDG_RUNTIME_DIR"] = "/run/user/1000"
         env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/run/user/1000/bus"
 
+        tail = [action] + ([unit] if unit else [])
         cmds = [
-            ["systemctl", "--machine=armada@.host", "--user", action, unit],
-            ["systemctl", "--user", action, unit],
+            ["systemctl", "--machine=armada@.host", "--user", *tail],
+            ["systemctl", "--user", *tail],
         ]
         success = False
         for cmd in cmds:
@@ -154,12 +262,13 @@ class Plugin:
                     "long_press_delay_ms": cfg.get("long_press_delay_ms", 450),
                     "two_finger_right_click": cfg.get("two_finger_right_click", True),
                     "three_finger_middle_click": cfg.get("three_finger_middle_click", False),
-                    "pinch_zoom_enabled": cfg.get("pinch_zoom_enabled", False),
                     "three_finger_swipe_enabled": cfg.get("three_finger_swipe_enabled", False),
-                    "drag_lock_enabled": cfg.get("drag_lock_enabled", False),
                     "mirror_dim": cfg.get("mirror_dim", False),
                     "mirror_dim_floor_percent": cfg.get("mirror_dim_floor_percent", 3),
                     "bottom_dimmed": res.get("bottom_dimmed", False),
+                    "pen_mode": res.get("pen_mode", "off"),
+                    "cursor_stay_visible": res.get("cursor_stay_visible", False),
+                    "cursor_stay_visible_active": res.get("cursor_stay_visible_active", False),
                     "debug_hud": cfg.get("debug_hud", False),
                     "telemetry": debug_info.get("telemetry", {}),
                     "touch_device": debug_info.get("touch_device", ""),
@@ -269,6 +378,15 @@ class Plugin:
             return {"ok": True, "debug_hud": cfg["debug_hud"]}
 
         return await asyncio.to_thread(_toggle)
+
+    async def set_pen_mode(self, mode: str) -> dict:
+        """off, pen or pen_plus. Pen + also keeps Game Mode's pointer visible, which applies when Game Mode next starts."""
+        def _set():
+            if _is_running():
+                return _send_ipc({"action": "set_pen_mode", "mode": mode})
+            return {"ok": False}
+
+        return await asyncio.to_thread(_set)
 
     async def run_diagnostics(self) -> dict:
         return await asyncio.to_thread(run_self_diagnostics)

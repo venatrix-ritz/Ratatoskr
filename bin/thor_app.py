@@ -47,6 +47,8 @@ from engine import (
     KEY_F24,
     SCREEN_HEIGHT,
     SCREEN_WIDTH,
+    STRIP_BOTTOM_H,
+    STRIP_RIGHT_W,
     TouchGestureProcessor,
     UInputBridge,
     raw_to_screen,
@@ -55,6 +57,11 @@ from keyboard_layout import Key, KeyboardLayout
 from touch_frames import TouchFrameParser
 from dim_mirror import DimMirror, IdleTracker
 from system_stats import HardwareStats
+import pen_mode as pm
+import atomic_json
+import ipc_util
+import session_cursor
+import tray_actions
 
 SOCKET_PATH = f"/run/user/{os.getuid()}/thor-input.sock"
 CONFIG_PATH = os.path.expanduser("~/.config/thor-input/config.json")
@@ -72,10 +79,13 @@ class ThorApp:
         self.show_debug_hud = False
         self.touch_dev_node = ""
         self.exit_code = 0
+        self._cleaned = False
         self._parser = None
         self._last_contacts = (0, 0)
         self._last_frame_ts = 0.0
         self._slider_drag: tuple[int, str] | None = None  # (touch id, 'vol' | 'top' | 'bot') while a slider is held
+        self.pen_mode = "off"  # off | pen | pen_plus, see pen_mode.py
+        self._cursor_status = {"cursor_stay_visible": False, "cursor_hide_delay_ms": None, "cursor_stay_visible_active": False}
         self._draw_ms_sum = 0.0
         self._draw_ms_max = 0.0
         self._draws = 0
@@ -148,6 +158,8 @@ class ThorApp:
                     self.show_debug_hud = cfg.get("debug_hud", self.show_debug_hud)
                     self.gesture.set_settings(**cfg)
                     self._apply_mirror_settings(cfg)
+                    self.pen_mode = pm.initial(cfg, session_cursor.is_configured())
+                    self.gesture.set_settings(stylus_mode=pm.engine_flag(self.pen_mode))
             except Exception as err:
                 self.logger.log(DebugCode.ERR_SOCKET_PROTOCOL, f"load_config: {err}")
 
@@ -157,13 +169,30 @@ class ThorApp:
             cfg = {
                 "mode": self.mode,
                 "debug_hud": self.show_debug_hud,
+                "pen_mode": self.pen_mode,
                 **self.gesture.get_settings(),
                 **self.mirror_cfg,
             }
-            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-                json.dump(cfg, f, indent=2)
+            atomic_json.write_json_atomic(CONFIG_PATH, cfg)
         except Exception as err:
             self.logger.log(DebugCode.ERR_SOCKET_PROTOCOL, f"save_config: {err}")
+
+    def set_pen_mode(self, mode) -> str:
+        """Off, Pen, or Pen +. Pen + also writes Game Mode's pointer-visible override (it applies the next time Game
+        Mode starts); leaving Pen + removes it. Until the override is running, the nudges stay on."""
+        mode = pm.normalize(mode)
+        self.pen_mode = mode
+        self.gesture.set_settings(stylus_mode=pm.engine_flag(mode))
+        ok = session_cursor.set_stay_visible(pm.wants_override(mode))
+        self._refresh_cursor_status(fresh=True)
+        self.logger.log(
+            DebugCode.SETTINGS_UPDATED,
+            f"pen mode {mode}; pointer-visible override {'on' if pm.wants_override(mode) else 'off'} "
+            f"{'written' if ok else 'FAILED'}; it applies when Game Mode next starts",
+        )
+        self.save_config()
+        GLib.idle_add(self.drawing_area.queue_draw)
+        return mode
 
     def _apply_mirror_settings(self, msg: dict) -> None:
         if "mirror_dim" in msg:
@@ -248,19 +277,15 @@ class ThorApp:
             self.logger.log(DebugCode.ERR_SOCKET_PROTOCOL, f"launch manager: {err}")
 
     def _stop_via_indicator(self, *_) -> None:
+        """Stop the driver and give the bottom screen back to Armada's stock session. The steps after stopping
+        the service would die with this process, so the manager does them from its own transient unit."""
         try:
             import subprocess
 
-            if os.path.exists(CONFIG_PATH):
-                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                    cfg = json.load(f)
-            else:
-                cfg = {}
-            cfg["enabled"] = False
-            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-                json.dump(cfg, f, indent=2)
-            subprocess.Popen(["systemctl", "--user", "stop", "touch-master.service"])
-            subprocess.Popen(["systemctl", "--user", "disable", "touch-master.service"])
+            subprocess.Popen(
+                tray_actions.stop_command(str(SCRIPT_DIR / "touch_master_manager.py"), sys.executable),
+                start_new_session=True,
+            )
         except Exception as err:
             self.logger.log(DebugCode.ERR_SOCKET_PROTOCOL, f"stop via indicator: {err}")
 
@@ -291,6 +316,7 @@ class ThorApp:
 
     def start(self) -> None:
         self.stats.start_sampler()
+        self._refresh_cursor_status()
         self._start_touch_reader()
         self._start_ipc_server()
         self.idle_tracker.start()
@@ -300,8 +326,14 @@ class ThorApp:
         GLib.timeout_add(1000, self._on_stats_tick)
         self.logger.log(DebugCode.DAEMON_READY, f"Mode={self.mode}, Device={self.touch_dev_node}")
 
+    def _refresh_cursor_status(self, fresh: bool = False) -> None:
+        """Is the running Game Mode keeping the pointer visible? If so the pre-scroll and pre-press nudges are off."""
+        self._cursor_status = session_cursor.status(ttl=0 if fresh else 10.0)
+        self.bridge.wake_pointer = not self._cursor_status["cursor_stay_visible_active"]
+
     def _on_stats_tick(self) -> bool:
         if not self.touch_stop.is_set():
+            self._refresh_cursor_status()
             self.drawing_area.queue_draw()
             return True
         return False
@@ -310,26 +342,51 @@ class ThorApp:
         self.cleanup()
         Gtk.main_quit()
 
+    def request_quit(self, signum: int = 0) -> bool:
+        """Leave the main loop so that cleanup() runs. Used for SIGTERM (what systemd sends on stop and restart) and SIGINT."""
+        name = signal.Signals(signum).name if signum else "quit request"
+        self.logger.log(DebugCode.DAEMON_STOPPING, f"{name} received")
+        Gtk.main_quit()
+        return False  # remove the signal source
+
+    def _release_touch_device(self) -> None:
+        if self.touch_fd < 0:
+            return
+        try:
+            EVIOCGRAB = (1 << 30) | (struct.calcsize("i") << 16) | (ord("E") << 8) | 0x90
+            fcntl.ioctl(self.touch_fd, EVIOCGRAB, 0)
+        except OSError:
+            pass
+        try:
+            os.close(self.touch_fd)
+        except OSError:
+            pass
+        self.touch_fd = -1
+
     def cleanup(self) -> None:
+        """Stop everything and give the hardware back: restore a dimmed bottom screen, release the touchscreen grab and
+        any held button or key, remove the IPC socket. Safe to call more than once, and each step is guarded so that one
+        failure cannot skip the rest."""
+        if self._cleaned:
+            return
+        self._cleaned = True
         self.logger.log(DebugCode.DAEMON_STOPPING)
-        self.dim_mirror.stop()
-        self.idle_tracker.stop()
-        self.stats.stop_sampler()
-        self._stop_key_repeat()
+
+        def step(name: str, fn) -> None:
+            try:
+                fn()
+            except Exception as err:
+                self.logger.log(DebugCode.ERR_SERVICE_STOP, f"cleanup step '{name}' failed: {type(err).__name__}: {err}")
+
+        step("restore the bottom screen", self.dim_mirror.stop)
+        step("idle tracker", self.idle_tracker.stop)
+        step("stats sampler", self.stats.stop_sampler)
+        step("key repeat", self._stop_key_repeat)
         self.touch_stop.set()
         self.ipc_stop.set()
-        if self.touch_fd >= 0:
-            try:
-                EVIOCGRAB = (1 << 30) | (struct.calcsize("i") << 16) | (ord("E") << 8) | 0x90
-                fcntl.ioctl(self.touch_fd, EVIOCGRAB, 0)
-            except OSError:
-                pass
-            try:
-                os.close(self.touch_fd)
-            except OSError:
-                pass
-            self.touch_fd = -1
-        self.bridge.close()
+        step("ipc socket", lambda: os.path.exists(SOCKET_PATH) and os.remove(SOCKET_PATH))
+        step("touchscreen grab", self._release_touch_device)
+        step("virtual devices", self.bridge.close)
         self.logger.log(DebugCode.DAEMON_STOPPED)
 
     # -------------------------------------------------------------------------
@@ -368,7 +425,12 @@ class ThorApp:
             self._parser = parser
             last_error_log = 0.0
             while not self.touch_stop.is_set():
-                r, _, _ = select.select([self.touch_fd], [], [], 0.1)
+                try:
+                    r, _, _ = select.select([self.touch_fd], [], [], 0.1)
+                except (OSError, ValueError):
+                    if self.touch_stop.is_set():
+                        return  # cleanup() closed the descriptor under us: shutting down, not a lost device
+                    raise
                 if not r:
                     self.gesture.expire_stale(time.time())  # kernel event timestamps are wall-clock
                     continue
@@ -377,6 +439,8 @@ class ThorApp:
                 except BlockingIOError:
                     continue
                 except OSError as err:
+                    if self.touch_stop.is_set():
+                        return  # shutting down: cleanup() closed the descriptor
                     if err.errno in (errno.ENODEV, errno.EIO, errno.EBADF, errno.ENOENT):
                         # The digitizer went away (resume, re-enumeration). Exit so systemd restarts the service,
                         # which finds and grabs it again; spinning on a dead descriptor would burn a core.
@@ -609,6 +673,8 @@ class ThorApp:
             self.held_ui_button_tid = tid
             self.bridge.mouse_button(BTN_RIGHT, True)
             GLib.idle_add(self.drawing_area.queue_draw)
+        elif 980 <= x <= 1080:
+            self.set_pen_mode(pm.cycle(self.pen_mode))
 
     def _handle_settings_touch(self, tid: int, x: float, y: float) -> None:
         # Card 1: Volume (y = 120 .. 230)
@@ -717,10 +783,11 @@ class ThorApp:
                     break
                 with conn:
                     try:
-                        data = conn.recv(4096)
-                        if not data:
+                        msg = ipc_util.read_json_request(conn)
+                        if msg is None:
                             continue
-                        msg = json.loads(data.decode("utf-8"))
+                        if not isinstance(msg, dict):
+                            raise ValueError("a request must be a JSON object")
                         action = msg.get("action")
                         res = {"ok": True, "code": int(DebugCode.OK)}
 
@@ -731,6 +798,8 @@ class ThorApp:
                             res.update(self.gesture.get_settings())
                             res.update(self.mirror_cfg)
                             res["bottom_dimmed"] = self.dim_mirror.dimmed
+                            res.update(self._cursor_status)
+                            res["pen_mode"] = self.pen_mode
                         elif action == "get_debug":
                             res["telemetry"] = self.bridge.get_telemetry()
                             res["state"] = self.gesture.last_state_label
@@ -772,6 +841,9 @@ class ThorApp:
                             res["bot_bright_pct"] = self.stats.request_bottom_brightness(msg.get("brightness", 100))
                             self.logger.log(DebugCode.BACKLIGHT_UPDATED, f"bottom={res['bot_bright_pct']}%")
                             GLib.idle_add(self.drawing_area.queue_draw)
+                        elif action == "set_pen_mode":
+                            res["pen_mode"] = self.set_pen_mode(msg.get("mode"))
+                            res.update(self._cursor_status)
                         elif action == "wake":
                             # A harmless key tap on the virtual keyboard: Steam and the compositor see it as input,
                             # so the sleep and dim timers restart and a dimmed top screen wakes.
@@ -786,9 +858,15 @@ class ThorApp:
                             res["diagnostics"] = run_self_diagnostics()
                         elif action == "quit":
                             GLib.idle_add(self.window.close)
+                        else:
+                            res.update(ok=False, code=int(DebugCode.ERR_SOCKET_PROTOCOL), error=f"unknown action: {action!r}")
                         conn.sendall(json.dumps(res).encode("utf-8"))
                     except Exception as err:
-                        self.logger.log(DebugCode.ERR_SOCKET_PROTOCOL, str(err))
+                        self.logger.log(DebugCode.ERR_SOCKET_PROTOCOL, f"{type(err).__name__}: {err}")
+                        try:  # answer instead of leaving the client to time out
+                            conn.sendall(json.dumps({"ok": False, "code": int(DebugCode.ERR_SOCKET_PROTOCOL), "error": f"{type(err).__name__}: {err}"}).encode("utf-8"))
+                        except OSError:
+                            pass
 
             server_sock.close()
 
@@ -865,6 +943,7 @@ class ThorApp:
         right_active = self.held_ui_button == "right"
         self._draw_button(cr, 680, 6, 140, 36, "Left Click", left_active, accent_color=(0.3, 0.45, 0.95))
         self._draw_button(cr, 828, 6, 140, 36, "Right Click", right_active, accent_color=(0.85, 0.35, 0.35))
+        self._draw_button(cr, 980, 6, 100, 36, pm.label(self.pen_mode), self.pen_mode != "off", accent_color=(0.95, 0.65, 0.20))
 
     def _draw_status_ribbon(self, cr: cairo.Context) -> None:
         """Render live system monitoring ribbon across top of AMOLED display."""
@@ -981,9 +1060,45 @@ class ThorApp:
         cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
         cr.set_font_size(18.0)
         hint = "Ratatoskr: 1 finger moves · Tap clicks · 2 fingers scroll · Flick glides"
+        if self.gesture.stylus_mode:
+            hint = "Pen: touch moves · Double-tap clicks · Hold right-clicks · Edge strips scroll"
+            if self.pen_mode == "pen_plus" and not self._cursor_status["cursor_stay_visible_active"]:
+                hint = "Pen +: restart Game Mode to keep the pointer visible (until then Pen's nudges stay on)"
         extents = cr.text_extents(hint)
         cr.move_to(pad_x + (pad_w - extents.width) / 2.0, pad_y + (pad_h + extents.height) / 2.0)
         cr.show_text(hint)
+
+        if self.gesture.stylus_mode:
+            self._draw_scroll_strips(cr, pad_y, pad_h, show_bottom=(y + h) >= SCREEN_HEIGHT - 1)
+
+    def _draw_scroll_strips(self, cr: cairo.Context, pad_y: float, pad_h: float, show_bottom: bool) -> None:
+        """Pen mode's scroll strips: drag along the right edge to scroll up and down, along the bottom to scroll sideways."""
+        right_x = SCREEN_WIDTH - STRIP_RIGHT_W
+        bottom_y = SCREEN_HEIGHT - STRIP_BOTTOM_H
+        strips = [(right_x, pad_y + 8.0, STRIP_RIGHT_W - 28.0, (bottom_y - pad_y - 16.0) if show_bottom else (pad_h - 16.0), "▲  scroll  ▼")]
+        if show_bottom:
+            strips.append((28.0, bottom_y + 8.0, right_x - 40.0, STRIP_BOTTOM_H - 28.0, "◀  scroll  ▶"))
+        for sx, sy, sw, sh, label in strips:
+            self._round_rect(cr, sx, sy, sw, sh, 14.0)
+            cr.set_source_rgb(0.09, 0.10, 0.14)
+            cr.fill_preserve()
+            cr.set_source_rgb(0.95, 0.65, 0.20)
+            cr.set_line_width(1.2)
+            cr.stroke()
+            cr.new_path()
+            cr.set_source_rgb(0.95, 0.65, 0.20)
+            cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+            cr.set_font_size(15.0)
+            ext = cr.text_extents(label)
+            if sh > sw:  # vertical strip: write the label sideways
+                cr.save()
+                cr.translate(sx + sw / 2.0 + ext.height / 2.0, sy + sh / 2.0 + ext.width / 2.0)
+                cr.rotate(-1.5707963)
+                cr.show_text(label)
+                cr.restore()
+            else:
+                cr.move_to(sx + (sw - ext.width) / 2.0, sy + (sh + ext.height) / 2.0)
+                cr.show_text(label)
 
     def _draw_keyboard(self, cr: cairo.Context) -> None:
         """Render virtual keyboard with clean key highlighting, vector arrows, and dual symbol labels."""
@@ -1310,9 +1425,17 @@ class ThorApp:
 
 
 def main():
-    signal.signal(signal.SIGINT, signal.SIG_DFL)
-    signal.signal(signal.SIGTERM, signal.SIG_DFL)
     app = ThorApp()
+    # systemd stops the service with SIGTERM. The default action ends the process on the spot and skips cleanup(), which
+    # left a dimmed bottom screen dim and held buttons held. Leave the main loop instead.
+    try:
+        from gi.repository import GLibUnix  # GLib.unix_signal_add is deprecated in favour of this
+
+        signal_add = GLibUnix.signal_add
+    except (ImportError, AttributeError):
+        signal_add = GLib.unix_signal_add
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal_add(GLib.PRIORITY_HIGH, sig, app.request_quit, sig)
     app.start()
     try:
         Gtk.main()
