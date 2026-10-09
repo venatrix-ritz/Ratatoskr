@@ -72,7 +72,6 @@ TAP_MAX_DISTANCE_PX = 12.0  # per finger; a tap with more travel than this is a 
 LONG_PRESS_TIME_S = 0.45
 LONG_PRESS_MAX_DIST_PX = 24.0
 SCROLL_DIVISOR = 10.0
-PINCH_THRESHOLD_PX = 35.0
 SWIPE_THRESHOLD_PX = 85.0
 HI_RES_NOTCH = 120
 # Game Mode's gamescope hides the pointer once it has not moved for --hide-cursor-delay (3000 ms on the Thor,
@@ -363,9 +362,7 @@ class TouchGestureProcessor:
         self.long_press_delay_ms = 450  # 250 to 900 ms
         self.two_finger_right_click = True
         self.three_finger_middle_click = False
-        self.pinch_zoom_enabled = False  # Disabled to eliminate accidental key 29 (Ctrl) spam
         self.three_finger_swipe_enabled = False  # Disabled to eliminate accidental gesture triggers
-        self.drag_lock_enabled = False  # Permanently disabled to eliminate sticky left-click drag traps
         self.stylus_mode = False  # one pointer, no gestures, long press right-clicks, edge strips scroll
 
         # Touch tracking state
@@ -394,8 +391,6 @@ class TouchGestureProcessor:
 
         # Multi-finger gesture tracking
         self.start_centroid: tuple[float, float] = (0.0, 0.0)
-        self.initial_pinch_dist: float = 0.0
-        self.pinch_triggered: bool = False
         self.swipe_triggered: bool = False
 
         # Fractional accumulator for high-res subpixel delta
@@ -424,9 +419,7 @@ class TouchGestureProcessor:
         long_press_delay_ms: int | float | None = None,
         two_finger_right_click: bool | None = None,
         three_finger_middle_click: bool | None = None,
-        pinch_zoom_enabled: bool | None = None,
         three_finger_swipe_enabled: bool | None = None,
-        drag_lock_enabled: bool | None = None,
         stylus_mode: bool | None = None,
         **kwargs: Any,
     ) -> None:
@@ -453,12 +446,8 @@ class TouchGestureProcessor:
             self.long_press_delay_ms = max(200, min(1200, int(round(float(long_press_delay_ms)))))
         if three_finger_middle_click is not None:
             self.three_finger_middle_click = bool(three_finger_middle_click)
-        if pinch_zoom_enabled is not None:
-            self.pinch_zoom_enabled = bool(pinch_zoom_enabled)
         if three_finger_swipe_enabled is not None:
             self.three_finger_swipe_enabled = bool(three_finger_swipe_enabled)
-        if drag_lock_enabled is not None:
-            self.drag_lock_enabled = bool(drag_lock_enabled)
         if stylus_mode is not None and bool(stylus_mode) != self.stylus_mode:
             self.stylus_mode = bool(stylus_mode)
             self._pen_tap_prev = None
@@ -479,9 +468,7 @@ class TouchGestureProcessor:
             "long_press_delay_ms": self.long_press_delay_ms,
             "two_finger_right_click": self.two_finger_right_click,
             "three_finger_middle_click": self.three_finger_middle_click,
-            "pinch_zoom_enabled": self.pinch_zoom_enabled,
             "three_finger_swipe_enabled": self.three_finger_swipe_enabled,
-            "drag_lock_enabled": self.drag_lock_enabled,
             "stylus_mode": self.stylus_mode,
         }
 
