@@ -1,6 +1,6 @@
 # Changelog
 
-Dates are 2026. The project was called Touch Master until 2026-10-07. No version numbers have been cut yet.
+Dates are 2026. The project was called Touch Master until 2026-10-07. The first tag is 0.1.0 (2026-10-08): everything under Unreleased below.
 
 ## Unreleased
 - **Fixed:** after a restart during Steam's idle dim the bottom stayed bright (2026-10-08 22:09:03). The slider-drag guard (a dim needs 5 s without input) read the freshly started tracker's zero idle time as "input just now" and vetoed the start-at-floor dim. The guard now applies only once the tracker has been running for 5 s.
