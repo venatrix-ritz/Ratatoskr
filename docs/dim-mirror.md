@@ -13,7 +13,8 @@ Steam's idle ramp, read from the Thor's journal (`armada-steamos-priv-write` tag
 3. It restores the bottom when the top comes back (back to 97 % of the peak, or up by 15 points), or when the top stops falling above 6 % for 4 s (a brightness-slider move ended, not an idle ramp), or when the bottom screen is touched. After a touch it will not dim again until the top has recovered.
 4. Writes the dimmed level to Armada's saved bottom-screen level (`/etc/armada/bottom-screen-brightness`) as well, because Armada's root service (`armada-control`) re-applies that saved level every 2 seconds whenever the backlight differs from it.
 5. If the backlight is not writable it logs `DBG-701` and retries after a minute.
-6. Logs a `DBG-610` line for each dim and restore, with the reason.
+6. If the service starts while the top is already at its floor (a restart during an idle dim), it treats that as a dim and follows it, assuming the normal level is full.
+7. Logs a `DBG-610` line for each dim and restore, with the reason.
 
 The logic is in `bin/top_follower.py` (pure, no I/O) and `DimMirror._run` in `bin/dim_mirror.py`.
 
