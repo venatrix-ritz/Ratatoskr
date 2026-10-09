@@ -59,6 +59,8 @@ scp dist/index.js "${THOR_HOST}:/tmp/index.js"
 ssh "${THOR_HOST}" "
     sudo mv /tmp/plugin.json /tmp/package.json /tmp/main.py /tmp/debug_codes.py '${PLUGIN_DIR}/'
     sudo mv /tmp/index.js '${PLUGIN_DIR}/dist/index.js'
+    # A release-zip install leaves driver/ here; main.py would copy it over the files just deployed (it did, 2026-10-08).
+    sudo rm -rf '${PLUGIN_DIR}/driver'
     sudo chown -R root:root '${PLUGIN_DIR}'
     sudo chmod -R 755 '${PLUGIN_DIR}'
     echo '==> Restarting plugin_loader.service...'
