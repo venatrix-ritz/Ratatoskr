@@ -64,6 +64,13 @@ def no_sleep():
     return real
 
 
+def test_boot_clock_keeps_counting_across_a_suspend():
+    import time
+    if not hasattr(time, "CLOCK_BOOTTIME"):
+        return  # Linux only
+    assert abs(dm._boot_now() - time.clock_gettime(time.CLOCK_BOOTTIME)) < 1.0
+
+
 def test_activity():
     k, a = dm.EV_KEY, dm.EV_ABS
     assert dm._is_activity(k, 304, 1, "Xbox pad")

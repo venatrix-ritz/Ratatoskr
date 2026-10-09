@@ -33,6 +33,12 @@ from top_follower import TopFollower
 TOP_BACKLIGHT = "/sys/class/backlight/ae96000.dsi.0"
 # A fall of the top backlight only counts as Steam's idle dim after this long without input (a slider drag has input).
 INPUT_QUIET_S = 5.0
+
+
+def _boot_now() -> float:
+    """Seconds on a clock that keeps counting while the system sleeps (CLOCK_MONOTONIC stops). The follower must see
+    the real gap across a suspend, or the last samples before it and the first after it look like one steep fall."""
+    return time.clock_gettime(time.CLOCK_BOOTTIME) if hasattr(time, "CLOCK_BOOTTIME") else time.monotonic()
 # Armada's root service re-applies this saved level every 2 s whenever the backlight differs from it
 # (armada-control: BOTTOM_SCREEN_BRIGHTNESS_RESTORE_INTERVAL), so a dim that does not change it is undone at once.
 ARMADA_SAVED = "/etc/armada/bottom-screen-brightness"
@@ -368,7 +374,7 @@ class DimMirror:
             if level is None:
                 continue
             now = time.monotonic()
-            action = follower.update(now, level)
+            action = follower.update(_boot_now(), level)
             if action == "dim" and self._tracker.idle_seconds() < INPUT_QUIET_S:
                 follower.reject()  # the user is dragging the brightness slider, not Steam's idle ramp (needs a minute of quiet)
             elif action == "dim" and now >= self._retry_after:
