@@ -71,6 +71,13 @@ def test_boot_clock_keeps_counting_across_a_suspend():
     assert abs(dm._boot_now() - time.clock_gettime(time.CLOCK_BOOTTIME)) < 1.0
 
 
+def test_input_guard_ignores_a_tracker_that_has_only_just_started():
+    assert dm.input_says_slider(idle=1.0, tracker_age=30.0) is True      # touched a second ago, running a while: a drag
+    assert dm.input_says_slider(idle=60.0, tracker_age=30.0) is False    # a minute of quiet: Steam's ramp
+    assert dm.input_says_slider(idle=0.0, tracker_age=0.5) is False      # just restarted: no information, so no veto
+    assert dm.input_says_slider(idle=0.0, tracker_age=dm.INPUT_QUIET_S) is True
+
+
 def test_activity():
     k, a = dm.EV_KEY, dm.EV_ABS
     assert dm._is_activity(k, 304, 1, "Xbox pad")
