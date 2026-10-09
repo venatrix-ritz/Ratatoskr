@@ -12,13 +12,6 @@ sys.path.insert(0, os.path.join(ROOT, "bin"))
 import dim_mirror as dm  # noqa: E402
 from debug_codes import DebugCode  # noqa: E402
 
-VDF = '''"system"
-{
-\t"IdleBacklightDimBatterySeconds"\t\t"300"
-\t"IdleBacklightDimACSeconds"\t\t"0"
-\t"DisplayBrightness"\t\t"0.0100000007078051567"
-}
-'''
 
 
 class FakeStats:
@@ -71,26 +64,6 @@ def no_sleep():
     return real
 
 
-def test_vdf():
-    with tempfile.NamedTemporaryFile("w", suffix=".vdf", delete=False, encoding="utf-8") as f:
-        f.write(VDF)
-    try:
-        assert dm.read_dim_seconds(False, f.name) == 300
-        # AC reads 0 ("never") but Steam still dims on the Thor's USB-C charger: the battery delay is used
-        assert dm.read_dim_seconds(True, f.name) == 300
-    finally:
-        os.unlink(f.name)
-    for ac_val, bat_val, want_ac, want_bat in ((600, 300, 600, 300), (0, 0, 0, 0), (120, 0, 120, 0)):
-        with tempfile.NamedTemporaryFile("w", suffix=".vdf", delete=False, encoding="utf-8") as g:
-            g.write('"IdleBacklightDimBatterySeconds"\t\t"%d"\n"IdleBacklightDimACSeconds"\t\t"%d"\n' % (bat_val, ac_val))
-        try:
-            assert dm.read_dim_seconds(True, g.name) == want_ac, (ac_val, bat_val)
-            assert dm.read_dim_seconds(False, g.name) == want_bat, (ac_val, bat_val)
-        finally:
-            os.unlink(g.name)
-    assert dm.read_dim_seconds(False, "/nonexistent/config.vdf") == 0
-
-
 def test_activity():
     k, a = dm.EV_KEY, dm.EV_ABS
     assert dm._is_activity(k, 304, 1, "Xbox pad")
@@ -107,7 +80,7 @@ def test_dim_changes_armadas_saved_level_on_the_last_step_only():
     w = World(80)
     real = no_sleep()
     try:
-        w.mirror._dim(300, 301.0, 3)
+        w.mirror._dim("test", 3)
     finally:
         dm.time.sleep = real
     assert w.mirror.dimmed and w.mirror._saved == 80
@@ -120,7 +93,7 @@ def test_dim_starts_from_armadas_saved_level():
     w = World(80, saved=60)
     real = no_sleep()
     try:
-        w.mirror._dim(300, 301.0, 3)
+        w.mirror._dim("test", 3)
     finally:
         dm.time.sleep = real
     assert w.mirror._saved == 60 and w.record() == 60
@@ -130,7 +103,7 @@ def test_restore_persists_and_clears_the_record():
     w = World(80)
     real = no_sleep()
     try:
-        w.mirror._dim(300, 301.0, 3)
+        w.mirror._dim("test", 3)
     finally:
         dm.time.sleep = real
     assert w.mirror.restore("input") is True
@@ -143,7 +116,7 @@ def test_restore_failure_keeps_the_state_and_retries():
     w = World(80)
     real = no_sleep()
     try:
-        w.mirror._dim(300, 301.0, 3)
+        w.mirror._dim("test", 3)
     finally:
         dm.time.sleep = real
     w.stats.ok = False
@@ -156,7 +129,7 @@ def test_restore_failure_keeps_the_state_and_retries():
 
 def test_no_dim_when_already_at_floor():
     w = World(2)
-    w.mirror._dim(300, 301.0, 3)
+    w.mirror._dim("test", 3)
     assert not w.mirror.dimmed and w.stats.calls == [] and w.record() is None
 
 
@@ -164,7 +137,7 @@ def test_unwritable_backlight_backs_off_and_rolls_back():
     w = World(80, ok=False)
     real = no_sleep()
     try:
-        w.mirror._dim(300, 301.0, 3)
+        w.mirror._dim("test", 3)
     finally:
         dm.time.sleep = real
     assert not w.mirror.dimmed and w.record() is None
@@ -215,7 +188,7 @@ def test_recover_leaves_a_live_dims_record_alone():
     w = World(80)
     real = no_sleep()
     try:
-        w.mirror._dim(300, 301.0, 3)
+        w.mirror._dim("test", 3)
     finally:
         dm.time.sleep = real
     n = len(w.stats.calls)
@@ -230,25 +203,6 @@ def test_recover_discards_a_corrupt_record():
         f.write("not json")
     assert w.mirror.recover() is True
     assert w.stats.calls == [] and not os.path.exists(w.state)
-
-
-def test_on_ac_power():
-    d = tempfile.mkdtemp()
-
-    def put(name, text):
-        path = os.path.join(d, name)
-        with open(path, "w") as f:
-            f.write(text)
-        return path
-
-    usb1, usb0 = put("u1", "1\n"), put("u0", "0\n")
-    charging, notcharging, disch = put("c", "Charging\n"), put("n", "Not charging\n"), put("d", "Discharging\n")
-    assert dm.on_ac_power(disch, usb1) is True          # USB online wins, e.g. when a charge limit says "Not charging"
-    assert dm.on_ac_power(notcharging, usb1) is True
-    assert dm.on_ac_power(charging, usb0) is True
-    assert dm.on_ac_power(notcharging, usb0) is False
-    assert dm.on_ac_power(disch, usb0) is False
-    assert dm.on_ac_power("/nonexistent", "/nonexistent") is False
 
 
 def _tracker(devices):
