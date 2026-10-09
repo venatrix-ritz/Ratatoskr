@@ -25,6 +25,9 @@ The host can also come from `THOR_HOST`, `THOR_ENV_FILE` or a git-ignored `local
 
 `deploy.sh` copies the driver, the desktop entries and icon, the user unit and the Decky plugin files, restarts `plugin_loader.service` (Decky) and restarts `touch-master.service` so the new code loads. It uses `sudo` only for the Decky plugin directory.
 
+## Install from a release zip (Armada Store)
+Build the zip with `python scripts/build-release.py` (or take `Ratatoskr.zip` from a release). It has one top-level `thor-input/` folder: the plugin, plus the driver under `driver/`. Unpacked into `~/homebrew/plugins/` (what the Armada Store does), Decky loads the plugin and `main.py` then copies the driver, the user unit and the launcher entries into the home directory and starts the service. A later zip with newer files updates them the same way. The optional narrow sudo rule below is not part of the zip.
+
 ## Manual install
 1. Copy `bin/*.py` and `debug_codes.py` to `~/.local/share/thor-input/` (keep `bin/` as a subfolder).
 2. Copy `systemd/touch-master.service` to `~/.config/systemd/user/`, then `systemctl --user daemon-reload && systemctl --user enable --now touch-master.service`.

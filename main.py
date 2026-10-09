@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -15,9 +16,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from debug_codes import DebugCode, DebugLogger, run_self_diagnostics
 
+PLUGIN_DIR = Path(__file__).resolve().parent
+# The user whose session the driver runs in. RATATOSKR_HOME exists so tests can point the installer at a temp directory.
+HOME = Path(os.environ.get("RATATOSKR_HOME", "/var/home/armada"))
 SOCKET_PATH = "/run/user/1000/thor-input.sock"
-CONFIG_PATH = Path("/var/home/armada/.config/thor-input/config.json")
-APP_PATH = "/var/home/armada/.local/share/thor-input/bin/thor_app.py"
+CONFIG_PATH = HOME / ".config/thor-input/config.json"
+APP_DIR = HOME / ".local/share/thor-input"
+APP_PATH = str(APP_DIR / "bin/thor_app.py")
+
+# Release zip only (the Armada Store unpacks the plugin folder and nothing else): driver files shipped inside the plugin
+# under driver/. With deploy.sh there is no driver/ folder and the installer does nothing.
+DRIVER_SRC = PLUGIN_DIR / "driver"
 
 
 def _send_ipc(request: dict) -> dict:
@@ -43,6 +52,54 @@ def _send_ipc(request: dict) -> dict:
             return json.loads(data.decode("utf-8"))
     except Exception as err:
         return {"ok": False, "code": int(DebugCode.ERR_SOCKET_TIMEOUT), "error": str(err)}
+
+
+def _driver_files() -> list[tuple[Path, Path, int]]:
+    """(source, destination, mode) for every driver file the plugin ships. Empty when there is no driver/ folder."""
+    if not DRIVER_SRC.is_dir():
+        return []
+    files: list[tuple[Path, Path, int]] = []
+    for src in sorted((DRIVER_SRC / "bin").glob("*.py")):
+        mode = 0o755 if src.name in ("thor_app.py", "touch_master_manager.py") else 0o644
+        files.append((src, APP_DIR / "bin" / src.name, mode))
+    files.append((PLUGIN_DIR / "debug_codes.py", APP_DIR / "debug_codes.py", 0o644))
+    files.append((DRIVER_SRC / "systemd/touch-master.service", HOME / ".config/systemd/user/touch-master.service", 0o644))
+    for name in ("touch-master.desktop", "touch-master-stop.desktop"):
+        files.append((DRIVER_SRC / "share" / name, HOME / ".local/share/applications" / name, 0o755))
+    files.append((DRIVER_SRC / "share/touch-master.svg", HOME / ".local/share/icons/hicolor/scalable/apps/touch-master.svg", 0o644))
+    return [f for f in files if f[0].is_file()]
+
+
+def _sync_driver() -> dict:
+    """Copy the shipped driver files into the user's home when they are missing or differ. Returns what changed."""
+    changed = {"bin": False, "unit": False, "any": False, "errors": []}
+    try:
+        st = HOME.stat()
+    except OSError:
+        return changed
+    for src, dst, mode in _driver_files():
+        try:
+            data = src.read_bytes()
+            if dst.is_file() and dst.read_bytes() == data:
+                continue
+            made = []
+            p = dst.parent
+            while not p.exists():
+                made.append(p)
+                p = p.parent
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            for d in made:
+                os.chown(d, st.st_uid, st.st_gid)
+            tmp = dst.with_name(dst.name + ".tmp")
+            tmp.write_bytes(data)
+            os.chmod(tmp, mode)
+            os.chown(tmp, st.st_uid, st.st_gid)
+            os.replace(tmp, dst)
+            changed["any"] = True
+            changed["bin" if APP_DIR in dst.parents else "unit" if dst.suffix == ".service" else "any"] = True
+        except Exception as exc:  # one bad file must not stop the plugin from loading
+            changed["errors"].append(f"{dst}: {exc}")
+    return changed
 
 
 def _is_running() -> bool:
@@ -130,22 +187,32 @@ class Plugin:
     async def _main(self) -> None:
         """Called automatically by Decky Loader on startup."""
         self.logger.log(DebugCode.DAEMON_STARTING, "Decky initialized Ratatoskr plugin")
+        changed = _sync_driver()
+        for err in changed["errors"]:
+            self.logger.log(DebugCode.ERR_SERVICE_START, f"driver install: {err}")
+        if changed["any"]:
+            self.logger.log(DebugCode.DAEMON_STARTING, "Installed or updated the shipped driver files in the user's home")
+            if changed["unit"]:
+                self._run_systemctl("daemon-reload", None)
         cfg = _read_config()
         if cfg.get("enabled", True):
             if not _is_running():
                 self._start_service()
+            elif changed["bin"] or changed["unit"]:
+                self._run_systemctl("restart")
         else:
             if _is_running():
                 self._stop_service()
 
-    def _run_systemctl(self, action: str, unit: str = "touch-master.service") -> bool:
+    def _run_systemctl(self, action: str, unit: str | None = "touch-master.service") -> bool:
         env = dict(os.environ)
         env["XDG_RUNTIME_DIR"] = "/run/user/1000"
         env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/run/user/1000/bus"
 
+        tail = [action] + ([unit] if unit else [])
         cmds = [
-            ["systemctl", "--machine=armada@.host", "--user", action, unit],
-            ["systemctl", "--user", action, unit],
+            ["systemctl", "--machine=armada@.host", "--user", *tail],
+            ["systemctl", "--user", *tail],
         ]
         success = False
         for cmd in cmds:
