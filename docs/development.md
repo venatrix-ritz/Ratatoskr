@@ -21,7 +21,7 @@
 for t in tests/test_*.py; do python "$t" || break; done
 node tests/test_panel_logic.cjs
 ```
-The Python tests use fake hardware, pipes and socket pairs and run on any OS; they are also run on the Thor by the deploy routine, so none of them may touch the real volume, backlight or sudo (`tests/test_system_stats.py` blocks real commands and fails if anything slips through). `tests/test_panel_logic.cjs` runs the Decky panel's pure helpers (`mergeStatus`, `makeThrottle`) under Node. The driver itself needs GTK, cairo, `/dev/uinput` and the Thor's bottom-screen session, so it can only be exercised on the device. Syntax checks that work anywhere:
+The Python tests use fake hardware, pipes and socket pairs and run on any OS (except `tests/test_driver_sync.py`, which needs `os.chown` and skips itself on Windows); they are also run on the Thor by the deploy routine, so none of them may touch the real volume, backlight or sudo (`tests/test_system_stats.py` blocks real commands and fails if anything slips through). `tests/test_panel_logic.cjs` runs the Decky panel's pure helpers (`mergeStatus`, `makeThrottle`) under Node. The driver itself needs GTK, cairo, `/dev/uinput` and the Thor's bottom-screen session, so it can only be exercised on the device. Syntax checks that work anywhere:
 ```bash
 python -m py_compile main.py debug_codes.py bin/*.py
 node --check dist/index.js

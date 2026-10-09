@@ -85,6 +85,9 @@ def test_a_bad_file_is_reported_and_does_not_stop_the_rest():
 
 
 if __name__ == "__main__":
+    if not hasattr(os, "chown"):
+        print("skip: os.chown is not available on this OS; run this test on Linux (the Thor)")
+        sys.exit(0)
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
             fn(); print("ok", name)
