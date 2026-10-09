@@ -100,9 +100,7 @@ function Content() {
         long_press_delay_ms: 450,
         two_finger_right_click: true,
         three_finger_middle_click: false,
-        pinch_zoom_enabled: false,
         three_finger_swipe_enabled: false,
-        drag_lock_enabled: false,
         mirror_dim: false,
         pen_mode: "off",
         debug_hud: false,
@@ -471,26 +469,10 @@ function Content() {
                     }),
                     SP_JSX.jsx(DFL.PanelSectionRow, {
                         children: SP_JSX.jsx(DFL.ToggleField, {
-                            label: "Pinch to Zoom",
-                            description: "Not implemented yet: this switch is saved but does nothing",
-                            checked: status.pinch_zoom_enabled ?? false,
-                            onChange: (val) => updateSetting("pinch_zoom_enabled", val)
-                        })
-                    }),
-                    SP_JSX.jsx(DFL.PanelSectionRow, {
-                        children: SP_JSX.jsx(DFL.ToggleField, {
                             label: "Three-Finger Navigation Swipes",
                             description: "Up = Super/Steam, Down = Escape, Left/Right = Alt+Tab",
                             checked: status.three_finger_swipe_enabled ?? false,
                             onChange: (val) => updateSetting("three_finger_swipe_enabled", val)
-                        })
-                    }),
-                    SP_JSX.jsx(DFL.PanelSectionRow, {
-                        children: SP_JSX.jsx(DFL.ToggleField, {
-                            label: "Drag Lock",
-                            description: "Not implemented yet: this switch is saved but does nothing",
-                            checked: status.drag_lock_enabled ?? false,
-                            onChange: (val) => updateSetting("drag_lock_enabled", val)
                         })
                     })
                 ]
