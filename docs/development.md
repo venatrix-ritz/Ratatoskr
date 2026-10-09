@@ -6,6 +6,9 @@
 | `bin/thor_app.py` | the driver: touch reader, UI drawing, IPC server |
 | `bin/engine.py` | `UInputBridge` and `TouchGestureProcessor` |
 | `bin/keyboard_layout.py` | on-glass keyboard geometry |
+| `bin/key_render.py` | key label drawing (pure cairo) |
+| `bin/keyboard_settings.py` | keyboard timing settings and limits |
+| `tests/render_keyboard.py` | renders the keyboard labels to PNG for a visual check (needs pycairo; run it on the Thor) |
 | `bin/system_stats.py` | battery/CPU/GPU/RAM/backlight/volume sampling and setters |
 | `bin/dim_mirror.py` | idle tracker and the bottom-screen dim follower |
 | `bin/touch_master_manager.py` | standalone GTK window and CLI |

@@ -102,6 +102,9 @@ function Content() {
         three_finger_middle_click: false,
         three_finger_swipe_enabled: false,
         mirror_dim: false,
+        keyboard_repeat_delay_ms: 350,
+        keyboard_repeat_interval_ms: 60,
+        keyboard_caps_window_ms: 350,
         pen_mode: "off",
         debug_hud: false,
         telemetry: {},
@@ -486,6 +489,44 @@ function Content() {
                             description: "Dims the bottom screen after Steam's idle-dim delay (Steam > Settings > Display) and restores it on any input",
                             checked: status.mirror_dim ?? false,
                             onChange: (val) => updateSetting("mirror_dim", val)
+                        })
+                    })
+                ]
+            }),
+            status.enabled && SP_JSX.jsxs(DFL.PanelSection, {
+                title: "Keyboard",
+                children: [
+                    SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.SliderField, {
+                            label: `Key Repeat Delay: ${status.keyboard_repeat_delay_ms ?? 350} ms`,
+                            value: status.keyboard_repeat_delay_ms ?? 350,
+                            min: 150,
+                            max: 800,
+                            step: 50,
+                            showValue: true,
+                            onChange: (val) => updateSetting("keyboard_repeat_delay_ms", Math.round(val))
+                        })
+                    }),
+                    SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.SliderField, {
+                            label: `Key Repeat Interval: ${status.keyboard_repeat_interval_ms ?? 60} ms`,
+                            value: status.keyboard_repeat_interval_ms ?? 60,
+                            min: 20,
+                            max: 200,
+                            step: 10,
+                            showValue: true,
+                            onChange: (val) => updateSetting("keyboard_repeat_interval_ms", Math.round(val))
+                        })
+                    }),
+                    SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.SliderField, {
+                            label: `Caps Lock Double-Tap: ${status.keyboard_caps_window_ms ?? 350} ms`,
+                            value: status.keyboard_caps_window_ms ?? 350,
+                            min: 150,
+                            max: 800,
+                            step: 50,
+                            showValue: true,
+                            onChange: (val) => updateSetting("keyboard_caps_window_ms", Math.round(val))
                         })
                     })
                 ]
