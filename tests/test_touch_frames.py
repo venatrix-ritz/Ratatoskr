@@ -84,6 +84,18 @@ def test_the_screen_transform_is_applied():
     assert frames[0].downs == [(1, 200.0, 979.0)]
 
 
+def test_resync_after_a_drop_restores_fingers_that_are_still_down():
+    p = tf.TouchFrameParser(identity)
+    p.feed(contact(0.1, 0, 5, 10, 20) + contact(0.1, 1, 6, 30, 40) + syn(0.1))
+    p.feed(ev(0.2, tf.SYN_DROPPED, 0, tf.EV_SYN) + syn(0.2))
+    frame = p.resync({0: (5, 11, 21), 1: (6, 30, 40), 2: (-1, 0, 0)}, 100.3)
+    assert sorted(frame.downs) == [(5, 11.0, 21.0), (6, 30.0, 40.0)] and frame.live == 2, frame
+    moved = p.feed(ev(0.4, tf.ABS_MT_SLOT, 1) + ev(0.4, tf.ABS_MT_POSITION_X, 35) + syn(0.4))
+    assert moved[0].moves == [(6, 35.0, 40.0)] and not moved[0].downs, "a resynced contact must move, not land again"
+    lifted = p.feed(ev(0.5, tf.ABS_MT_SLOT, 0) + ev(0.5, tf.ABS_MT_TRACKING_ID, -1) + syn(0.5))
+    assert lifted[0].ups == [5]
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

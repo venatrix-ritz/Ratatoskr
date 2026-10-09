@@ -69,6 +69,20 @@ class TouchFrameParser:
                 frames.append(self._close_frame(sec + usec * 1e-6))
         return frames
 
+    def resync(self, slots: dict[int, tuple[int, int, int]], ts: float) -> Frame:
+        """Rebuild the contact state from the kernel's slot table after SYN_DROPPED.
+
+        slots maps slot -> (tracking id, raw x, raw y) for the live slots (EVIOCGMTSLOTS). Without this, a finger that
+        was already down when the buffer overflowed stays invisible until it lifts. Returns a frame whose downs are
+        those contacts, for the caller to hand to its touch-down handler."""
+        self._reset()
+        for slot, (tid, x, y) in slots.items():
+            if tid < 0:
+                continue
+            self.tracking[slot] = tid
+            self.raw[slot] = [x, y]
+        return self._close_frame(ts)
+
     def _close_frame(self, ts: float) -> Frame:
         live: dict[int, tuple[float, float]] = {}
         for slot, tid in self.tracking.items():

@@ -251,6 +251,11 @@ class DimMirror:
 
     def stop(self) -> None:
         self._stop.set()
+        # Wait for the loop: if it is in the middle of a fade, restoring first and letting the fade finish afterwards
+        # would leave the bottom dim with its recovery record already deleted.
+        t = self._thread
+        if t is not None and t.is_alive() and t is not threading.current_thread():
+            t.join(timeout=2.0)
         self.restore("stopping")
 
     # -- recovery record -------------------------------------------------------------------------------
@@ -333,6 +338,8 @@ class DimMirror:
         self._saved = current
         steps = 6
         for step in range(1, steps + 1):  # short fade so the change is not a hard cut
+            if self._stop.is_set():  # stopping mid-fade: stop() restores self._saved once this returns
+                return
             last = step == steps
             # Only the last step changes Armada's saved level; the fade is shorter than its 2 s restore interval.
             self._stats.set_bottom_brightness(

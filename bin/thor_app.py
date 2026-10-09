@@ -56,6 +56,7 @@ from engine import (
 from keyboard_layout import Key, KeyboardLayout
 import key_render
 import keyboard_settings
+from modifiers import ModifierState
 from touch_frames import TouchFrameParser
 from dim_mirror import DimMirror, IdleTracker
 from system_stats import HardwareStats
@@ -67,9 +68,40 @@ import tray_actions
 
 SOCKET_PATH = f"/run/user/{os.getuid()}/thor-input.sock"
 CONFIG_PATH = os.path.expanduser("~/.config/thor-input/config.json")
-HEADER_BUTTONS_H = 48.0
-STATUS_RIBBON_H = 44.0
-HEADER_HEIGHT = HEADER_BUTTONS_H + STATUS_RIBBON_H  # 92.0
+# The bottom panel is 3.92" at 1240x1080, about 16.5 px per mm: the old 48 px header (36 px buttons, 15 px text) was
+# about 2 mm tall. 80 / 64 px buttons are about 4 mm, still leaving most of the screen to the trackpad and keyboard.
+HEADER_BUTTONS_H = 80.0
+STATUS_RIBBON_H = 52.0
+BUTTON_TEXT_MAX_PX = 26.0
+RIBBON_TEXT_MAX_PX = 20.0
+HEADER_HEIGHT = HEADER_BUTTONS_H + STATUS_RIBBON_H
+SPLIT_Y = 500.0  # split mode: trackpad above, keyboard below
+
+# Header buttons: (key, x, width). One table for drawing and for hit-testing.
+HEADER_BUTTONS = (
+    ("trackpad", 12, 150), ("split", 170, 110), ("keyboard", 288, 150), ("settings", 446, 190),
+    ("hud", 644, 90), ("left", 750, 150), ("right", 908, 150), ("pen", 1066, 162),
+)
+HEADER_BUTTON_Y, HEADER_BUTTON_H = 8.0, 64.0
+
+# Quick Controls layout, below the header
+QC_CARD_Y = (HEADER_HEIGHT + 28.0, HEADER_HEIGHT + 178.0, HEADER_HEIGHT + 328.0)  # volume, top, bottom brightness
+QC_CARD_H = 120.0
+QC_CTRL_DY, QC_CTRL_H = 46.0, 56.0  # the -, slider, + row inside a card
+QC_HEALTH_Y, QC_HEALTH_H = HEADER_HEIGHT + 478.0, 220.0
+QC_BUTTONS_Y, QC_BUTTONS_H = 856.0, 64.0
+
+# <linux/input.h> (include/uapi/linux/input.h): EVIOCGABS(abs) = _IOR('E', 0x40 + abs, struct input_absinfo), 24 bytes;
+# EVIOCGMTSLOTS(len) = _IOC(_IOC_READ, 'E', 0x0a, len) with a buffer of one u32 code and one s32 per slot.
+_IOC_READ = 2
+
+
+def _eviocgabs(code: int) -> int:
+    return (_IOC_READ << 30) | (24 << 16) | (ord("E") << 8) | (0x40 + code)
+
+
+def _eviocgmtslots(length: int) -> int:
+    return (_IOC_READ << 30) | (length << 16) | (ord("E") << 8) | 0x0A
 
 
 class ThorApp:
@@ -119,8 +151,13 @@ class ThorApp:
         # Continuous key repeat state
         self.held_key: Key | None = None
         self.held_key_tid: int | None = None
-        self._repeat_stop = threading.Event()
+        self._repeat_stop = threading.Event()  # replaced for every repeat, so an old worker can never miss its stop
         self._repeat_thread: threading.Thread | None = None
+        self.mods = ModifierState()  # Shift / Ctrl / Alt / Win: off, latched (one-shot) or locked
+        self._touch_owner: dict[int, str] = {}  # touch id -> the area it landed in; a touch stays there until it lifts
+        # Touch frames (reader thread) and settings / mode changes (IPC thread, GTK) all change the gesture and keyboard
+        # state; one re-entrant lock keeps them from interleaving.
+        self.input_lock = threading.RLock()
 
         self.load_config()
 
@@ -171,7 +208,16 @@ class ThorApp:
     def save_config(self) -> None:
         os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
         try:
+            # Start from what is on disk: the plugin's `enabled` and anything else the driver does not own must survive.
+            try:
+                with open(CONFIG_PATH, encoding="utf-8") as f:
+                    on_disk = json.load(f)
+                if not isinstance(on_disk, dict):
+                    on_disk = {}
+            except (OSError, ValueError):
+                on_disk = {}
             cfg = {
+                **on_disk,
                 "mode": self.mode,
                 "debug_hud": self.show_debug_hud,
                 "pen_mode": self.pen_mode,
@@ -187,8 +233,9 @@ class ThorApp:
         """Off, Pen, or Pen +. Pen + also writes Game Mode's pointer-visible override (it applies the next time Game
         Mode starts); leaving Pen + removes it. Until the override is running, the nudges stay on."""
         mode = pm.normalize(mode)
-        self.pen_mode = mode
-        self.gesture.set_settings(stylus_mode=pm.engine_flag(mode))
+        with self.input_lock:
+            self.pen_mode = mode
+            self.gesture.set_settings(stylus_mode=pm.engine_flag(mode))
         ok = session_cursor.set_stay_visible(pm.wants_override(mode))
         self._refresh_cursor_status(fresh=True)
         self.logger.log(
@@ -212,9 +259,14 @@ class ThorApp:
     def set_mode(self, mode: str) -> None:
         if mode not in ("trackpad", "split", "keyboard", "settings"):
             return
-        self._slider_drag = None
-        self.mode = mode
-        self.update_mode_bounds()
+        with self.input_lock:
+            self._slider_drag = None
+            if mode not in ("keyboard", "split"):
+                # Without a keyboard on screen a latched or locked modifier would turn every click into Ctrl/Shift-click.
+                self._end_key_press()
+                self._send_keys(self.mods.release_all())
+            self.mode = mode
+            self.update_mode_bounds()
         self.save_config()
         GLib.idle_add(self.drawing_area.queue_draw)
 
@@ -222,8 +274,7 @@ class ThorApp:
         if self.mode == "keyboard":
             self.kb_layout.update_bounds(0, HEADER_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT - HEADER_HEIGHT)
         elif self.mode == "split":
-            split_y = 500.0
-            self.kb_layout.update_bounds(0, split_y, SCREEN_WIDTH, SCREEN_HEIGHT - split_y)
+            self.kb_layout.update_bounds(0, SPLIT_Y, SCREEN_WIDTH, SCREEN_HEIGHT - SPLIT_Y)
 
     def _setup_indicator(self) -> None:
         if not HAS_APP_INDICATOR:
@@ -297,20 +348,17 @@ class ThorApp:
 
     def _start_key_repeat(self, key: Key) -> None:
         self._stop_key_repeat()
-        self._repeat_stop.clear()
+        stop = threading.Event()
+        self._repeat_stop = stop
 
         def _worker():
-            # Initial hold delay before repeating, then the repeat interval (both are settings)
-            if self._repeat_stop.wait(self.keyboard_cfg["keyboard_repeat_delay_ms"] / 1000.0):
+            # Initial hold delay before repeating, then the repeat interval (both are settings). Modifiers are already
+            # down (self.mods), so a repeat is just the key.
+            if stop.wait(self.keyboard_cfg["keyboard_repeat_delay_ms"] / 1000.0):
                 return
-            while not self._repeat_stop.is_set():
-                if self.held_key is not key:
-                    break
-                shift_on = self.kb_layout.shift_active or self.kb_layout.caps_lock
-                if shift_on:
-                    self.bridge.key(42, True)
+            while not stop.is_set() and self.held_key is key:
                 self.bridge.tap_key(key.code)
-                if self._repeat_stop.wait(self.keyboard_cfg["keyboard_repeat_interval_ms"] / 1000.0):
+                if stop.wait(self.keyboard_cfg["keyboard_repeat_interval_ms"] / 1000.0):
                     break
 
         self._repeat_thread = threading.Thread(target=_worker, daemon=True)
@@ -433,12 +481,16 @@ class ThorApp:
             while not self.touch_stop.is_set():
                 try:
                     r, _, _ = select.select([self.touch_fd], [], [], 0.1)
-                except (OSError, ValueError):
+                except (OSError, ValueError) as err:
                     if self.touch_stop.is_set():
                         return  # cleanup() closed the descriptor under us: shutting down, not a lost device
-                    raise
+                    # Ending this thread silently would leave the grab held and the bottom screen dead: restart instead.
+                    self.logger.log(DebugCode.ERR_TOUCH_READ, f"select on the touch device failed ({err}); restarting")
+                    GLib.idle_add(self._device_lost)
+                    return
                 if not r:
-                    self.gesture.expire_stale(time.time())  # kernel event timestamps are wall-clock
+                    with self.input_lock:
+                        self.gesture.expire_stale(time.time())  # kernel event timestamps are wall-clock
                     continue
                 try:
                     data = os.read(self.touch_fd, EVENT_STRUCT.size * 256)
@@ -461,8 +513,9 @@ class ThorApp:
                     continue
                 self.idle_tracker.poke()  # the grabbed bottom touchscreen is invisible to the tracker
                 try:
-                    for frame in parser.feed(data):
-                        self._dispatch_frame(frame)
+                    with self.input_lock:
+                        for frame in parser.feed(data):
+                            self._dispatch_frame(frame)
                 except Exception as err:  # one bad frame must not end touch input while the grab is still held
                     now = time.monotonic()
                     if now - last_error_log > 5.0:
@@ -487,6 +540,10 @@ class ThorApp:
                 f"SYN_DROPPED: the kernel's touch buffer overflowed; contact state discarded (engine held {len(self.gesture.active_contacts)})",
             )
             self.gesture.reset_all()
+            self._end_key_press()
+            self._release_ui_button()
+            self._touch_owner.clear()
+            self._resync_contacts()
             return
         for tid in frame.ups:
             self._handle_touch_up(tid, frame.ts)
@@ -504,6 +561,35 @@ class ThorApp:
                 f"digitizer reports {counts[0]} contact(s), gesture engine holds {counts[1]}; downs={[(t, round(x), round(y)) for t, x, y in frame.downs]} ups={frame.ups} mode={self.mode}",
             )
         self._last_contacts = counts
+
+    def _read_mt_slots(self) -> dict[int, tuple[int, int, int]]:
+        """Current kernel state of every touch slot: {slot: (tracking id, raw x, raw y)}, live slots only."""
+        absinfo = bytearray(24)
+        fcntl.ioctl(self.touch_fd, _eviocgabs(ABS_MT_SLOT), absinfo)
+        n = struct.unpack("6i", absinfo)[2] + 1  # maximum slot index + 1
+        values = {}
+        for code in (ABS_MT_TRACKING_ID, ABS_MT_POSITION_X, ABS_MT_POSITION_Y):
+            buf = bytearray(struct.pack("I", code) + bytes(4 * n))
+            fcntl.ioctl(self.touch_fd, _eviocgmtslots(len(buf)), buf)
+            values[code] = struct.unpack(f"{n}i", bytes(buf[4:]))
+        return {
+            slot: (values[ABS_MT_TRACKING_ID][slot], values[ABS_MT_POSITION_X][slot], values[ABS_MT_POSITION_Y][slot])
+            for slot in range(n) if values[ABS_MT_TRACKING_ID][slot] >= 0
+        }
+
+    def _resync_contacts(self) -> None:
+        """After SYN_DROPPED the parser knows nothing; read the slots back so fingers already down are not lost."""
+        if self._parser is None or self.touch_fd < 0:
+            return
+        try:
+            slots = self._read_mt_slots()
+        except (OSError, struct.error) as err:
+            self.logger.log(DebugCode.ERR_TOUCH_READ, f"could not read the touch slots after SYN_DROPPED: {err}")
+            return
+        frame = self._parser.resync(slots, time.time())
+        self.logger.log(DebugCode.STATUS_TOUCH_DOWN, f"resynced {len(frame.downs)} contact(s) after SYN_DROPPED")
+        for tid, x, y in frame.downs:
+            self._handle_touch_down(tid, x, y, frame.ts)
 
     def _device_lost(self) -> bool:
         self.exit_code = 1
@@ -525,166 +611,147 @@ class ThorApp:
     # Touch Event Routing
     # -------------------------------------------------------------------------
 
-    def _handle_touch_down(self, tid: int, x: float, y: float, now: float) -> None:
-        self.last_event_time = time.time()
-
-        # 1. Header Navigation Bar (y < 48)
+    def _owner_at(self, x: float, y: float) -> str:
+        """The area a touch belongs to, decided where it lands. It keeps that owner until it lifts, so a drag that
+        crosses into another area (the split line, the header) is not cut off or handed to the wrong handler."""
         if y < HEADER_BUTTONS_H:
-            self._handle_header_touch(tid, x, y, True)
-            return
-
-        # 2. Status Ribbon (48 <= y < HEADER_HEIGHT) -> tap toggles Quick Settings
+            return "header"
         if y < HEADER_HEIGHT:
-            if self.mode == "settings":
-                self.set_mode("trackpad")
-            else:
-                self.set_mode("settings")
-            return
-
-        # 3. Quick Settings Mode
+            return "ribbon"
         if self.mode == "settings":
-            self._handle_settings_touch(tid, x, y)
+            return "settings"
+        if self.mode == "keyboard" or (self.mode == "split" and y >= SPLIT_Y):
+            return "keyboard"
+        return "trackpad"
+
+    def _send_keys(self, events) -> None:
+        for code, down in events:
+            self.bridge.key(code, down)
+        self._sync_modifier_flags()
+
+    def _sync_modifier_flags(self) -> None:
+        """The keyboard drawing reads these flags from the layout."""
+        kb = self.kb_layout
+        kb.shift_active = self.mods.latched("shift")
+        kb.caps_lock = self.mods.locked("shift")
+        for mod in ("ctrl", "alt", "super"):
+            setattr(kb, f"{mod}_active", self.mods.active(mod))
+
+    def _end_key_press(self) -> None:
+        """The held (non-modifier) key is over: stop its repeat and use up one-shot modifiers."""
+        if self.held_key is None and self.held_key_tid is None:
             return
+        self._stop_key_repeat()
+        self._send_keys(self.mods.key_released())
+        self.held_key = None
+        self.held_key_tid = None
+        self.active_key_press = None
+        GLib.idle_add(self.drawing_area.queue_draw)
 
-        # 4. Keyboard / Split Mode
-        if self.mode == "keyboard" or (self.mode == "split" and y >= 500.0):
-            key = self.kb_layout.hit_test(x, y)
-            if key:
-                if key.special == "shift":
-                    now_t = time.time()
-                    if self.kb_layout.caps_lock:
-                        self.kb_layout.caps_lock = False
-                        self.kb_layout.shift_active = False
-                        self.bridge.key(42, False)
-                    elif self.kb_layout.shift_active:
-                        if now_t - self.kb_layout.last_shift_time < self.keyboard_cfg["keyboard_caps_window_ms"] / 1000.0:
-                            self.kb_layout.caps_lock = True
-                            self.kb_layout.shift_active = False
-                            self.bridge.key(42, True)
-                        else:
-                            self.kb_layout.shift_active = False
-                            self.bridge.key(42, False)
-                    else:
-                        self.kb_layout.shift_active = True
-                        self.kb_layout.last_shift_time = now_t
-                        self.bridge.key(42, True)
-                    self.active_key_press = key.code
-                    self.held_key = None
-                    self.held_key_tid = tid
-                    GLib.idle_add(self.drawing_area.queue_draw)
-                elif key.special in ("ctrl", "alt", "super"):
-                    current = getattr(self.kb_layout, f"{key.special}_active", False)
-                    setattr(self.kb_layout, f"{key.special}_active", not current)
-                    self.bridge.key(key.code, not current)
-                    self.active_key_press = key.code
-                    self.held_key = None
-                    self.held_key_tid = tid
-                    GLib.idle_add(self.drawing_area.queue_draw)
-                else:
-                    self.active_key_press = key.code
-                    self.held_key = key
-                    self.held_key_tid = tid
-                    shift_on = self.kb_layout.shift_active or self.kb_layout.caps_lock
-                    self.last_key_label = key.shift_label if shift_on else key.label
-                    if shift_on:
-                        self.bridge.key(42, True)
-                    self.bridge.tap_key(key.code)
-                    self._start_key_repeat(key)
-                    GLib.idle_add(self.drawing_area.queue_draw)
-            return
-
-        # 5. Trackpad Mode (or top half of Split)
-        self.gesture.touch_down(tid, x, y, now)
-        if self.show_debug_hud:
-            GLib.idle_add(self.drawing_area.queue_draw)
-
-    def _handle_touch_move(self, tid: int, x: float, y: float, now: float) -> None:
-        self.last_event_time = time.time()
-        if self.mode == "keyboard" or (self.mode == "split" and y >= 500.0):
-            if self.held_key and tid == self.held_key_tid:
-                if not (self.held_key.x <= x <= self.held_key.x + self.held_key.w and
-                        self.held_key.y <= y <= self.held_key.y + self.held_key.h):
-                    self._stop_key_repeat()
-                    if self.kb_layout.shift_active and not self.kb_layout.caps_lock:
-                        self.kb_layout.shift_active = False
-                        self.bridge.key(42, False)
-                    self.held_key = None
-                    self.held_key_tid = None
-                    self.active_key_press = None
-                    GLib.idle_add(self.drawing_area.queue_draw)
-            return
-
-        if self.mode == "settings":
-            self._handle_settings_drag(tid, x, y)
-            return
-
-        if y >= HEADER_HEIGHT:
-            if self.mode == "trackpad" or (self.mode == "split" and y < 500.0):
-                self.gesture.touch_move(tid, x, y, now)
-                if self.show_debug_hud:
-                    GLib.idle_add(self.drawing_area.queue_draw)
-
-    def _handle_touch_up(self, tid: int, now: float) -> None:
-        self.last_event_time = time.time()
-        if self._slider_drag and self._slider_drag[0] == tid:
-            self._slider_drag = None
-        if self.held_ui_button and (tid == self.held_ui_button_tid or len(self.gesture.active_contacts) == 0):
-            if self.held_ui_button == "left":
-                self.bridge.mouse_button(BTN_LEFT, False)
-            elif self.held_ui_button == "right":
-                self.bridge.mouse_button(BTN_RIGHT, False)
+    def _release_ui_button(self) -> None:
+        if self.held_ui_button == "left":
+            self.bridge.mouse_button(BTN_LEFT, False)
+        elif self.held_ui_button == "right":
+            self.bridge.mouse_button(BTN_RIGHT, False)
+        if self.held_ui_button:
             self.held_ui_button = None
             self.held_ui_button_tid = None
             GLib.idle_add(self.drawing_area.queue_draw)
 
-        if self.held_key_tid == tid or len(self.gesture.active_contacts) == 0:
-            self._stop_key_repeat()
-            if self.kb_layout.shift_active and not self.kb_layout.caps_lock:
-                self.kb_layout.shift_active = False
-                self.bridge.key(42, False)
-            self.held_key = None
-            self.held_key_tid = None
-            self.active_key_press = None
-            GLib.idle_add(self.drawing_area.queue_draw)
-        elif self.active_key_press is not None:
-            self.active_key_press = None
-            GLib.idle_add(self.drawing_area.queue_draw)
+    def _handle_touch_down(self, tid: int, x: float, y: float, now: float) -> None:
+        self.last_event_time = time.time()
+        owner = self._owner_at(x, y)
+        self._touch_owner[tid] = owner
+        if owner == "header":
+            self._handle_header_touch(tid, x, y, True)
+        elif owner == "ribbon":  # the status ribbon toggles Quick Controls
+            self.set_mode("trackpad" if self.mode == "settings" else "settings")
+        elif owner == "settings":
+            self._handle_settings_touch(tid, x, y)
+        elif owner == "keyboard":
+            self._keyboard_down(tid, x, y)
+        else:
+            self.gesture.touch_down(tid, x, y, now)
+            if self.show_debug_hud:
+                GLib.idle_add(self.drawing_area.queue_draw)
 
-        if self.mode != "settings":
+    def _keyboard_down(self, tid: int, x: float, y: float) -> None:
+        key = self.kb_layout.hit_test(x, y)
+        if not key:
+            return
+        if key.special in ("shift", "ctrl", "alt", "super"):
+            window_s = self.keyboard_cfg["keyboard_caps_window_ms"] / 1000.0
+            self._send_keys(self.mods.press(key.special, tid, time.monotonic(), window_s))
+            self.active_key_press = key.code
+        else:
+            if self.held_key is not None:
+                self._end_key_press()  # a second finger types while the first still holds a key
+            self.mods.key_typed()
+            self.active_key_press = key.code
+            self.held_key = key
+            self.held_key_tid = tid
+            self.last_key_label = key.shift_label if self.mods.active("shift") else key.label
+            self.bridge.tap_key(key.code)
+            self._start_key_repeat(key)
+        GLib.idle_add(self.drawing_area.queue_draw)
+
+    def _handle_touch_move(self, tid: int, x: float, y: float, now: float) -> None:
+        self.last_event_time = time.time()
+        owner = self._touch_owner.get(tid)
+        if owner == "keyboard":
+            k = self.held_key
+            if k is not None and tid == self.held_key_tid and not (k.x <= x <= k.x + k.w and k.y <= y <= k.y + k.h):
+                self._end_key_press()  # slid off the key: stop repeating
+        elif owner == "settings":
+            self._handle_settings_drag(tid, x, y)
+        elif owner == "trackpad" or (owner is None and self.mode != "settings"):
+            # None: a contact from before a restart or a dropped frame; the engine ignores ids it does not hold
+            self.gesture.touch_move(tid, x, y, now)
+            if self.show_debug_hud:
+                GLib.idle_add(self.drawing_area.queue_draw)
+
+    def _handle_touch_up(self, tid: int, now: float) -> None:
+        self.last_event_time = time.time()
+        owner = self._touch_owner.pop(tid, None)
+        if self._slider_drag and self._slider_drag[0] == tid:
+            self._slider_drag = None
+        if self.held_ui_button and tid == self.held_ui_button_tid:
+            self._release_ui_button()
+        if owner == "keyboard":
+            if self.mods.is_modifier_touch(tid):
+                self._send_keys(self.mods.release(tid))
+                self.active_key_press = None
+                GLib.idle_add(self.drawing_area.queue_draw)
+            elif tid == self.held_key_tid:
+                self._end_key_press()
+        elif owner == "trackpad" or (owner is None and self.mode != "settings"):
             self.gesture.touch_up(tid, now)
             if self.show_debug_hud:
                 GLib.idle_add(self.drawing_area.queue_draw)
 
     def _handle_header_touch(self, tid: int, x: float, y: float, down: bool) -> None:
-        if 12 <= x <= 132:
-            self.set_mode("trackpad")
-        elif 140 <= x <= 240:
-            self.set_mode("split")
-        elif 248 <= x <= 368:
-            self.set_mode("keyboard")
-        elif 376 <= x <= 526:
-            self.set_mode("settings")
-        elif 534 <= x <= 614:
-            # HUD toggle
+        key = next((k for k, bx, bw in HEADER_BUTTONS if bx <= x <= bx + bw), None)
+        if key in ("trackpad", "split", "keyboard", "settings"):
+            self.set_mode(key)
+        elif key == "hud":
             self.show_debug_hud = not self.show_debug_hud
             self.save_config()
             GLib.idle_add(self.drawing_area.queue_draw)
-        elif 680 <= x <= 820:
-            self.held_ui_button = "left"
+        elif key in ("left", "right"):
+            self.held_ui_button = key
             self.held_ui_button_tid = tid
-            self.bridge.mouse_button(BTN_LEFT, True)
+            self.bridge.mouse_button(BTN_LEFT if key == "left" else BTN_RIGHT, True)
             GLib.idle_add(self.drawing_area.queue_draw)
-        elif 828 <= x <= 968:
-            self.held_ui_button = "right"
-            self.held_ui_button_tid = tid
-            self.bridge.mouse_button(BTN_RIGHT, True)
-            GLib.idle_add(self.drawing_area.queue_draw)
-        elif 980 <= x <= 1080:
+        elif key == "pen":
             self.set_pen_mode(pm.cycle(self.pen_mode))
 
     def _handle_settings_touch(self, tid: int, x: float, y: float) -> None:
-        # Card 1: Volume (y = 120 .. 230)
-        if 160 <= y <= 220:
+        def in_ctrl_row(card: int) -> bool:
+            top = QC_CARD_Y[card] + QC_CTRL_DY
+            return top - 6 <= y <= top + QC_CTRL_H + 6
+
+        # Card 1: Volume
+        if in_ctrl_row(0):
             if 30 <= x <= 120:
                 self.stats.adjust_volume(-5)
             elif 130 <= x <= 950:
@@ -698,8 +765,8 @@ class ThorApp:
             GLib.idle_add(self.drawing_area.queue_draw)
             return
 
-        # Card 2: Top Brightness (y = 270 .. 380)
-        if 310 <= y <= 370:
+        # Card 2: Top Brightness
+        if in_ctrl_row(1):
             if 30 <= x <= 120:
                 self.stats.adjust_top_brightness(-10)
             elif 130 <= x <= 1090:
@@ -711,8 +778,8 @@ class ThorApp:
             GLib.idle_add(self.drawing_area.queue_draw)
             return
 
-        # Card 3: Bottom Brightness (y = 420 .. 530)
-        if 460 <= y <= 520:
+        # Card 3: Bottom Brightness
+        if in_ctrl_row(2):
             if 30 <= x <= 120:
                 self.stats.adjust_bottom_brightness(-10)
             elif 130 <= x <= 1090:
@@ -724,8 +791,8 @@ class ThorApp:
             GLib.idle_add(self.drawing_area.queue_draw)
             return
 
-        # Bottom Action Buttons (y = 840 .. 915)
-        if 840 <= y <= 915:
+        # Bottom Action Buttons
+        if QC_BUTTONS_Y - 6 <= y <= QC_BUTTONS_Y + QC_BUTTONS_H + 6:
             if 30 <= x <= 310:
                 self.gesture.tap_to_click = not self.gesture.tap_to_click
                 self.save_config()
@@ -820,17 +887,19 @@ class ThorApp:
                             res["draw_ms_avg"] = round(self._draw_ms_sum / self._draws, 1) if self._draws else 0.0
                             res["draw_ms_max"] = round(self._draw_ms_max, 1)
                             res["frame_lag_ms_max"] = round(self._lag_ms_max, 1)
-                            self._draws, self._draw_ms_sum, self._draw_ms_max, self._lag_ms_max = 0, 0.0, 0.0, 0.0
+                            if msg.get("reset"):  # the Decky panel polls every 2 s; it must not wipe the window
+                                self._draws, self._draw_ms_sum, self._draw_ms_max, self._lag_ms_max = 0, 0.0, 0.0, 0.0
                             res["hardware_stats"] = self.stats.get_stats()
                             res.update(self.gesture.get_settings())
                         elif action == "set_mode":
                             self.set_mode(msg.get("mode", "trackpad"))
                         elif action == "set_settings":
-                            self.gesture.set_settings(**msg)
-                            self._apply_mirror_settings(msg)
-                            keyboard_settings.apply(self.keyboard_cfg, msg)
-                            if "debug_hud" in msg:
-                                self.show_debug_hud = bool(msg["debug_hud"])
+                            with self.input_lock:  # the touch thread may be in the gesture engine right now
+                                self.gesture.set_settings(**msg)
+                                self._apply_mirror_settings(msg)
+                                keyboard_settings.apply(self.keyboard_cfg, msg)
+                                if "debug_hud" in msg:
+                                    self.show_debug_hud = bool(msg["debug_hud"])
                             self.save_config()
                             GLib.idle_add(self.drawing_area.queue_draw)
                         elif action == "set_volume":
@@ -917,8 +986,7 @@ class ThorApp:
         elif self.mode == "keyboard":
             self._draw_keyboard(cr)
         elif self.mode == "split":
-            split_y = 500.0
-            self._draw_trackpad_surface(cr, HEADER_HEIGHT, split_y - HEADER_HEIGHT)
+            self._draw_trackpad_surface(cr, HEADER_HEIGHT, SPLIT_Y - HEADER_HEIGHT)
             self._draw_keyboard(cr)
         elif self.mode == "settings":
             self._draw_quick_settings(cr)
@@ -937,21 +1005,23 @@ class ThorApp:
         cr.stroke()
         cr.new_path()
 
-        self._draw_button(cr, 12, 6, 120, 36, "Trackpad", self.mode == "trackpad")
-        self._draw_button(cr, 140, 6, 100, 36, "Split", self.mode == "split")
-        self._draw_button(cr, 248, 6, 120, 36, "Keyboard", self.mode == "keyboard")
-        self._draw_button(cr, 376, 6, 150, 36, "Quick Controls", self.mode == "settings", accent_color=(0.20, 0.55, 0.90))
+        for key, x, w in HEADER_BUTTONS:
+            label, active, accent = self._header_button_look(key)
+            self._draw_button(cr, x, HEADER_BUTTON_Y, w, HEADER_BUTTON_H, label, active, accent_color=accent)
 
-        # HUD Toggle Button
-        hud_active = self.show_debug_hud
-        self._draw_button(cr, 534, 6, 80, 36, "HUD", hud_active, accent_color=(0.15, 0.65, 0.45))
-
-        # Click helper buttons
-        left_active = self.held_ui_button == "left"
-        right_active = self.held_ui_button == "right"
-        self._draw_button(cr, 680, 6, 140, 36, "Left Click", left_active, accent_color=(0.3, 0.45, 0.95))
-        self._draw_button(cr, 828, 6, 140, 36, "Right Click", right_active, accent_color=(0.85, 0.35, 0.35))
-        self._draw_button(cr, 980, 6, 100, 36, pm.label(self.pen_mode), self.pen_mode != "off", accent_color=(0.95, 0.65, 0.20))
+    def _header_button_look(self, key: str):
+        """(label, active, accent colour) of a header button."""
+        if key in ("trackpad", "split", "keyboard"):
+            return key.capitalize(), self.mode == key, (0.38, 0.25, 0.85)
+        if key == "settings":
+            return "Quick Controls", self.mode == "settings", (0.20, 0.55, 0.90)
+        if key == "hud":
+            return "HUD", self.show_debug_hud, (0.15, 0.65, 0.45)
+        if key == "left":
+            return "Left Click", self.held_ui_button == "left", (0.3, 0.45, 0.95)
+        if key == "right":
+            return "Right Click", self.held_ui_button == "right", (0.85, 0.35, 0.35)
+        return pm.label(self.pen_mode), self.pen_mode != "off", (0.95, 0.65, 0.20)
 
     def _draw_status_ribbon(self, cr: cairo.Context) -> None:
         """Render live system monitoring ribbon across top of AMOLED display."""
@@ -971,23 +1041,23 @@ class ThorApp:
         cr.stroke()
         cr.new_path()
 
-        # Telemetry pills text
+        # Telemetry pills text: one size for all, as large as fits across the screen
         cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-        cr.set_font_size(14.0)
 
         # Battery
-        bat_icon = "⚡" if "charg" in st.get("bat_status", "").lower() else "🔋"
+        # Plain-text labels: the Thor's fonts have no emoji, which drew as empty boxes (seen in tests/render_screens.py)
+        bat_icon = "CHG" if "charg" in st.get("bat_status", "").lower() else "BAT"
         bat_txt = f"{bat_icon} {st.get('bat_cap', 0)}% ({st.get('bat_watts', 0)}W)"
         # CPU
-        cpu_txt = f"🧠 CPU {st.get('cpu_load', 0)}% · {st.get('cpu_temp', 0)}°C"
+        cpu_txt = f"CPU {st.get('cpu_load', 0)}% · {st.get('cpu_temp', 0)}°C"
         # GPU
-        gpu_txt = f"🎮 GPU {st.get('gpu_mhz', 0)}M · {st.get('gpu_temp', 0)}°C"
+        gpu_txt = f"GPU {st.get('gpu_mhz', 0)}M · {st.get('gpu_temp', 0)}°C"
         # RAM
-        ram_txt = f"💾 RAM {st.get('ram_used_gb', 0)}/{st.get('ram_total_gb', 0)}G"
+        ram_txt = f"RAM {st.get('ram_used_gb', 0)}/{st.get('ram_total_gb', 0)}G"
         # Volume
-        vol_txt = f"🔊 Muted" if st.get("vol_muted") else f"🔊 Vol {st.get('vol_pct', 0)}%"
+        vol_txt = "Muted" if st.get("vol_muted") else f"Vol {st.get('vol_pct', 0)}%"
         # Brightness
-        brt_txt = f"☀️ Top {st.get('top_bright_pct', 100)}% · Bot {st.get('bot_bright_pct', 100)}%"
+        brt_txt = f"Top {st.get('top_bright_pct', 100)}% · Bot {st.get('bot_bright_pct', 100)}%"
 
         pills = [
             (bat_txt, (0.3, 0.85, 0.5)),
@@ -998,18 +1068,23 @@ class ThorApp:
             (brt_txt, (1.0, 0.85, 0.4)),
         ]
 
+        gap = 26.0
+        cr.set_font_size(RIBBON_TEXT_MAX_PX)
+        natural = sum(cr.text_extents(t).x_advance for t, _ in pills) + gap * (len(pills) - 1)
+        cr.set_font_size(RIBBON_TEXT_MAX_PX * min(1.0, (SCREEN_WIDTH - 40.0) / natural))
+        baseline = ry + (rh + cr.text_extents("H").height) / 2.0
         cur_x = 20.0
-        for text, col in pills:
+        for i, (text, col) in enumerate(pills):
             cr.set_source_rgb(*col)
-            cr.move_to(cur_x, ry + 27.0)
+            cr.move_to(cur_x, baseline)
             cr.show_text(text)
             ext = cr.text_extents(text)
-            cur_x += ext.width + 26.0
+            cur_x += ext.x_advance + gap
 
             # Divider dot
-            if cur_x < SCREEN_WIDTH - 80:
+            if i < len(pills) - 1:
                 cr.set_source_rgb(0.25, 0.28, 0.35)
-                cr.arc(cur_x - 13.0, ry + 22.0, 2.0, 0, 6.28)
+                cr.arc(cur_x - gap / 2.0, ry + rh / 2.0, 2.0, 0, 6.28)
                 cr.fill()
                 cr.new_path()
 
@@ -1042,11 +1117,8 @@ class ThorApp:
             cr.set_source_rgb(0.85, 0.88, 0.92)
         cr.new_path()
 
-        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-        cr.set_font_size(15.0)
-        extents = cr.text_extents(text)
-        cr.move_to(x + (w - extents.width) / 2.0, y + (h + extents.height) / 2.0 - 2)
-        cr.show_text(text)
+        key_render._fit(cr, text, min(h * 0.40, BUTTON_TEXT_MAX_PX), w - 16.0)
+        key_render._show_centered(cr, text, x + w / 2.0, y + h / 2.0)
 
     def _draw_trackpad_surface(self, cr: cairo.Context, y: float, h: float) -> None:
         margin = 20.0
@@ -1066,7 +1138,7 @@ class ThorApp:
         # Center prompt hint (clean, no scrollbar clutter)
         cr.set_source_rgb(0.30, 0.34, 0.42)
         cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-        cr.set_font_size(18.0)
+        cr.set_font_size(22.0)
         hint = "Ratatoskr: 1 finger moves · Tap clicks · 2 fingers scroll · Flick glides"
         if self.gesture.stylus_mode:
             hint = "Pen: touch moves · Double-tap clicks · Hold right-clicks · Edge strips scroll"
@@ -1096,7 +1168,7 @@ class ThorApp:
             cr.new_path()
             cr.set_source_rgb(0.95, 0.65, 0.20)
             cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-            cr.set_font_size(15.0)
+            cr.set_font_size(20.0)
             ext = cr.text_extents(label)
             if sh > sw:  # vertical strip: write the label sideways
                 cr.save()
@@ -1197,7 +1269,7 @@ class ThorApp:
         self._draw_slider_card(
             cr,
             x=20,
-            y=120,
+            y=QC_CARD_Y[0],
             w=SCREEN_WIDTH - 40,
             h=120,
             title=f"Master Audio Volume: {st.get('vol_pct', 0)}%" + (" [MUTED]" if st.get("vol_muted") else ""),
@@ -1212,7 +1284,7 @@ class ThorApp:
         self._draw_slider_card(
             cr,
             x=20,
-            y=270,
+            y=QC_CARD_Y[1],
             w=SCREEN_WIDTH - 40,
             h=120,
             title=f"Top Screen Brightness: {st.get('top_bright_pct', 100)}%",
@@ -1226,7 +1298,7 @@ class ThorApp:
         self._draw_slider_card(
             cr,
             x=20,
-            y=420,
+            y=QC_CARD_Y[2],
             w=SCREEN_WIDTH - 40,
             h=120,
             title=f"Bottom AMOLED Brightness: {st.get('bot_bright_pct', 100)}%",
@@ -1237,7 +1309,7 @@ class ThorApp:
         )
 
         # Card 4: Hardware Health Monitor Grid
-        self._round_rect(cr, 20, 570, SCREEN_WIDTH - 40, 240, 18.0)
+        self._round_rect(cr, 20, QC_HEALTH_Y, SCREEN_WIDTH - 40, QC_HEALTH_H, 18.0)
         cr.set_source_rgb(0.06, 0.07, 0.10)
         cr.fill_preserve()
         cr.set_source_rgb(0.18, 0.20, 0.26)
@@ -1246,9 +1318,9 @@ class ThorApp:
         cr.new_path()
 
         cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-        cr.set_font_size(18.0)
+        cr.set_font_size(22.0)
         cr.set_source_rgb(0.85, 0.88, 0.95)
-        cr.move_to(44, 608)
+        cr.move_to(44, QC_HEALTH_Y + 38.0)
         cr.show_text("Live System Health & Power Telemetry")
 
         grid_items = [
@@ -1259,19 +1331,19 @@ class ThorApp:
         ]
 
         gx = 44.0
-        gy = 650.0
+        gy = QC_HEALTH_Y + 82.0
         for i, (label, val, col) in enumerate(grid_items):
             rx = gx if (i % 2 == 0) else gx + 580.0
             ry = gy if (i < 2) else gy + 75.0
 
             cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-            cr.set_font_size(15.0)
-            cr.set_source_rgb(0.55, 0.60, 0.70)
+            cr.set_font_size(18.0)
+            cr.set_source_rgb(0.62, 0.67, 0.78)
             cr.move_to(rx, ry)
             cr.show_text(label)
 
             cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-            cr.set_font_size(20.0)
+            cr.set_font_size(22.0)
             cr.set_source_rgb(*col)
             cr.move_to(rx, ry + 30.0)
             cr.show_text(val)
@@ -1279,16 +1351,16 @@ class ThorApp:
         # Action Buttons
         tap_active = self.gesture.tap_to_click
         tap_label = "Tap Click: ON" if tap_active else "Tap Click: OFF"
-        self._draw_button(cr, 30, 846, 280, 64, tap_label, tap_active, accent_color=(0.15, 0.55, 0.95))
+        self._draw_button(cr, 30, QC_BUTTONS_Y, 280, QC_BUTTONS_H, tap_label, tap_active, accent_color=(0.15, 0.55, 0.95))
 
         right_2f = self.gesture.two_finger_right_click
         right_label = "Right: 2-Finger" if right_2f else "Right: Press-Hold"
-        self._draw_button(cr, 330, 846, 280, 64, right_label, right_2f, accent_color=(0.2, 0.75, 0.65))
+        self._draw_button(cr, 330, QC_BUTTONS_Y, 280, QC_BUTTONS_H, right_label, right_2f, accent_color=(0.2, 0.75, 0.65))
 
         hud_label = "Glass HUD: ON" if self.show_debug_hud else "Glass HUD: OFF"
-        self._draw_button(cr, 630, 846, 280, 64, hud_label, self.show_debug_hud, accent_color=(0.2, 0.65, 0.4))
+        self._draw_button(cr, 630, QC_BUTTONS_Y, 280, QC_BUTTONS_H, hud_label, self.show_debug_hud, accent_color=(0.2, 0.65, 0.4))
 
-        self._draw_button(cr, 930, 846, 280, 64, "Back to Trackpad", False, accent_color=(0.38, 0.25, 0.85))
+        self._draw_button(cr, 930, QC_BUTTONS_Y, 280, QC_BUTTONS_H, "Back to Trackpad", False, accent_color=(0.38, 0.25, 0.85))
 
 
     def _draw_slider_card(
@@ -1315,12 +1387,12 @@ class ThorApp:
 
         # Title
         cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-        cr.set_font_size(17.0)
+        cr.set_font_size(22.0)
         cr.set_source_rgb(0.88, 0.90, 0.96)
-        cr.move_to(x + 24, y + 32)
+        cr.move_to(x + 24, y + 34)
         cr.show_text(title)
 
-        ctrl_y = y + 46.0
+        ctrl_y = y + QC_CTRL_DY
         # [-] button
         self._draw_button(cr, x + 10, ctrl_y, 90, 56, "–", False)
 
@@ -1353,7 +1425,7 @@ class ThorApp:
 
     def _draw_debug_hud(self, cr: cairo.Context) -> None:
         """Render diagnostic telemetry HUD in top-right of trackpad area."""
-        hud_w, hud_h = 320.0, 170.0
+        hud_w, hud_h = 400.0, 190.0
         hud_x, hud_y = SCREEN_WIDTH - hud_w - 30.0, HEADER_HEIGHT + 20.0
 
         # HUD Box
@@ -1377,7 +1449,7 @@ class ThorApp:
         ]
 
         cr.select_font_face("Monospace", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-        cr.set_font_size(13.0)
+        cr.set_font_size(15.0)
         line_y = hud_y + 24.0
         for i, text in enumerate(lines):
             cr.set_source_rgb(0.2, 0.9, 0.5) if i == 0 else cr.set_source_rgb(0.85, 0.88, 0.92)
