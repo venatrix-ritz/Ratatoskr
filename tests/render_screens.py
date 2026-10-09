@@ -31,6 +31,14 @@ GLEIPNIR = {"clamp_value": 0, "node_max": 9000000, "verified": True, "capacity":
             "current_ua": -642716, "temp_dc": 300, "limit": 9000000, "sleep_floor": 0, "service_active": True}
 
 
+# battery / charger sysfs on the Thor, 2026-10-09 (on battery), and a charging variant on the 8.4 V PD charger
+BATT = {"charge_now": "4856746", "charge_full": "6241000", "charge_full_design": "5938000", "cycle_count": "3",
+        "voltage_now": "3994391", "current_now": "-1706951", "temp": "300", "health": "Good", "time_to_empty_avg": "12082",
+        "capacity": "77", "usb_online": "0", "usb_type": "[Unknown] SDP DCP CDP ACA C PD PD_DRP PD_PPS BrickID"}
+BATT_CHARGING = {**BATT, "current_now": "2400000", "charge_now": "4600000", "capacity": "74", "voltage_now": "4105000",
+                 "usb_online": "1", "usb_type": "C [PD] PD_PPS", "usb_voltage_now": "8376000", "usb_input_current_limit": "3000000"}
+
+
 class Stats:
     def get_stats(self):
         return dict(STATS)
@@ -56,6 +64,8 @@ def make_app(mode, hud=False, shift=False, gleipnir=None):
     app.active_key_press, app.mods = None, ModifierState()
     app.gleipnir_cfg = {"gleipnir_ribbon": gleipnir is not None}
     app.gleipnir_status = gleipnir
+    app.gleipnir_batt = dict(BATT_CHARGING if gleipnir and gleipnir.get("current_ua", 0) > 0 else BATT)
+    app.gleipnir_events = [("11:24", "CLAMP at 80%"), ("15:18", "RELEASE (charger unplugged)")]
     app.update_mode_bounds()
     if shift:
         app.mods.press("shift", 1, 0.0, 0.35)
