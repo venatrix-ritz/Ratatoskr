@@ -125,6 +125,7 @@ def _default_config() -> dict:
         "keyboard_repeat_delay_ms": 350,
         "keyboard_repeat_interval_ms": 60,
         "keyboard_caps_window_ms": 350,
+        "gleipnir_ribbon": False,
         "debug_hud": False,
     }
 
@@ -271,6 +272,8 @@ class Plugin:
                     "keyboard_repeat_delay_ms": cfg.get("keyboard_repeat_delay_ms", 350),
                     "keyboard_repeat_interval_ms": cfg.get("keyboard_repeat_interval_ms", 60),
                     "keyboard_caps_window_ms": cfg.get("keyboard_caps_window_ms", 350),
+                    "gleipnir_ribbon": cfg.get("gleipnir_ribbon", False),
+                    "gleipnir_available": res.get("gleipnir_available", False),
                     "bottom_dimmed": res.get("bottom_dimmed", False),
                     "pen_mode": res.get("pen_mode", "off"),
                     "cursor_stay_visible": res.get("cursor_stay_visible", False),
