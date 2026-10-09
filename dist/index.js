@@ -105,6 +105,8 @@ function Content() {
         keyboard_repeat_delay_ms: 350,
         keyboard_repeat_interval_ms: 60,
         keyboard_caps_window_ms: 350,
+        gleipnir_ribbon: false,
+        gleipnir_available: false,
         pen_mode: "off",
         debug_hud: false,
         telemetry: {},
@@ -489,6 +491,14 @@ function Content() {
                             description: "Dims the bottom screen after Steam's idle-dim delay (Steam > Settings > Display) and restores it on any input",
                             checked: status.mirror_dim ?? false,
                             onChange: (val) => updateSetting("mirror_dim", val)
+                        })
+                    }),
+                    (status.gleipnir_available || status.gleipnir_ribbon) && SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.ToggleField, {
+                            label: "Show Gleipnir in the status ribbon",
+                            description: "The battery item shows the 80 % cap (held, charging toward it, or off), and Quick Controls gets a Gleipnir status line. Read-only.",
+                            checked: status.gleipnir_ribbon ?? false,
+                            onChange: (val) => updateSetting("gleipnir_ribbon", val)
                         })
                     })
                 ]

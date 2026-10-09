@@ -26,6 +26,19 @@ STATS = {
 }
 
 
+# gleipnir --status --json on the Thor, 2026-10-09, plus the service flag gleipnir_view adds
+GLEIPNIR = {"clamp_value": 0, "node_max": 9000000, "verified": True, "capacity": 78, "status": "Discharging", "usb_online": 0,
+            "current_ua": -642716, "temp_dc": 300, "limit": 9000000, "sleep_floor": 0, "service_active": True}
+
+
+# battery / charger sysfs on the Thor, 2026-10-09 (on battery), and a charging variant on the 8.4 V PD charger
+BATT = {"charge_now": "4856746", "charge_full": "6241000", "charge_full_design": "5938000", "cycle_count": "3",
+        "voltage_now": "3994391", "current_now": "-1706951", "temp": "300", "health": "Good", "time_to_empty_avg": "12082",
+        "capacity": "77", "usb_online": "0", "usb_type": "[Unknown] SDP DCP CDP ACA C PD PD_DRP PD_PPS BrickID"}
+BATT_CHARGING = {**BATT, "current_now": "2400000", "charge_now": "4600000", "capacity": "74", "voltage_now": "4105000",
+                 "usb_online": "1", "usb_type": "C [PD] PD_PPS", "usb_voltage_now": "8376000", "usb_input_current_limit": "3000000"}
+
+
 class Stats:
     def get_stats(self):
         return dict(STATS)
@@ -40,7 +53,7 @@ class Bridge:
         return lambda *a, **k: None
 
 
-def make_app(mode, hud=False, shift=False):
+def make_app(mode, hud=False, shift=False, gleipnir=None):
     app = thor_app.ThorApp.__new__(thor_app.ThorApp)
     app.mode, app.show_debug_hud = mode, hud
     app.frame_count, app.last_fps_calc, app.fps = 0, time.time(), 60.0
@@ -49,6 +62,10 @@ def make_app(mode, hud=False, shift=False):
     app.held_ui_button, app.pen_mode, app.touch_dev_node = None, "off", "/dev/input/event5"
     app.kb_layout = KeyboardLayout(0, thor_app.HEADER_HEIGHT, thor_app.SCREEN_WIDTH, thor_app.SCREEN_HEIGHT - thor_app.HEADER_HEIGHT)
     app.active_key_press, app.mods = None, ModifierState()
+    app.gleipnir_cfg = {"gleipnir_ribbon": gleipnir is not None}
+    app.gleipnir_status = gleipnir
+    app.gleipnir_batt = dict(BATT_CHARGING if gleipnir and gleipnir.get("current_ua", 0) > 0 else BATT)
+    app.gleipnir_events = [("11:24", "CLAMP at 80%"), ("15:18", "RELEASE (charger unplugged)")]
     app.update_mode_bounds()
     if shift:
         app.mods.press("shift", 1, 0.0, 0.35)
@@ -71,6 +88,8 @@ if __name__ == "__main__":
         "trackpad": make_app("trackpad"), "split": make_app("split"), "keyboard": make_app("keyboard"),
         "keyboard-shift": make_app("keyboard", shift=True), "settings": make_app("settings"),
         "trackpad-hud": make_app("trackpad", hud=True),
+        "settings-gleipnir-charging": make_app("settings", gleipnir={**GLEIPNIR, "current_ua": 2400000, "usb_online": 1, "capacity": 74}),
+        "trackpad-gleipnir-held": make_app("trackpad", gleipnir={**GLEIPNIR, "limit": 0, "capacity": 80, "usb_online": 1, "current_ua": 0}),
     }
     for name, app in shots.items():
         render(app, os.path.join(out, f"screen-{name}.png"))

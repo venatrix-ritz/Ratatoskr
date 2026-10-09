@@ -24,6 +24,7 @@ Settings live in one JSON file, `~/.config/thor-input/config.json` (`/var/home/a
 | `keyboard_repeat_delay_ms` | `350` | 150 to 800 | how long a key must be held before it starts repeating |
 | `keyboard_repeat_interval_ms` | `60` | 20 to 200 | time between repeats of a held key (60 ms is about 16 per second) |
 | `keyboard_caps_window_ms` | `350` | 150 to 800 | a second Shift tap within this time turns on Caps Lock |
+| `gleipnir_ribbon` | `false` | bool | show [Gleipnir](https://github.com/venatrix-ritz/Gleipnir) (the 80 % charge cap) in the status ribbon's battery item and a Gleipnir line in Quick Controls; read-only, from `gleipnir --status --json` every 10 s. The Decky toggle appears only when Gleipnir is installed |
 
 Values outside a range are clamped. The ranges and defaults come from `bin/engine.py` (`TouchGestureProcessor`), `bin/thor_app.py`, `bin/keyboard_settings.py` (the three keyboard timings) and `main.py`.
 

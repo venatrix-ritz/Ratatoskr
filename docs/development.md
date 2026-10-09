@@ -9,6 +9,7 @@
 | `bin/key_render.py` | key label drawing (pure cairo) |
 | `bin/keyboard_settings.py` | keyboard timing settings and limits |
 | `bin/modifiers.py` | Shift / Ctrl / Alt / Win state machine |
+| `bin/gleipnir_view.py` | read-only Gleipnir status for the ribbon and Quick Controls |
 | `tests/test_keyboard_handlers.py` | drives the real touch handlers with a fake keyboard; needs GTK, so run it on the Thor (prints `skip` elsewhere) |
 | `tests/render_screens.py` | renders every mode of the real drawing code to PNG (run it on the Thor) |
 | `tests/render_keyboard.py` | renders the keyboard labels to PNG for a visual check (needs pycairo; run it on the Thor) |

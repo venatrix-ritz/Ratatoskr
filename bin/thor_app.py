@@ -56,6 +56,7 @@ from engine import (
 from keyboard_layout import Key, KeyboardLayout
 import key_render
 import keyboard_settings
+import gleipnir_view
 from modifiers import ModifierState
 from touch_frames import TouchFrameParser
 from dim_mirror import DimMirror, IdleTracker
@@ -132,6 +133,12 @@ class ThorApp:
         self.mirror_cfg: dict = {"mirror_dim": False, "mirror_dim_floor_percent": 3}
         # Keyboard timings (repeat delay, repeat interval, Caps Lock double-tap window), in milliseconds
         self.keyboard_cfg: dict = dict(keyboard_settings.DEFAULTS)
+        # Gleipnir (the charge limiter) in the ribbon and Quick Controls: off until switched on; polled every 10 s
+        self.gleipnir_cfg: dict = {"gleipnir_ribbon": False}
+        self.gleipnir_status: dict | None = None
+        self.gleipnir_batt: dict = {}       # battery and charger sysfs values for the ribbon and the card
+        self.gleipnir_events: list = []     # last clamp / release decisions from Gleipnir's journal
+        self._gleipnir_wake = threading.Event()
         self.idle_tracker = IdleTracker(self.logger)
         self.dim_mirror = DimMirror(self.stats, self.idle_tracker, self.logger, lambda: self.mirror_cfg)
 
@@ -201,6 +208,7 @@ class ThorApp:
                     self.gesture.set_settings(**cfg)
                     self._apply_mirror_settings(cfg)
                     keyboard_settings.apply(self.keyboard_cfg, cfg)
+                    self._apply_gleipnir_settings(cfg)
                     self.pen_mode = pm.initial(cfg, session_cursor.is_configured())
                     self.gesture.set_settings(stylus_mode=pm.engine_flag(self.pen_mode))
             except Exception as err:
@@ -225,6 +233,7 @@ class ThorApp:
                 **self.gesture.get_settings(),
                 **self.mirror_cfg,
                 **self.keyboard_cfg,
+                **self.gleipnir_cfg,
             }
             atomic_json.write_json_atomic(CONFIG_PATH, cfg)
         except Exception as err:
@@ -256,6 +265,29 @@ class ThorApp:
                 self.mirror_cfg["mirror_dim_floor_percent"] = max(1, min(50, int(msg["mirror_dim_floor_percent"])))
             except (TypeError, ValueError):
                 pass
+
+    def _apply_gleipnir_settings(self, msg: dict) -> None:
+        if "gleipnir_ribbon" in msg:
+            self.gleipnir_cfg["gleipnir_ribbon"] = bool(msg["gleipnir_ribbon"])
+            if not self.gleipnir_cfg["gleipnir_ribbon"]:
+                self.gleipnir_status = None
+            self._gleipnir_wake.set()  # read it now instead of in up to 10 s
+
+    def _gleipnir_loop(self) -> None:
+        """Read Gleipnir's status every 10 s while the view is on (about 80 ms each, off the draw and touch threads)."""
+        ticks = 0
+        while not self.touch_stop.is_set():
+            if self.gleipnir_cfg["gleipnir_ribbon"]:
+                self.gleipnir_status = gleipnir_view.read_status()
+                self.gleipnir_batt = gleipnir_view.read_battery()
+                if ticks % 6 == 0:  # the journal changes rarely: once a minute
+                    self.gleipnir_events = gleipnir_view.read_events()
+                ticks += 1
+                GLib.idle_add(self.drawing_area.queue_draw)
+            else:
+                ticks = 0
+            self._gleipnir_wake.wait(10.0)
+            self._gleipnir_wake.clear()
 
     def set_mode(self, mode: str) -> None:
         if mode not in ("trackpad", "split", "keyboard", "settings"):
@@ -376,6 +408,7 @@ class ThorApp:
         self._start_ipc_server()
         self.idle_tracker.start()
         self.dim_mirror.start()
+        threading.Thread(target=self._gleipnir_loop, name="gleipnir-view", daemon=True).start()
         self.window.show_all()
         # Periodic 1-second refresh for live system monitor ribbon
         GLib.timeout_add(1000, self._on_stats_tick)
@@ -438,6 +471,7 @@ class ThorApp:
         step("stats sampler", self.stats.stop_sampler)
         step("key repeat", self._stop_key_repeat)
         self.touch_stop.set()
+        self._gleipnir_wake.set()
         self.ipc_stop.set()
         step("ipc socket", lambda: os.path.exists(SOCKET_PATH) and os.remove(SOCKET_PATH))
         step("touchscreen grab", self._release_touch_device)
@@ -877,6 +911,8 @@ class ThorApp:
                             res.update(self.gesture.get_settings())
                             res.update(self.mirror_cfg)
                             res.update(self.keyboard_cfg)
+                            res.update(self.gleipnir_cfg)
+                            res["gleipnir_available"] = gleipnir_view.find_script() is not None
                             res["bottom_dimmed"] = self.dim_mirror.dimmed
                             res.update(self._cursor_status)
                             res["pen_mode"] = self.pen_mode
@@ -904,6 +940,7 @@ class ThorApp:
                                 self.gesture.set_settings(**msg)
                                 self._apply_mirror_settings(msg)
                                 keyboard_settings.apply(self.keyboard_cfg, msg)
+                                self._apply_gleipnir_settings(msg)
                                 if "debug_hud" in msg:
                                     self.show_debug_hud = bool(msg["debug_hud"])
                             self.save_config()
@@ -1065,8 +1102,13 @@ class ThorApp:
         # Brightness
         brt_txt = f"Top {st.get('top_bright_pct', 100)}% · Bot {st.get('bot_bright_pct', 100)}%"
 
+        bat_col = (0.3, 0.85, 0.5)
+        if self.gleipnir_cfg["gleipnir_ribbon"]:
+            view = gleipnir_view.summary(self.gleipnir_status, self.gleipnir_batt)
+            if view:
+                bat_txt, bat_col = view
         pills = [
-            (bat_txt, (0.3, 0.85, 0.5)),
+            (bat_txt, bat_col),
             (cpu_txt, (0.4, 0.75, 1.0)),
             (gpu_txt, (0.95, 0.7, 0.3)),
             (ram_txt, (0.75, 0.6, 0.95)),
@@ -1310,45 +1352,49 @@ class ThorApp:
             accent_col=(0.30, 0.85, 0.60),
         )
 
-        # Card 4: Hardware Health Monitor Grid
-        self._round_rect(cr, 20, QC_HEALTH_Y, SCREEN_WIDTH - 40, QC_HEALTH_H, 18.0)
-        cr.set_source_rgb(0.06, 0.07, 0.10)
-        cr.fill_preserve()
-        cr.set_source_rgb(0.18, 0.20, 0.26)
-        cr.set_line_width(1.5)
-        cr.stroke()
-        cr.new_path()
-
-        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-        cr.set_font_size(22.0)
-        cr.set_source_rgb(0.85, 0.88, 0.95)
-        cr.move_to(44, QC_HEALTH_Y + 38.0)
-        cr.show_text("Live System Health & Power Telemetry")
-
-        grid_items = [
-            ("Battery Status", f"{st.get('bat_cap', 0)}% · {st.get('bat_status', 'N/A')} ({st.get('bat_watts', 0)} W)", (0.3, 0.85, 0.5)),
-            ("CPU Processor", f"{st.get('cpu_load', 0)}% Load · {st.get('cpu_ghz', 0)} GHz · {st.get('cpu_temp', 0)}°C", (0.4, 0.75, 1.0)),
-            ("GPU Adreno", f"{st.get('gpu_mhz', 0)} MHz · {st.get('gpu_temp', 0)}°C", (0.95, 0.7, 0.3)),
-            ("System RAM", f"{st.get('ram_used_gb', 0)} / {st.get('ram_total_gb', 0)} GB ({st.get('ram_pct', 0)}%)", (0.75, 0.6, 0.95)),
-        ]
-
-        gx = 44.0
-        gy = QC_HEALTH_Y + 82.0
-        for i, (label, val, col) in enumerate(grid_items):
-            rx = gx if (i % 2 == 0) else gx + 580.0
-            ry = gy if (i < 2) else gy + 75.0
-
-            cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-            cr.set_font_size(18.0)
-            cr.set_source_rgb(0.62, 0.67, 0.78)
-            cr.move_to(rx, ry)
-            cr.show_text(label)
+        if self.gleipnir_cfg["gleipnir_ribbon"]:
+            # CPU, GPU and RAM are in the ribbon already: the space shows the battery and Gleipnir instead
+            self._draw_battery_card(cr)
+        else:
+            # Card 4: Hardware Health Monitor Grid
+            self._round_rect(cr, 20, QC_HEALTH_Y, SCREEN_WIDTH - 40, QC_HEALTH_H, 18.0)
+            cr.set_source_rgb(0.06, 0.07, 0.10)
+            cr.fill_preserve()
+            cr.set_source_rgb(0.18, 0.20, 0.26)
+            cr.set_line_width(1.5)
+            cr.stroke()
+            cr.new_path()
 
             cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
             cr.set_font_size(22.0)
-            cr.set_source_rgb(*col)
-            cr.move_to(rx, ry + 30.0)
-            cr.show_text(val)
+            cr.set_source_rgb(0.85, 0.88, 0.95)
+            cr.move_to(44, QC_HEALTH_Y + 38.0)
+            cr.show_text("Live System Health & Power Telemetry")
+
+            grid_items = [
+                ("Battery Status", f"{st.get('bat_cap', 0)}% · {st.get('bat_status', 'N/A')} ({st.get('bat_watts', 0)} W)", (0.3, 0.85, 0.5)),
+                ("CPU Processor", f"{st.get('cpu_load', 0)}% Load · {st.get('cpu_ghz', 0)} GHz · {st.get('cpu_temp', 0)}°C", (0.4, 0.75, 1.0)),
+                ("GPU Adreno", f"{st.get('gpu_mhz', 0)} MHz · {st.get('gpu_temp', 0)}°C", (0.95, 0.7, 0.3)),
+                ("System RAM", f"{st.get('ram_used_gb', 0)} / {st.get('ram_total_gb', 0)} GB ({st.get('ram_pct', 0)}%)", (0.75, 0.6, 0.95)),
+            ]
+
+            gx = 44.0
+            gy = QC_HEALTH_Y + 82.0
+            for i, (label, val, col) in enumerate(grid_items):
+                rx = gx if (i % 2 == 0) else gx + 580.0
+                ry = gy if (i < 2) else gy + 75.0
+
+                cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+                cr.set_font_size(18.0)
+                cr.set_source_rgb(0.62, 0.67, 0.78)
+                cr.move_to(rx, ry)
+                cr.show_text(label)
+
+                cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+                cr.set_font_size(22.0)
+                cr.set_source_rgb(*col)
+                cr.move_to(rx, ry + 30.0)
+                cr.show_text(val)
 
         # Action Buttons
         tap_active = self.gesture.tap_to_click
@@ -1364,6 +1410,43 @@ class ThorApp:
 
         self._draw_button(cr, 930, QC_BUTTONS_Y, 280, QC_BUTTONS_H, "Back to Trackpad", False, accent_color=(0.38, 0.25, 0.85))
 
+        if self.gleipnir_cfg["gleipnir_ribbon"]:
+            line = gleipnir_view.detail(self.gleipnir_status)
+            key_render._fit(cr, line, 22.0, SCREEN_WIDTH - 60.0)
+            cr.set_source_rgb(0.75, 0.80, 0.90)
+            cr.move_to(30.0, QC_BUTTONS_Y + QC_BUTTONS_H + 48.0)
+            cr.show_text(line)
+
+
+    def _draw_battery_card(self, cr: cairo.Context) -> None:
+        """Quick Controls card with the battery, the charger and Gleipnir, in place of the health card."""
+        y = QC_HEALTH_Y
+        self._round_rect(cr, 20, y, SCREEN_WIDTH - 40, QC_HEALTH_H, 18.0)
+        cr.set_source_rgb(0.06, 0.07, 0.10)
+        cr.fill_preserve()
+        cr.set_source_rgb(0.18, 0.20, 0.26)
+        cr.set_line_width(1.5)
+        cr.stroke()
+        cr.new_path()
+        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+        cr.set_font_size(22.0)
+        cr.set_source_rgb(0.85, 0.88, 0.95)
+        cr.move_to(44, y + 38.0)
+        cr.show_text("Battery & Gleipnir")
+        items = gleipnir_view.card_items(self.gleipnir_status, self.gleipnir_batt, self.gleipnir_events)
+        col_w = (SCREEN_WIDTH - 88.0) / 2.0
+        for i, (label, value, col) in enumerate(items):
+            x = 44.0 + col_w * (i % 2)
+            row_y = y + 80.0 + 38.0 * (i // 2)
+            cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+            cr.set_font_size(18.0)
+            cr.set_source_rgb(0.55, 0.60, 0.70)
+            cr.move_to(x, row_y)
+            cr.show_text(label)
+            key_render._fit(cr, value, 22.0, col_w - 120.0)
+            cr.set_source_rgb(*col)
+            cr.move_to(x + 100.0, row_y)
+            cr.show_text(value)
 
     def _draw_slider_card(
         self,

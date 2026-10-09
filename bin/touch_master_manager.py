@@ -48,6 +48,7 @@ DEFAULT_CONFIG = {
     "keyboard_repeat_delay_ms": 350,
     "keyboard_repeat_interval_ms": 60,
     "keyboard_caps_window_ms": 350,
+    "gleipnir_ribbon": False,
     "debug_hud": False,
 }
 
