@@ -28,6 +28,7 @@ class TopFollower:
         self._lowest = 1.0
         self._since = 0.0
         self._latched = False
+        self._assumed_peak = 0.0  # set when we start already dimmed: the normal level is unknown, assume full
 
     def suppress(self) -> None:
         """The bottom was touched while dimmed: stay up until the top has recovered, whatever it does meanwhile."""
@@ -38,13 +39,14 @@ class TopFollower:
         self._hist.append((now, level))
         while self._hist and now - self._hist[0][0] > self.keep_s:
             self._hist.pop(0)
-        peak = max(lv for _t, lv in self._hist)
+        peak = max(max(lv for _t, lv in self._hist), self._assumed_peak)
         if self._latched and level >= self.back_ratio * peak:
             self._latched = False
         if self.dimmed:
             self._lowest = min(self._lowest, level)
             if level >= self._lowest + self.rise or level >= self.back_ratio * peak:
                 self.dimmed = False
+                self._assumed_peak = 0.0
                 return "restore"
             if level > self.floor_ratio and now - self._since >= self.settle_s:
                 recent = [lv for t, lv in self._hist if now - t <= self.settle_s]
@@ -54,6 +56,10 @@ class TopFollower:
             return None
         if self._latched:
             return None
+        if len(self._hist) == 1 and level <= self.floor_ratio:
+            # first reading, already at the floor (the service restarted during an idle dim): follow the top down
+            self.dimmed, self._lowest, self._since, self._assumed_peak = True, level, now, 1.0
+            return "dim"
         window = [(t, lv) for t, lv in self._hist if now - t <= self.fall_s]
         if len(window) >= 3 and now - window[0][0] >= self.fall_s * 0.8:
             steady = all(b[1] <= a[1] + 0.005 for a, b in zip(window, window[1:]))

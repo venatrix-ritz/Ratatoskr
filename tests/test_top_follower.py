@@ -92,6 +92,17 @@ def test_touching_the_bottom_latches_until_the_top_recovers():
     assert [a for _t, a in out2] == ["dim"], out2
 
 
+def test_starting_while_the_top_is_already_at_the_floor_dims_and_restores_on_wake():
+    f = TopFollower()
+    out, t = run(f, 0.0, [FLOOR] * 8)
+    assert [a for _t, a in out] == ["dim"] and f.dimmed, out
+    out, t = run(f, t, [1.0] * 4)
+    assert [a for _t, a in out] == ["restore"] and not f.dimmed, out
+    g = TopFollower()
+    out, _ = run(g, 0.0, [0.5] * 8)                      # a user-chosen mid level at start is not a dim
+    assert out == [], out
+
+
 def test_sleep_blank_then_wake():
     f = TopFollower()
     run(f, 0.0, [1.0] * 80)
