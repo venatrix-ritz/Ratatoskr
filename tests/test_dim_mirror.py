@@ -299,6 +299,18 @@ def test_idle_tracker_poke():
     assert t.idle_seconds() < 0.1
 
 
+def test_stopping_during_a_fade_leaves_the_bottom_restored_and_no_record():
+    import threading
+    w = World(pct=80)
+    w.mirror._thread = threading.Thread(target=w.mirror._dim, args=("test", 3))
+    w.mirror._thread.start()
+    time.sleep(0.2)  # inside the 6-step fade (0.15 s between steps)
+    w.mirror.stop()
+    assert not w.mirror._thread.is_alive(), "stop() must wait for the fade"
+    assert w.stats.pct == 80, f"the pre-dim level must be back, got {w.stats.pct}"
+    assert w.record() is None and not w.mirror.dimmed
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

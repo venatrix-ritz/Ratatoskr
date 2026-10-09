@@ -22,6 +22,8 @@
 - **`bin/keyboard_layout.py`** is the on-glass keyboard: key geometry and hit testing.
 - **`bin/key_render.py`** draws the key labels (pure cairo, sized from the key; `tests/render_keyboard.py` renders them to PNG).
 - **`bin/keyboard_settings.py`** holds the keyboard timing settings, their limits and clamping.
+- **`bin/modifiers.py`** is the Shift / Ctrl / Alt / Win state machine (off, one-shot, locked; held while a finger is on it); it returns the key events and `thor_app` sends them.
+- Every touch is owned by the area it landed in (header, ribbon, Quick Controls, keyboard or trackpad) until it lifts, so a drag that crosses the split line stays a trackpad drag. One re-entrant lock (`input_lock`) keeps touch frames and IPC setting or mode changes from interleaving. After `SYN_DROPPED` the driver reads the slot table back (`EVIOCGMTSLOTS`) so fingers already down are not lost.
 - **`bin/system_stats.py`** reads battery, CPU, GPU, RAM, backlights and volume (PipeWire through `wpctl`), and writes volume and brightness. A background thread samples once a second, so drawing and IPC never wait on a sample (a sample took about 29 ms on the Thor, 2026-10-08). Slider writes go through `request_*`: the requested value is drawn at once and a writer thread per control writes only the newest value (each `sudo tee` write took about 25 ms, and the bottom slider needs two).
 - **`bin/dim_mirror.py`** is the optional idle-dim follower ([dim-mirror.md](dim-mirror.md)).
 - **`bin/touch_master_manager.py`** is the standalone GTK window and CLI.
@@ -40,7 +42,7 @@ One request per connection on the stream socket `/run/user/<uid>/thor-input.sock
 | `action` | Request fields | Reply adds |
 |---|---|---|
 | `get_status` | | `mode`, `debug_hud`, `hardware_stats`, every gesture setting, `mirror_dim`, `mirror_dim_floor_percent`, `bottom_dimmed`, `pen_mode`, `cursor_stay_visible`, `cursor_hide_delay_ms`, `cursor_stay_visible_active` |
-| `get_debug` | | `telemetry`, `state`, `coords`, `touch_device`, `active_fingers`, `last_key`, `hardware_stats`, gesture settings |
+| `get_debug` | `reset` (optional): also zero the draw-time counters | `telemetry`, `state`, `coords`, `touch_device`, `active_fingers`, `last_key`, `hardware_stats`, gesture settings, draw-time counters |
 | `set_mode` | `mode` | |
 | `set_pen_mode` | `mode`: `off`, `pen` or `pen_plus` | `pen_mode` and the `cursor_*` fields; `pen_plus` also writes Game Mode's pointer-visible override, which applies when Game Mode next starts |
 | `set_settings` | flat keys, e.g. `sensitivity`, `mirror_dim` | |

@@ -9,7 +9,7 @@ Switch with the buttons along the top of the bottom screen, from the Decky panel
 |---|---|
 | **Trackpad** | a full-screen touchpad |
 | **Split** | the upper part is a trackpad, the lower part a keyboard (the keyboard starts 500 px down) |
-| **Keyboard** | a thumb keyboard that sends real Linux key codes through `/dev/uinput`, with dual-symbol keys, a highlight on active modifiers and key repeat |
+| **Keyboard** | a thumb keyboard that sends real Linux key codes through `/dev/uinput`, with dual-symbol keys, a highlight on active modifiers and key repeat. Shift, Ctrl, Alt and Win: tap once for the next key only, tap twice quickly to lock (Caps Lock for Shift), tap a locked one to release it; or hold one with a finger while typing with another. Switching to Trackpad or Quick Controls releases them all |
 | **Quick Controls** | sliders for volume, top-screen brightness and bottom-screen brightness, plus a live ribbon: battery % and watts, CPU load and temperature, GPU clock and temperature, RAM, volume, both backlights |
 
 ## Trackpad gestures

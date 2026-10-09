@@ -262,13 +262,13 @@ class UInputBridge:
                     self.logger.log(DebugCode.STATUS_CLICK_RIGHT)
                 elif button_code == BTN_MIDDLE:
                     self.logger.log(DebugCode.STATUS_CLICK_MIDDLE)
-            else:
-                self.held_buttons.discard(button_code)
             if self.mouse_fd >= 0:
                 try:
                     if down:
                         self._wake_pointer_locked(sec, usec)
                     os.write(self.mouse_fd, b"".join(evs))
+                    if not down:
+                        self.held_buttons.discard(button_code)  # only once the release really went out
                 except OSError as err:
                     self.logger.log(DebugCode.ERR_UINPUT_WRITE, f"mouse_button: {err}")
 
@@ -285,11 +285,11 @@ class UInputBridge:
                 self.held_keys.add(key_code)
                 self.count_keystrokes += 1
                 self.logger.log(DebugCode.STATUS_KEY_PRESS, f"Key {key_code} DOWN")
-            else:
-                self.held_keys.discard(key_code)
             if self.kb_fd >= 0:
                 try:
                     os.write(self.kb_fd, b"".join(evs))
+                    if not down:
+                        self.held_keys.discard(key_code)  # a failed key-up stays held, so release_all() retries it
                 except OSError as err:
                     self.logger.log(DebugCode.ERR_UINPUT_WRITE, f"key: {err}")
 
@@ -812,7 +812,10 @@ class TouchGestureProcessor:
 
 
     def _start_glide(self, vx: float, vy: float) -> None:
-        self.glide_stop.clear()
+        # A fresh event per glide: clearing a shared one could revive an older glide that had not yet seen its stop.
+        self.glide_stop.set()
+        stop = threading.Event()
+        self.glide_stop = stop
 
         # Decay based on friction setting (1 = 0.97 slick, 5 = 0.88, 10 = 0.74 high friction)
         decay = 0.97 - ((self.friction - 1) / 9.0) * 0.23
@@ -821,7 +824,7 @@ class TouchGestureProcessor:
             cur_vx, cur_vy = vx, vy
             dt = 0.016
             accum_x, accum_y = 0.0, 0.0
-            while not self.glide_stop.is_set():
+            while not stop.is_set():
                 cur_vx *= decay
                 cur_vy *= decay
                 if math.hypot(cur_vx, cur_vy) < 12.0:

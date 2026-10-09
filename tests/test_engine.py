@@ -664,6 +664,35 @@ def test_a_long_scroll_keeps_waking_the_pointer_every_couple_of_seconds():
     assert b.count_pointer_wakes == 2
 
 
+def test_a_failed_key_up_stays_held_so_release_all_can_retry_it():
+    import threading as _t
+    r, w = os.pipe()
+    b = E.UInputBridge.__new__(E.UInputBridge)
+    b.lock = _t.RLock()
+    b.logger = E.DebugLogger("test")
+    b.held_keys, b.held_buttons = set(), set()
+    b.count_keystrokes = 0
+    b.kb_fd = r  # the read end: every write fails
+    b.key(30, True)
+    b.key(30, False)
+    assert 30 in b.held_keys, "a key-up that was not written must not be forgotten"
+    b.kb_fd = w  # writes work again
+    b.release_all()
+    assert not b.held_keys, "release_all() must send the missing key-up"
+    os.close(r)
+    os.close(w)
+
+
+def test_a_new_glide_stops_the_old_one_for_good():
+    g, _ = fresh()
+    g._start_glide(4000.0, 0.0)
+    first = g.glide_stop
+    g._start_glide(4000.0, 0.0)
+    assert first.is_set(), "the first glide must be told to stop"
+    assert not g.glide_stop.is_set() and g.glide_stop is not first, "the new glide has its own, unset stop flag"
+    g.glide_stop.set()
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

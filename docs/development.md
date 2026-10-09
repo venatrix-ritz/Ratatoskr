@@ -8,6 +8,9 @@
 | `bin/keyboard_layout.py` | on-glass keyboard geometry |
 | `bin/key_render.py` | key label drawing (pure cairo) |
 | `bin/keyboard_settings.py` | keyboard timing settings and limits |
+| `bin/modifiers.py` | Shift / Ctrl / Alt / Win state machine |
+| `tests/test_keyboard_handlers.py` | drives the real touch handlers with a fake keyboard; needs GTK, so run it on the Thor (prints `skip` elsewhere) |
+| `tests/render_screens.py` | renders every mode of the real drawing code to PNG (run it on the Thor) |
 | `tests/render_keyboard.py` | renders the keyboard labels to PNG for a visual check (needs pycairo; run it on the Thor) |
 | `bin/system_stats.py` | battery/CPU/GPU/RAM/backlight/volume sampling and setters |
 | `bin/dim_mirror.py` | idle tracker and the bottom-screen dim follower |
