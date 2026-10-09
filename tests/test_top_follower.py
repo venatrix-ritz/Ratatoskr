@@ -92,6 +92,18 @@ def test_touching_the_bottom_latches_until_the_top_recovers():
     assert [a for _t, a in out2] == ["dim"], out2
 
 
+def test_reject_forgets_the_fall_and_needs_a_fresh_one():
+    f = TopFollower()
+    out, t = run(f, 0.0, [1.0] * 80 + ramp(1.0, 0.7, 3))
+    assert [a for _t, a in out] == ["dim"] and f.dimmed
+    f.reject()
+    assert not f.dimmed
+    out, t = run(f, t, ramp(0.7, 0.69, 1))                 # one more sample of the same slow drift: no new dim yet
+    assert out == [], out
+    out, t = run(f, t, ramp(0.69, 0.4, 4))                 # a new steady fall of several seconds: dim again
+    assert "dim" in [a for _t, a in out], out
+
+
 def test_starting_while_the_top_is_already_at_the_floor_dims_and_restores_on_wake():
     f = TopFollower()
     out, t = run(f, 0.0, [FLOOR] * 8)

@@ -30,6 +30,12 @@ class TopFollower:
         self._latched = False
         self._assumed_peak = 0.0  # set when we start already dimmed: the normal level is unknown, assume full
 
+    def reject(self) -> None:
+        """The caller will not act on a "dim" (recent input: the user is dragging the slider). Forget the fall so far;
+        another few seconds of steady fall are needed before it answers "dim" again."""
+        self.dimmed = False
+        self._hist = self._hist[-1:]
+
     def suppress(self) -> None:
         """The bottom was touched while dimmed: stay up until the top has recovered, whatever it does meanwhile."""
         self.dimmed = False
