@@ -52,13 +52,21 @@ _TRIGGER_THRESHOLD = 100
 
 
 def read_dim_seconds(on_ac: bool, path: str = STEAM_CONFIG) -> int:
-    """Steam's idle-dim delay for the current power source, in seconds (0 = never or unreadable)."""
+    """Steam's idle-dim delay for the current power source, in seconds (0 = never or unreadable).
+
+    On a charger an AC delay of 0 ("never" in Steam's settings) is not believed: on the Thor, Steam dimmed the top panel
+    after about the battery delay while the USB-C charger was in and the AC value read 0 (2026-10-08: dims at 00:35,
+    00:57 and 15:22 with the charger online). So the battery delay is used instead. Why Steam does this is not known.
+    """
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
             found = {k: int(v) for k, v in _VDF_KEY.findall(f.read())}
     except OSError:
         return 0
-    return found.get("AC" if on_ac else "Battery", 0)
+    battery = found.get("Battery", 0)
+    if on_ac:
+        return found.get("AC", 0) or battery
+    return battery
 
 
 def on_ac_power(status_path: str = BATTERY_STATUS, usb_path: str = USB_ONLINE) -> bool:

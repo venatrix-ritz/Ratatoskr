@@ -76,9 +76,18 @@ def test_vdf():
         f.write(VDF)
     try:
         assert dm.read_dim_seconds(False, f.name) == 300
-        assert dm.read_dim_seconds(True, f.name) == 0
+        # AC reads 0 ("never") but Steam still dims on the Thor's USB-C charger: the battery delay is used
+        assert dm.read_dim_seconds(True, f.name) == 300
     finally:
         os.unlink(f.name)
+    for ac_val, bat_val, want_ac, want_bat in ((600, 300, 600, 300), (0, 0, 0, 0), (120, 0, 120, 0)):
+        with tempfile.NamedTemporaryFile("w", suffix=".vdf", delete=False, encoding="utf-8") as g:
+            g.write('"IdleBacklightDimBatterySeconds"\t\t"%d"\n"IdleBacklightDimACSeconds"\t\t"%d"\n' % (bat_val, ac_val))
+        try:
+            assert dm.read_dim_seconds(True, g.name) == want_ac, (ac_val, bat_val)
+            assert dm.read_dim_seconds(False, g.name) == want_bat, (ac_val, bat_val)
+        finally:
+            os.unlink(g.name)
     assert dm.read_dim_seconds(False, "/nonexistent/config.vdf") == 0
 
 
