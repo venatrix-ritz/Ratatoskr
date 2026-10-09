@@ -35,6 +35,13 @@ TOP_BACKLIGHT = "/sys/class/backlight/ae96000.dsi.0"
 INPUT_QUIET_S = 5.0
 
 
+def input_says_slider(idle: float, tracker_age: float) -> bool:
+    """True when a falling top backlight is probably a slider drag: there was input within INPUT_QUIET_S. A tracker that
+    has only just started has seen no input yet, so its idle time says nothing; then the guard does not apply (a restart
+    during Steam's idle dim must still dim the bottom)."""
+    return tracker_age >= INPUT_QUIET_S and idle < INPUT_QUIET_S
+
+
 def _boot_now() -> float:
     """Seconds on a clock that keeps counting while the system sleeps (CLOCK_MONOTONIC stops). The follower must see
     the real gap across a suspend, or the last samples before it and the first after it look like one steep fall."""
@@ -361,6 +368,7 @@ class DimMirror:
 
     def _run(self) -> None:
         follower = TopFollower()
+        started = time.monotonic()
         while not self._stop.wait(0.25):
             if self._recover_pending and time.monotonic() >= self._next_recover:
                 self._recover_pending = not self.recover()
@@ -375,7 +383,7 @@ class DimMirror:
                 continue
             now = time.monotonic()
             action = follower.update(_boot_now(), level)
-            if action == "dim" and self._tracker.idle_seconds() < INPUT_QUIET_S:
+            if action == "dim" and input_says_slider(self._tracker.idle_seconds(), now - started):
                 follower.reject()  # the user is dragging the brightness slider, not Steam's idle ramp (needs a minute of quiet)
             elif action == "dim" and now >= self._retry_after:
                 self._dim(f"top backlight falling, now {level * 100:.0f}% of its maximum",
