@@ -54,6 +54,8 @@ from engine import (
     raw_to_screen,
 )
 from keyboard_layout import Key, KeyboardLayout
+import key_render
+import keyboard_settings
 from touch_frames import TouchFrameParser
 from dim_mirror import DimMirror, IdleTracker
 from system_stats import HardwareStats
@@ -96,6 +98,8 @@ class ThorApp:
 
         # Bottom screen follows Steam's idle-dim timer (off until switched on)
         self.mirror_cfg: dict = {"mirror_dim": False, "mirror_dim_floor_percent": 3}
+        # Keyboard timings (repeat delay, repeat interval, Caps Lock double-tap window), in milliseconds
+        self.keyboard_cfg: dict = dict(keyboard_settings.DEFAULTS)
         self.idle_tracker = IdleTracker(self.logger)
         self.dim_mirror = DimMirror(self.stats, self.idle_tracker, self.logger, lambda: self.mirror_cfg)
 
@@ -158,6 +162,7 @@ class ThorApp:
                     self.show_debug_hud = cfg.get("debug_hud", self.show_debug_hud)
                     self.gesture.set_settings(**cfg)
                     self._apply_mirror_settings(cfg)
+                    keyboard_settings.apply(self.keyboard_cfg, cfg)
                     self.pen_mode = pm.initial(cfg, session_cursor.is_configured())
                     self.gesture.set_settings(stylus_mode=pm.engine_flag(self.pen_mode))
             except Exception as err:
@@ -172,6 +177,7 @@ class ThorApp:
                 "pen_mode": self.pen_mode,
                 **self.gesture.get_settings(),
                 **self.mirror_cfg,
+                **self.keyboard_cfg,
             }
             atomic_json.write_json_atomic(CONFIG_PATH, cfg)
         except Exception as err:
@@ -294,8 +300,8 @@ class ThorApp:
         self._repeat_stop.clear()
 
         def _worker():
-            # Initial hold delay before repeating (350ms standard)
-            if self._repeat_stop.wait(0.35):
+            # Initial hold delay before repeating, then the repeat interval (both are settings)
+            if self._repeat_stop.wait(self.keyboard_cfg["keyboard_repeat_delay_ms"] / 1000.0):
                 return
             while not self._repeat_stop.is_set():
                 if self.held_key is not key:
@@ -304,7 +310,7 @@ class ThorApp:
                 if shift_on:
                     self.bridge.key(42, True)
                 self.bridge.tap_key(key.code)
-                if self._repeat_stop.wait(0.06):
+                if self._repeat_stop.wait(self.keyboard_cfg["keyboard_repeat_interval_ms"] / 1000.0):
                     break
 
         self._repeat_thread = threading.Thread(target=_worker, daemon=True)
@@ -551,7 +557,7 @@ class ThorApp:
                         self.kb_layout.shift_active = False
                         self.bridge.key(42, False)
                     elif self.kb_layout.shift_active:
-                        if now_t - self.kb_layout.last_shift_time < 0.35:
+                        if now_t - self.kb_layout.last_shift_time < self.keyboard_cfg["keyboard_caps_window_ms"] / 1000.0:
                             self.kb_layout.caps_lock = True
                             self.kb_layout.shift_active = False
                             self.bridge.key(42, True)
@@ -797,6 +803,7 @@ class ThorApp:
                             res["hardware_stats"] = self.stats.get_stats()
                             res.update(self.gesture.get_settings())
                             res.update(self.mirror_cfg)
+                            res.update(self.keyboard_cfg)
                             res["bottom_dimmed"] = self.dim_mirror.dimmed
                             res.update(self._cursor_status)
                             res["pen_mode"] = self.pen_mode
@@ -821,6 +828,7 @@ class ThorApp:
                         elif action == "set_settings":
                             self.gesture.set_settings(**msg)
                             self._apply_mirror_settings(msg)
+                            keyboard_settings.apply(self.keyboard_cfg, msg)
                             if "debug_hud" in msg:
                                 self.show_debug_hud = bool(msg["debug_hud"])
                             self.save_config()
@@ -1138,34 +1146,8 @@ class ThorApp:
 
                 # Draw Labels / Glyphs
                 if k.has_sub_symbol:
-                    # Keys with dual symbols (e.g. 1 / !, - / _, [ / {)
-                    # When shift is active, swap them so the shifted symbol is primary!
-                    if shift_on:
-                        prim = k.shift_label
-                        sub = k.label
-                    else:
-                        prim = k.label
-                        sub = k.shift_label
-
-                    # Primary character (centered / lower)
-                    cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-                    cr.set_font_size(14.0)
-                    if is_active:
-                        cr.set_source_rgb(1.0, 1.0, 1.0)
-                    elif shift_on:
-                        cr.set_source_rgb(0.40, 0.85, 1.0)  # Bright cyan when shifted!
-                    else:
-                        cr.set_source_rgb(0.92, 0.94, 0.96)
-                    ext = cr.text_extents(prim)
-                    cr.move_to(k.x + (k.w - ext.width) / 2.0 - 4, k.y + k.h - 14)
-                    cr.show_text(prim)
-
-                    # Secondary symbol (upper-right corner)
-                    cr.set_font_size(11.0)
-                    cr.set_source_rgb(0.42, 0.48, 0.58)
-                    sub_ext = cr.text_extents(sub)
-                    cr.move_to(k.x + k.w - sub_ext.width - 10, k.y + 18)
-                    cr.show_text(sub)
+                    # Two-symbol keys (1 / !, - / _, [ / {): the symbol that will be typed is large and centred
+                    key_render.draw_dual_label(cr, k, shift_on, is_active)
 
                 elif k.code in (105, 103, 108, 106):  # Left, Up, Down, Right arrows
                     cx = k.x + k.w / 2.0
@@ -1205,19 +1187,7 @@ class ThorApp:
                     else:
                         label = k.label
 
-                    cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-                    font_sz = 15.0 if len(label) == 1 else 12.5
-                    cr.set_font_size(font_sz)
-
-                    if is_active:
-                        cr.set_source_rgb(1.0, 1.0, 1.0)
-                    elif shift_on and k.is_letter:
-                        cr.set_source_rgb(0.40, 0.85, 1.0)
-                    else:
-                        cr.set_source_rgb(0.92, 0.94, 0.96)
-                    extents = cr.text_extents(label)
-                    cr.move_to(k.x + (k.w - extents.width) / 2.0, k.y + (k.h + extents.height) / 2.0 - 1)
-                    cr.show_text(label)
+                    key_render.draw_plain_label(cr, k, label, is_active, shift_on and k.is_letter)
 
     def _draw_quick_settings(self, cr: cairo.Context) -> None:
         """Render full Quick Settings dashboard cards."""

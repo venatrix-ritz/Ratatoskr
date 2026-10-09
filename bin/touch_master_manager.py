@@ -45,6 +45,9 @@ DEFAULT_CONFIG = {
     "three_finger_swipe_enabled": False,
     "mirror_dim": False,
     "mirror_dim_floor_percent": 3,
+    "keyboard_repeat_delay_ms": 350,
+    "keyboard_repeat_interval_ms": 60,
+    "keyboard_caps_window_ms": 350,
     "debug_hud": False,
 }
 

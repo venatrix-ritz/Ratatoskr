@@ -21,8 +21,11 @@ Settings live in one JSON file, `~/.config/thor-input/config.json` (`/var/home/a
 | `stylus_mode` | `false` | bool | the engine half of Pen mode (on for `pen` and `pen_plus`); older configs only have this key, and are read as `pen`, or `pen_plus` if the override file exists |
 | `mirror_dim` | `false` | bool | dim the bottom screen on Steam's idle-dim timer ([details](dim-mirror.md)) |
 | `mirror_dim_floor_percent` | `3` | 1 to 50 | brightness the bottom screen dims to |
+| `keyboard_repeat_delay_ms` | `350` | 150 to 800 | how long a key must be held before it starts repeating |
+| `keyboard_repeat_interval_ms` | `60` | 20 to 200 | time between repeats of a held key (60 ms is about 16 per second) |
+| `keyboard_caps_window_ms` | `350` | 150 to 800 | a second Shift tap within this time turns on Caps Lock |
 
-Values outside a range are clamped. The ranges and defaults come from `bin/engine.py` (`TouchGestureProcessor`), `bin/thor_app.py` and `main.py`.
+Values outside a range are clamped. The ranges and defaults come from `bin/engine.py` (`TouchGestureProcessor`), `bin/thor_app.py`, `bin/keyboard_settings.py` (the three keyboard timings) and `main.py`.
 
 ## Things to know
 - The standalone manager keeps its own copy of the defaults (it writes the whole file when you touch a control, so they matter). They match the driver's since 2026-10-08; before that the manager's `glide` was `false` and `friction` `7`, and any `config.json` it wrote carries those values. Once `config.json` exists, whatever it holds wins.

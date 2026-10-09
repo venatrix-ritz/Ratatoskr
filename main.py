@@ -122,6 +122,9 @@ def _default_config() -> dict:
         "three_finger_swipe_enabled": False,
         "mirror_dim": False,
         "mirror_dim_floor_percent": 3,
+        "keyboard_repeat_delay_ms": 350,
+        "keyboard_repeat_interval_ms": 60,
+        "keyboard_caps_window_ms": 350,
         "debug_hud": False,
     }
 
@@ -265,6 +268,9 @@ class Plugin:
                     "three_finger_swipe_enabled": cfg.get("three_finger_swipe_enabled", False),
                     "mirror_dim": cfg.get("mirror_dim", False),
                     "mirror_dim_floor_percent": cfg.get("mirror_dim_floor_percent", 3),
+                    "keyboard_repeat_delay_ms": cfg.get("keyboard_repeat_delay_ms", 350),
+                    "keyboard_repeat_interval_ms": cfg.get("keyboard_repeat_interval_ms", 60),
+                    "keyboard_caps_window_ms": cfg.get("keyboard_caps_window_ms", 350),
                     "bottom_dimmed": res.get("bottom_dimmed", False),
                     "pen_mode": res.get("pen_mode", "off"),
                     "cursor_stay_visible": res.get("cursor_stay_visible", False),
