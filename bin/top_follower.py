@@ -11,13 +11,16 @@ class TopFollower:
     - dim: the level has been falling steadily (never rising by more than a hair) for `fall_s` seconds, by at least
       `fall_drop` of where it started, and is below `peak_ratio` of its recent peak. Steam's idle ramp is 254 -> 7 over about 30 s, so it
       shows this in the first seconds. A user sliding the brightness down looks the same at first.
+    - A fall with a single drop over `max_step` of the range is not a dim: that is the blank before a suspend.
     - restore: the level rose by `rise` from its lowest point, or is back within `back_ratio` of the peak (a wake, input),
       or it stopped falling above `floor_ratio` for `settle_s` (a slider move that ended, not an idle ramp).
     After `suppress()` (the bottom panel was touched) it will not dim again until the top has recovered to its peak.
     """
 
     def __init__(self, fall_s: float = 2.5, fall_drop: float = 0.06, peak_ratio: float = 0.95, back_ratio: float = 0.97,
-                 rise: float = 0.15, settle_s: float = 4.0, floor_ratio: float = 0.06, keep_s: float = 120.0) -> None:
+                 rise: float = 0.15, settle_s: float = 4.0, floor_ratio: float = 0.06, keep_s: float = 120.0,
+                 max_step: float = 0.25) -> None:
+        self.max_step = max_step
         self.fall_s, self.fall_drop, self.peak_ratio, self.back_ratio, self.rise = fall_s, fall_drop, peak_ratio, back_ratio, rise
         self.settle_s, self.floor_ratio, self.keep_s = settle_s, floor_ratio, keep_s
         self.reset()
@@ -69,7 +72,10 @@ class TopFollower:
         window = [(t, lv) for t, lv in self._hist if now - t <= self.fall_s]
         if len(window) >= 3 and now - window[0][0] >= self.fall_s * 0.8:
             steady = all(b[1] <= a[1] + 0.005 for a, b in zip(window, window[1:]))
-            if steady and window[0][1] > 0 and (window[0][1] - level) / window[0][1] >= self.fall_drop and level <= self.peak_ratio * peak:
+            # Steam's idle ramp is gradual (a few percent per sample at 4 Hz). The blank before a suspend drops most of the
+            # range within a second; the fade would then start just before the freeze and finish after the wake.
+            gradual = all(a[1] - b[1] <= self.max_step for a, b in zip(window, window[1:]))
+            if steady and gradual and window[0][1] > 0 and (window[0][1] - level) / window[0][1] >= self.fall_drop and level <= self.peak_ratio * peak:
                 self.dimmed, self._lowest, self._since = True, level, now
                 return "dim"
         return None
