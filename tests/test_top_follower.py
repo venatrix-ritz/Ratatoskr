@@ -104,6 +104,19 @@ def test_reject_forgets_the_fall_and_needs_a_fresh_one():
     assert "dim" in [a for _t, a in out], out
 
 
+def test_a_suspend_between_samples_is_not_a_fall():
+    # Full brightness, then a 14 s gap (the suspend, on a clock that counted it), then the top still at its floor on wake.
+    f = TopFollower()
+    out, t = run(f, 0.0, [1.0] * 80)
+    out2, t = run(f, t + 14.0, [FLOOR, FLOOR, FLOOR, 0.5, 1.0, 1.0])
+    assert out2 == [], out2
+    # The same samples on a clock that stood still across the suspend DO look like a steep fall: why the boot clock matters.
+    g = TopFollower()
+    run(g, 0.0, [1.0] * 80)
+    bad, _ = run(g, 20.0 + 0.25, [0.6, 0.3, FLOOR, FLOOR])
+    assert [a for _t, a in bad] == ["dim"], bad
+
+
 def test_starting_while_the_top_is_already_at_the_floor_dims_and_restores_on_wake():
     f = TopFollower()
     out, t = run(f, 0.0, [FLOOR] * 8)
