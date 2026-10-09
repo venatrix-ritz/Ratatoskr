@@ -1,6 +1,6 @@
 {
   "name": "thor-input",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Ratatoskr: AYN Thor bottom AMOLED screen input driver and Decky plugin (trackpad and keyboard)",
   "type": "module",
   "scripts": {
