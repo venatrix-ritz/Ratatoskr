@@ -1,4 +1,7 @@
-"""Ratatoskr Decky Plugin Backend with diagnostic logging, telemetry & quick controls."""
+"""Ratatoskr Decky Plugin Backend with diagnostic logging, telemetry & quick controls.
+
+Disclaimer: This project was developed with AI assistance, hand-edited, audited, and extensively tested on physical hardware.
+"""
 from __future__ import annotations
 
 import asyncio

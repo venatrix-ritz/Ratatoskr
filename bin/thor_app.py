@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Thor Input App: Bottom-screen AMOLED interface with trackpad, keyboard, system monitor & quick controls."""
+"""Thor Input App: Bottom-screen AMOLED interface with trackpad, keyboard, system monitor & quick controls.
+
+Disclaimer: This project was developed with AI assistance, hand-edited, audited, and extensively tested on physical hardware.
+"""
 from __future__ import annotations
 
 import errno

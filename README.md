@@ -1,5 +1,7 @@
 # Ratatoskr
 
+> **Disclaimer:** This project was developed with AI assistance, hand-edited, audited, and extensively tested on physical hardware.
+
 > The squirrel that runs messages up and down Yggdrasil: Ratatoskr carries your touches from the bottom screen to the game on the top one. Formerly **Touch Master** (renamed 2026-10-07). The service, config folder, socket and install paths still use the old `touch-master` / `thor-input` names so existing installs keep working.
 
 A [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin and virtual input driver for the **AYN Thor** (dual-screen handheld, Armada OS). It turns the lower 3.92" AMOLED screen into a **trackpad**, a **keyboard**, a **split** of both, or a **quick-settings and hardware monitor** for games on the main screen, with no launcher in the way.
