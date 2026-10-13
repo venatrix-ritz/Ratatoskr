@@ -1,6 +1,9 @@
-# Ratatoskr
+# Disclaimer
+This project was developed with AI assistance, hand-edited, audited, and extensively tested on physical hardware.
 
-> **Disclaimer:** This project was developed with AI assistance, hand-edited, audited, and extensively tested on physical hardware.
+---
+
+# Ratatoskr
 
 > The squirrel that runs messages up and down Yggdrasil: Ratatoskr carries your touches from the bottom screen to the game on the top one. Formerly **Touch Master** (renamed 2026-10-07). The service, config folder, socket and install paths still use the old `touch-master` / `thor-input` names so existing installs keep working.
 
