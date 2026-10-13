@@ -23,6 +23,7 @@ import threading  # noqa: E402
 import keyboard_settings  # noqa: E402
 from keyboard_layout import KeyboardLayout  # noqa: E402
 from modifiers import ModifierState  # noqa: E402
+from burn_in import BurnInProtector  # noqa: E402
 
 FAILED = []
 SHIFT, CTRL, KEY_A, KEY_B = 42, 29, 30, 48
@@ -63,6 +64,7 @@ def make(mode="keyboard"):
     app.mode = mode
     app.kb_layout = KeyboardLayout(0, thor_app.HEADER_HEIGHT, thor_app.SCREEN_WIDTH, thor_app.SCREEN_HEIGHT - thor_app.HEADER_HEIGHT)
     app.bridge, app.gesture = Bridge(), Gesture()
+    app.burn_in = BurnInProtector()
     app.keyboard_cfg = dict(keyboard_settings.DEFAULTS)
     app.mods, app._touch_owner, app.input_lock = ModifierState(), {}, threading.RLock()
     app.held_key = app.held_key_tid = app.active_key_press = app.active_key_tid = None
