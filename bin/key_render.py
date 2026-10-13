@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import cairo
 
+import theme
+
 FACE = "Sans"
 MAIN_MAX_PX = 34.0       # largest main label, for the biggest keys
 MODIFIER_MAX_PX = 26.0   # multi-character labels (Ctrl, Enter, Backspace ...)
@@ -16,10 +18,10 @@ SUB_MIN_PX = 14.0
 MARGIN_X = 8.0
 MARGIN_Y = 6.0
 
-WHITE = (1.0, 1.0, 1.0)
-MAIN = (0.95, 0.96, 0.98)
-SHIFTED = (0.40, 0.85, 1.0)
-SUB = (0.66, 0.72, 0.84)     # brighter than the old (0.42, 0.48, 0.58), which was hard to read on the dark key
+WHITE = theme.TEXT_ACTIVE
+MAIN = theme.TEXT_PRIMARY
+SHIFTED = (0.95, 0.96, 1.0)
+SUB = theme.TEXT_SECONDARY
 
 
 def _fit(cr: cairo.Context, text: str, max_size: float, max_w: float) -> cairo.TextExtents:

@@ -18,6 +18,7 @@ import thor_app  # noqa: E402
 from engine import TouchGestureProcessor  # noqa: E402
 from keyboard_layout import KeyboardLayout  # noqa: E402
 from modifiers import ModifierState  # noqa: E402
+from burn_in import BurnInProtector  # noqa: E402
 
 STATS = {
     "bat_cap": 80, "bat_status": "Charging", "bat_watts": 12.4, "cpu_load": 23, "cpu_temp": 61, "cpu_ghz": 2.3,
@@ -57,6 +58,7 @@ def make_app(mode, hud=False, shift=False, gleipnir=None):
     app = thor_app.ThorApp.__new__(thor_app.ThorApp)
     app.mode, app.show_debug_hud = mode, hud
     app.frame_count, app.last_fps_calc, app.fps = 0, time.time(), 60.0
+    app.burn_in = BurnInProtector()
     app.stats, app.bridge = Stats(), Bridge()
     app.gesture = TouchGestureProcessor(app.bridge)
     app.held_ui_button, app.pen_mode, app.touch_dev_node = None, "off", "/dev/input/event5"

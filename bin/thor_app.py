@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Thor Input App: Bottom-screen AMOLED interface with trackpad, keyboard, system monitor & quick controls."""
+"""Thor Input App: Bottom-screen AMOLED interface with trackpad, keyboard, system monitor & quick controls.
+
+Disclaimer: This project was developed with AI assistance, hand-edited, audited, and extensively tested on physical hardware.
+"""
 from __future__ import annotations
 
 import errno
@@ -66,6 +69,8 @@ import atomic_json
 import ipc_util
 import session_cursor
 import tray_actions
+import theme
+from burn_in import BurnInProtector
 
 SOCKET_PATH = f"/run/user/{os.getuid()}/thor-input.sock"
 CONFIG_PATH = os.path.expanduser("~/.config/thor-input/config.json")
@@ -141,6 +146,7 @@ class ThorApp:
         self._gleipnir_wake = threading.Event()
         self.idle_tracker = IdleTracker(self.logger)
         self.dim_mirror = DimMirror(self.stats, self.idle_tracker, self.logger, lambda: self.mirror_cfg)
+        self.burn_in = BurnInProtector(shift_radius=1.5, cycle_seconds=90.0, idle_timeout=30.0, idle_floor=0.4, hint_duration=5.0)
 
         # Bridge & processors
         self.bridge = UInputBridge(self.logger)
@@ -299,6 +305,7 @@ class ThorApp:
                 self._end_key_press()
                 self._send_keys(self.mods.release_all())
             self.mode = mode
+            self.burn_in.notify_mode_change()
             self.update_mode_bounds()
         self.save_config()
         GLib.idle_add(self.drawing_area.queue_draw)
@@ -547,6 +554,7 @@ class ThorApp:
                     time.sleep(0.05)
                     continue
                 self.idle_tracker.poke()  # the grabbed bottom touchscreen is invisible to the tracker
+                self.burn_in.record_touch()
                 try:
                     with self.input_lock:
                         for frame in parser.feed(data):
@@ -969,6 +977,7 @@ class ThorApp:
                             # so the sleep and dim timers restart and a dimmed top screen wakes.
                             self.bridge.tap_key(KEY_F24)
                             self.idle_tracker.poke()
+                            self.burn_in.record_touch()
                         elif action == "toggle_hud":
                             self.show_debug_hud = not self.show_debug_hud
                             self.save_config()
@@ -1019,6 +1028,12 @@ class ThorApp:
         cr.set_source_rgb(0, 0, 0)
         cr.paint()
 
+        # Orbital micro-shift for burn-in protection on static UI
+        now_mono = time.monotonic()
+        dx, dy = self.burn_in.get_orbital_offset(now_mono)
+        cr.save()
+        cr.translate(dx, dy)
+
         # Header Bar & Live Status Ribbon
         self._draw_header(cr)
         self._draw_status_ribbon(cr)
@@ -1034,6 +1049,8 @@ class ThorApp:
         elif self.mode == "settings":
             self._draw_quick_settings(cr)
 
+        cr.restore()
+
         # Live Debug HUD Overlay (when enabled)
         if self.show_debug_hud:
             self._draw_debug_hud(cr)
@@ -1041,7 +1058,7 @@ class ThorApp:
         return True
 
     def _draw_header(self, cr: cairo.Context) -> None:
-        cr.set_source_rgb(0.10, 0.12, 0.16)
+        cr.set_source_rgb(*theme.DIVIDER)
         cr.set_line_width(1.0)
         cr.move_to(0, HEADER_BUTTONS_H)
         cr.line_to(SCREEN_WIDTH, HEADER_BUTTONS_H)
@@ -1055,16 +1072,16 @@ class ThorApp:
     def _header_button_look(self, key: str):
         """(label, active, accent colour) of a header button."""
         if key in ("trackpad", "split", "keyboard"):
-            return key.capitalize(), self.mode == key, (0.38, 0.25, 0.85)
+            return key.capitalize(), self.mode == key, theme.BTN_FILL_ACTIVE
         if key == "settings":
-            return "Quick Controls", self.mode == "settings", (0.20, 0.55, 0.90)
+            return "Quick Controls", self.mode == "settings", theme.BTN_FILL_ACTIVE
         if key == "hud":
-            return "HUD", self.show_debug_hud, (0.15, 0.65, 0.45)
+            return "HUD", self.show_debug_hud, (0.18, 0.32, 0.24)
         if key == "left":
-            return "Left Click", self.held_ui_button == "left", (0.3, 0.45, 0.95)
+            return "Left Click", self.held_ui_button == "left", (0.22, 0.26, 0.35)
         if key == "right":
-            return "Right Click", self.held_ui_button == "right", (0.85, 0.35, 0.35)
-        return pm.label(self.pen_mode), self.pen_mode != "off", (0.95, 0.65, 0.20)
+            return "Right Click", self.held_ui_button == "right", (0.35, 0.22, 0.24)
+        return pm.label(self.pen_mode), self.pen_mode != "off", (0.35, 0.30, 0.20)
 
     def _draw_status_ribbon(self, cr: cairo.Context) -> None:
         """Render live system monitoring ribbon across top of AMOLED display."""
@@ -1072,12 +1089,8 @@ class ThorApp:
         ry = HEADER_BUTTONS_H
         rh = STATUS_RIBBON_H
 
-        # Ribbon Background container
-        cr.set_source_rgb(0.04, 0.05, 0.07)
-        cr.rectangle(0, ry, SCREEN_WIDTH, rh)
-        cr.fill()
-
-        cr.set_source_rgb(0.14, 0.16, 0.22)
+        # Pure OLED black: NO background fill container (diodes off)
+        cr.set_source_rgb(*theme.DIVIDER)
         cr.set_line_width(1.0)
         cr.move_to(0, ry + rh)
         cr.line_to(SCREEN_WIDTH, ry + rh)
@@ -1102,18 +1115,18 @@ class ThorApp:
         # Brightness
         brt_txt = f"Top {st.get('top_bright_pct', 100)}% · Bot {st.get('bot_bright_pct', 100)}%"
 
-        bat_col = (0.3, 0.85, 0.5)
+        bat_col = theme.PILL_BAT
         if self.gleipnir_cfg["gleipnir_ribbon"]:
             view = gleipnir_view.summary(self.gleipnir_status, self.gleipnir_batt)
             if view:
                 bat_txt, bat_col = view
         pills = [
             (bat_txt, bat_col),
-            (cpu_txt, (0.4, 0.75, 1.0)),
-            (gpu_txt, (0.95, 0.7, 0.3)),
-            (ram_txt, (0.75, 0.6, 0.95)),
-            (vol_txt, (0.9, 0.5, 0.5) if st.get("vol_muted") else (0.4, 0.85, 0.9)),
-            (brt_txt, (1.0, 0.85, 0.4)),
+            (cpu_txt, theme.PILL_CPU),
+            (gpu_txt, theme.PILL_GPU),
+            (ram_txt, theme.PILL_RAM),
+            (vol_txt, theme.PILL_VOL_MUTED if st.get("vol_muted") else theme.PILL_VOL),
+            (brt_txt, theme.PILL_BRT),
         ]
 
         # Two rows of three cells; one font size for all, as large as the widest text allows
@@ -1141,24 +1154,23 @@ class ThorApp:
         h: float,
         text: str,
         active: bool,
-        accent_color: tuple[float, float, float] = (0.38, 0.25, 0.85),
+        accent_color: tuple[float, float, float] = theme.BTN_ACCENT_DEFAULT,
     ) -> None:
         radius = 10.0
         self._round_rect(cr, x, y, w, h, radius)
         if active:
             cr.set_source_rgb(*accent_color)
             cr.fill_preserve()
-            cr.set_source_rgb(0.75, 0.65, 1.0)
-            cr.set_line_width(1.5)
+            cr.set_source_rgb(*theme.BTN_BORDER_ACTIVE)
+            cr.set_line_width(1.2)
             cr.stroke()
-            cr.set_source_rgb(1.0, 1.0, 1.0)
+            cr.set_source_rgb(*theme.TEXT_ACTIVE)
         else:
-            cr.set_source_rgb(0.08, 0.09, 0.12)
-            cr.fill_preserve()
-            cr.set_source_rgb(0.2, 0.22, 0.28)
+            # Monochrome AMOLED: NO button fill (diodes off)
+            cr.set_source_rgb(*theme.BTN_BORDER_INACTIVE)
             cr.set_line_width(1.0)
             cr.stroke()
-            cr.set_source_rgb(0.85, 0.88, 0.92)
+            cr.set_source_rgb(*theme.TEXT_PRIMARY)
         cr.new_path()
 
         key_render._fit(cr, text, min(h * 0.40, BUTTON_TEXT_MAX_PX), w - 16.0)
@@ -1172,25 +1184,26 @@ class ThorApp:
         pad_h = h - 2 * margin
 
         self._round_rect(cr, pad_x, pad_y, pad_w, pad_h, 20.0)
-        cr.set_source_rgb(0.04, 0.04, 0.06)
-        cr.fill_preserve()
-        cr.set_source_rgb(0.15, 0.17, 0.22)
-        cr.set_line_width(1.5)
+        # AMOLED Pitch-Black: NO surface fill (diodes physically off)
+        cr.set_source_rgb(*theme.BORDER_HAIRLINE)
+        cr.set_line_width(1.0)
         cr.stroke()
         cr.new_path()
 
-        # Center prompt hint (clean, no scrollbar clutter)
-        cr.set_source_rgb(0.30, 0.34, 0.42)
-        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-        cr.set_font_size(22.0)
-        hint = "Ratatoskr: 1 finger moves · Tap clicks · 2 fingers scroll · Flick glides"
-        if self.gesture.stylus_mode:
-            hint = "Pen: touch moves · Double-tap clicks · Hold right-clicks · Edge strips scroll"
-            if self.pen_mode == "pen_plus" and not self._cursor_status["cursor_stay_visible_active"]:
-                hint = "Pen +: restart Game Mode to keep the pointer visible (until then Pen's nudges stay on)"
-        extents = cr.text_extents(hint)
-        cr.move_to(pad_x + (pad_w - extents.width) / 2.0, pad_y + (pad_h + extents.height) / 2.0)
-        cr.show_text(hint)
+        # Center prompt hint: fades out after 5s or first touch to prevent burn-in
+        hint_alpha = self.burn_in.get_hint_alpha()
+        if hint_alpha > 0.01:
+            cr.set_source_rgba(theme.TEXT_SECONDARY[0], theme.TEXT_SECONDARY[1], theme.TEXT_SECONDARY[2], hint_alpha)
+            cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+            cr.set_font_size(22.0)
+            hint = "Ratatoskr: 1 finger moves · Tap clicks · 2 fingers scroll · Flick glides"
+            if self.gesture.stylus_mode:
+                hint = "Pen: touch moves · Double-tap clicks · Hold right-clicks · Edge strips scroll"
+                if self.pen_mode == "pen_plus" and not self._cursor_status["cursor_stay_visible_active"]:
+                    hint = "Pen +: restart Game Mode to keep the pointer visible (until then Pen's nudges stay on)"
+            extents = cr.text_extents(hint)
+            cr.move_to(pad_x + (pad_w - extents.width) / 2.0, pad_y + (pad_h + extents.height) / 2.0)
+            cr.show_text(hint)
 
         if self.gesture.stylus_mode:
             self._draw_scroll_strips(cr, pad_y, pad_h, show_bottom=(y + h) >= SCREEN_HEIGHT - 1)
@@ -1204,13 +1217,12 @@ class ThorApp:
             strips.append((28.0, bottom_y + 8.0, right_x - 40.0, STRIP_BOTTOM_H - 28.0, "◀  scroll  ▶"))
         for sx, sy, sw, sh, label in strips:
             self._round_rect(cr, sx, sy, sw, sh, 14.0)
-            cr.set_source_rgb(0.09, 0.10, 0.14)
-            cr.fill_preserve()
-            cr.set_source_rgb(0.95, 0.65, 0.20)
-            cr.set_line_width(1.2)
+            # AMOLED Pitch-Black: NO strip fill
+            cr.set_source_rgb(*theme.STRIP_BORDER)
+            cr.set_line_width(1.0)
             cr.stroke()
             cr.new_path()
-            cr.set_source_rgb(0.95, 0.65, 0.20)
+            cr.set_source_rgb(*theme.STRIP_TEXT)
             cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
             cr.set_font_size(20.0)
             ext = cr.text_extents(label)
@@ -1242,21 +1254,20 @@ class ThorApp:
 
                 self._round_rect(cr, k.x, k.y, k.w, k.h, 10.0)
                 if is_active:
-                    # Highlighted active key
-                    cr.set_source_rgb(0.48, 0.28, 0.95)
+                    # Highlighted active key: momentary touch flare
+                    cr.set_source_rgb(*theme.KEY_FILL_ACTIVE)
                     cr.fill_preserve()
-                    cr.set_source_rgb(0.78, 0.60, 1.0)
-                    cr.set_line_width(2.0)
+                    cr.set_source_rgb(*theme.KEY_BORDER_ACTIVE)
+                    cr.set_line_width(1.5)
                     cr.stroke()
                 else:
+                    # Inactive key: NO fill! Pure unlit black glass
                     if shift_on and k.is_letter:
-                        # Subtle highlighted tint for letters when Shift is active
-                        cr.set_source_rgb(0.15, 0.14, 0.22)
+                        cr.set_source_rgb(*theme.KEY_BORDER_SHIFTED)
+                        cr.set_line_width(1.2)
                     else:
-                        cr.set_source_rgb(0.10, 0.11, 0.15)
-                    cr.fill_preserve()
-                    cr.set_source_rgb(0.22, 0.25, 0.32)
-                    cr.set_line_width(1.0)
+                        cr.set_source_rgb(*theme.KEY_BORDER_INACTIVE)
+                        cr.set_line_width(1.0)
                     cr.stroke()
                 cr.new_path()  # Path clean reset
 
@@ -1270,9 +1281,9 @@ class ThorApp:
                     cy = k.y + k.h / 2.0
                     sz = 6.5
                     if is_active:
-                        cr.set_source_rgb(1.0, 1.0, 1.0)
+                        cr.set_source_rgb(*theme.TEXT_ACTIVE)
                     else:
-                        cr.set_source_rgb(0.92, 0.94, 0.96)
+                        cr.set_source_rgb(*theme.TEXT_PRIMARY)
 
                     if k.code == 105:  # KEY_LEFT
                         cr.move_to(cx - sz, cy)
@@ -1321,7 +1332,7 @@ class ThorApp:
             track_w=820,
             has_mute=True,
             is_muted=st.get("vol_muted", False),
-            accent_col=(0.35, 0.55, 0.95),
+            accent_col=theme.SLIDER_FILL,
         )
 
         # Card 2: Top Display Brightness
@@ -1335,7 +1346,7 @@ class ThorApp:
             pct=st.get("top_bright_pct", 100),
             track_w=960,
             has_mute=False,
-            accent_col=(1.0, 0.80, 0.30),
+            accent_col=theme.SLIDER_FILL,
         )
 
         # Card 3: Bottom AMOLED Brightness
@@ -1349,7 +1360,7 @@ class ThorApp:
             pct=st.get("bot_bright_pct", 100),
             track_w=960,
             has_mute=False,
-            accent_col=(0.30, 0.85, 0.60),
+            accent_col=theme.SLIDER_FILL,
         )
 
         if self.gleipnir_cfg["gleipnir_ribbon"]:
@@ -1358,24 +1369,23 @@ class ThorApp:
         else:
             # Card 4: Hardware Health Monitor Grid
             self._round_rect(cr, 20, QC_HEALTH_Y, SCREEN_WIDTH - 40, QC_HEALTH_H, 18.0)
-            cr.set_source_rgb(0.06, 0.07, 0.10)
-            cr.fill_preserve()
-            cr.set_source_rgb(0.18, 0.20, 0.26)
-            cr.set_line_width(1.5)
+            # AMOLED Pitch-Black: NO card fill
+            cr.set_source_rgb(*theme.CARD_BORDER)
+            cr.set_line_width(1.0)
             cr.stroke()
             cr.new_path()
 
             cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
             cr.set_font_size(22.0)
-            cr.set_source_rgb(0.85, 0.88, 0.95)
+            cr.set_source_rgb(*theme.TEXT_PRIMARY)
             cr.move_to(44, QC_HEALTH_Y + 38.0)
             cr.show_text("Live System Health & Power Telemetry")
 
             grid_items = [
-                ("Battery Status", f"{st.get('bat_cap', 0)}% · {st.get('bat_status', 'N/A')} ({st.get('bat_watts', 0)} W)", (0.3, 0.85, 0.5)),
-                ("CPU Processor", f"{st.get('cpu_load', 0)}% Load · {st.get('cpu_ghz', 0)} GHz · {st.get('cpu_temp', 0)}°C", (0.4, 0.75, 1.0)),
-                ("GPU Adreno", f"{st.get('gpu_mhz', 0)} MHz · {st.get('gpu_temp', 0)}°C", (0.95, 0.7, 0.3)),
-                ("System RAM", f"{st.get('ram_used_gb', 0)} / {st.get('ram_total_gb', 0)} GB ({st.get('ram_pct', 0)}%)", (0.75, 0.6, 0.95)),
+                ("Battery Status", f"{st.get('bat_cap', 0)}% · {st.get('bat_status', 'N/A')} ({st.get('bat_watts', 0)} W)", theme.PILL_BAT),
+                ("CPU Processor", f"{st.get('cpu_load', 0)}% Load · {st.get('cpu_ghz', 0)} GHz · {st.get('cpu_temp', 0)}°C", theme.PILL_CPU),
+                ("GPU Adreno", f"{st.get('gpu_mhz', 0)} MHz · {st.get('gpu_temp', 0)}°C", theme.PILL_GPU),
+                ("System RAM", f"{st.get('ram_used_gb', 0)} / {st.get('ram_total_gb', 0)} GB ({st.get('ram_pct', 0)}%)", theme.PILL_RAM),
             ]
 
             gx = 44.0
@@ -1386,7 +1396,7 @@ class ThorApp:
 
                 cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
                 cr.set_font_size(18.0)
-                cr.set_source_rgb(0.62, 0.67, 0.78)
+                cr.set_source_rgb(*theme.TEXT_SECONDARY)
                 cr.move_to(rx, ry)
                 cr.show_text(label)
 
@@ -1399,21 +1409,21 @@ class ThorApp:
         # Action Buttons
         tap_active = self.gesture.tap_to_click
         tap_label = "Tap Click: ON" if tap_active else "Tap Click: OFF"
-        self._draw_button(cr, 30, QC_BUTTONS_Y, 280, QC_BUTTONS_H, tap_label, tap_active, accent_color=(0.15, 0.55, 0.95))
+        self._draw_button(cr, 30, QC_BUTTONS_Y, 280, QC_BUTTONS_H, tap_label, tap_active, accent_color=theme.BTN_FILL_ACTIVE)
 
         right_2f = self.gesture.two_finger_right_click
         right_label = "Right: 2-Finger" if right_2f else "Right: Press-Hold"
-        self._draw_button(cr, 330, QC_BUTTONS_Y, 280, QC_BUTTONS_H, right_label, right_2f, accent_color=(0.2, 0.75, 0.65))
+        self._draw_button(cr, 330, QC_BUTTONS_Y, 280, QC_BUTTONS_H, right_label, right_2f, accent_color=theme.BTN_FILL_ACTIVE)
 
         hud_label = "Glass HUD: ON" if self.show_debug_hud else "Glass HUD: OFF"
-        self._draw_button(cr, 630, QC_BUTTONS_Y, 280, QC_BUTTONS_H, hud_label, self.show_debug_hud, accent_color=(0.2, 0.65, 0.4))
+        self._draw_button(cr, 630, QC_BUTTONS_Y, 280, QC_BUTTONS_H, hud_label, self.show_debug_hud, accent_color=(0.18, 0.32, 0.24))
 
-        self._draw_button(cr, 930, QC_BUTTONS_Y, 280, QC_BUTTONS_H, "Back to Trackpad", False, accent_color=(0.38, 0.25, 0.85))
+        self._draw_button(cr, 930, QC_BUTTONS_Y, 280, QC_BUTTONS_H, "Back to Trackpad", False, accent_color=theme.BTN_FILL_ACTIVE)
 
         if self.gleipnir_cfg["gleipnir_ribbon"]:
             line = gleipnir_view.detail(self.gleipnir_status)
             key_render._fit(cr, line, 22.0, SCREEN_WIDTH - 60.0)
-            cr.set_source_rgb(0.75, 0.80, 0.90)
+            cr.set_source_rgb(*theme.TEXT_SECONDARY)
             cr.move_to(30.0, QC_BUTTONS_Y + QC_BUTTONS_H + 48.0)
             cr.show_text(line)
 
@@ -1422,15 +1432,14 @@ class ThorApp:
         """Quick Controls card with the battery, the charger and Gleipnir, in place of the health card."""
         y = QC_HEALTH_Y
         self._round_rect(cr, 20, y, SCREEN_WIDTH - 40, QC_HEALTH_H, 18.0)
-        cr.set_source_rgb(0.06, 0.07, 0.10)
-        cr.fill_preserve()
-        cr.set_source_rgb(0.18, 0.20, 0.26)
-        cr.set_line_width(1.5)
+        # AMOLED Pitch-Black: NO card fill
+        cr.set_source_rgb(*theme.CARD_BORDER)
+        cr.set_line_width(1.0)
         cr.stroke()
         cr.new_path()
         cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
         cr.set_font_size(22.0)
-        cr.set_source_rgb(0.85, 0.88, 0.95)
+        cr.set_source_rgb(*theme.TEXT_PRIMARY)
         cr.move_to(44, y + 38.0)
         cr.show_text("Battery & Gleipnir")
         items = gleipnir_view.card_items(self.gleipnir_status, self.gleipnir_batt, self.gleipnir_events)
@@ -1440,7 +1449,7 @@ class ThorApp:
             row_y = y + 80.0 + 38.0 * (i // 2)
             cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
             cr.set_font_size(18.0)
-            cr.set_source_rgb(0.55, 0.60, 0.70)
+            cr.set_source_rgb(*theme.TEXT_SECONDARY)
             cr.move_to(x, row_y)
             cr.show_text(label)
             key_render._fit(cr, value, 22.0, col_w - 120.0)
@@ -1460,20 +1469,19 @@ class ThorApp:
         track_w: float,
         has_mute: bool = False,
         is_muted: bool = False,
-        accent_col: tuple[float, float, float] = (0.35, 0.55, 0.95),
+        accent_col: tuple[float, float, float] = theme.SLIDER_FILL,
     ) -> None:
         self._round_rect(cr, x, y, w, h, 16.0)
-        cr.set_source_rgb(0.06, 0.07, 0.10)
-        cr.fill_preserve()
-        cr.set_source_rgb(0.18, 0.20, 0.26)
-        cr.set_line_width(1.5)
+        # AMOLED Pitch-Black: NO card fill
+        cr.set_source_rgb(*theme.CARD_BORDER)
+        cr.set_line_width(1.0)
         cr.stroke()
         cr.new_path()
 
         # Title
         cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
         cr.set_font_size(22.0)
-        cr.set_source_rgb(0.88, 0.90, 0.96)
+        cr.set_source_rgb(*theme.TEXT_PRIMARY)
         cr.move_to(x + 24, y + 34)
         cr.show_text(title)
 
@@ -1484,9 +1492,8 @@ class ThorApp:
         # Slider track
         track_x = x + 110.0
         self._round_rect(cr, track_x, ctrl_y + 12.0, track_w, 32.0, 16.0)
-        cr.set_source_rgb(0.12, 0.14, 0.18)
-        cr.fill_preserve()
-        cr.set_source_rgb(0.24, 0.27, 0.35)
+        # NO trough fill! Just hairline border
+        cr.set_source_rgb(*theme.TRACK_BORDER)
         cr.set_line_width(1.0)
         cr.stroke()
         cr.new_path()
@@ -1505,7 +1512,7 @@ class ThorApp:
         # Optional Mute button
         if has_mute:
             mute_x = plus_x + 100.0
-            mute_col = (0.85, 0.35, 0.35) if is_muted else (0.25, 0.28, 0.35)
+            mute_col = (0.45, 0.22, 0.24) if is_muted else theme.BTN_FILL_ACTIVE
             self._draw_button(cr, mute_x, ctrl_y, 140, 56, "Muted" if is_muted else "Mute", is_muted, accent_color=mute_col)
 
     def _draw_debug_hud(self, cr: cairo.Context) -> None:
@@ -1513,12 +1520,12 @@ class ThorApp:
         hud_w, hud_h = 400.0, 190.0
         hud_x, hud_y = SCREEN_WIDTH - hud_w - 30.0, HEADER_HEIGHT + 20.0
 
-        # HUD Box
+        # HUD Box: pure black translucent background
         self._round_rect(cr, hud_x, hud_y, hud_w, hud_h, 10.0)
-        cr.set_source_rgba(0.05, 0.07, 0.10, 0.92)
+        cr.set_source_rgba(0.0, 0.0, 0.0, 0.88)
         cr.fill_preserve()
-        cr.set_source_rgba(0.18, 0.55, 0.35, 0.8)
-        cr.set_line_width(1.5)
+        cr.set_source_rgba(0.18, 0.35, 0.25, 0.8)
+        cr.set_line_width(1.0)
         cr.stroke()
         cr.new_path()
 
@@ -1537,7 +1544,7 @@ class ThorApp:
         cr.set_font_size(15.0)
         line_y = hud_y + 24.0
         for i, text in enumerate(lines):
-            cr.set_source_rgb(0.2, 0.9, 0.5) if i == 0 else cr.set_source_rgb(0.85, 0.88, 0.92)
+            cr.set_source_rgb(0.35, 0.85, 0.50) if i == 0 else cr.set_source_rgb(*theme.TEXT_PRIMARY)
             cr.move_to(hud_x + 14.0, line_y)
             cr.show_text(text)
             line_y += 22.0
