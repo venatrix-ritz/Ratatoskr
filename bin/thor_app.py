@@ -83,10 +83,13 @@ SPLIT_Y = 500.0  # split mode: trackpad above, keyboard below
 
 # Header buttons: (key, x, width). One table for drawing and for hit-testing.
 HEADER_BUTTONS = (
-    ("trackpad", 12, 150), ("split", 170, 110), ("keyboard", 288, 150), ("settings", 446, 190),
-    ("hud", 644, 90), ("left", 750, 150), ("right", 908, 150), ("pen", 1066, 162),
+    ("trackpad", 12, 138), ("split", 158, 100), ("keyboard", 266, 138), ("settings", 412, 176),
+    ("hud", 596, 78), ("left", 682, 130), ("right", 820, 130), ("pen", 958, 150), ("hide", 1116, 112),
 )
 HEADER_BUTTON_Y, HEADER_BUTTON_H = 8.0, 64.0
+# Hidden UI: only this button is drawn (where the Hide button was) and touches within OPEN_HIT_PAD of it open the UI again.
+OPEN_BUTTON = (1116.0, HEADER_BUTTON_Y, 112.0, HEADER_BUTTON_H)
+OPEN_HIT_PAD = 24.0
 
 # Quick Controls layout, below the header
 QC_CARD_Y = (HEADER_HEIGHT + 28.0, HEADER_HEIGHT + 178.0, HEADER_HEIGHT + 328.0)  # volume, top, bottom brightness
@@ -115,6 +118,7 @@ class ThorApp:
 
         self.mode = "trackpad"  # 'trackpad', 'split', 'keyboard', 'settings'
         self.show_debug_hud = False
+        self.ui_hidden = False  # Hide button: everything but the Open button is blanked; not saved, a restart shows the UI
         self.touch_dev_node = ""
         self.exit_code = 0
         self._cleaned = False
@@ -307,6 +311,17 @@ class ThorApp:
                 self.burn_in.notify_mode_change()
             self.update_mode_bounds()
         self.save_config()
+        GLib.idle_add(self.drawing_area.queue_draw)
+
+    def set_ui_hidden(self, hidden: bool) -> None:
+        """Blank the screen but for the Open button (hidden), or bring the UI back. Hiding ends anything a keyboard or
+        slider touch was doing, like leaving the keyboard does; the mode itself is kept."""
+        with self.input_lock:
+            self._slider_drag = None
+            if hidden:
+                self._end_key_press()
+                self._send_keys(self.mods.release_all())
+            self.ui_hidden = hidden
         GLib.idle_add(self.drawing_area.queue_draw)
 
     def update_mode_bounds(self) -> None:
@@ -656,6 +671,11 @@ class ThorApp:
     def _owner_at(self, x: float, y: float) -> str:
         """The area a touch belongs to, decided where it lands. It keeps that owner until it lifts, so a drag that
         crosses into another area (the split line, the header) is not cut off or handed to the wrong handler."""
+        if self.ui_hidden:  # the whole screen is a trackpad, except the Open button
+            ox, oy, ow, oh = OPEN_BUTTON
+            if ox - OPEN_HIT_PAD <= x <= ox + ow + OPEN_HIT_PAD and oy - OPEN_HIT_PAD <= y <= oy + oh + OPEN_HIT_PAD:
+                return "open"
+            return "trackpad"
         if y < HEADER_BUTTONS_H:
             return "header"
         if y < HEADER_HEIGHT:
@@ -706,6 +726,8 @@ class ThorApp:
         self._touch_owner[tid] = owner
         if owner == "header":
             self._handle_header_touch(tid, x, y, True)
+        elif owner == "open":
+            self.set_ui_hidden(False)
         elif owner == "ribbon":  # the status ribbon toggles Quick Controls
             self.set_mode("trackpad" if self.mode == "settings" else "settings", restart_hint=False)
         elif owner == "settings":
@@ -780,6 +802,8 @@ class ThorApp:
         key = next((k for k, bx, bw in HEADER_BUTTONS if bx <= x <= bx + bw), None)
         if key in ("trackpad", "split", "keyboard", "settings"):
             self.set_mode(key, restart_hint=False)
+        elif key == "hide":
+            self.set_ui_hidden(True)
         elif key == "hud":
             self.show_debug_hud = not self.show_debug_hud
             self.save_config()
@@ -1033,20 +1057,11 @@ class ThorApp:
         cr.save()
         cr.translate(dx, dy)
 
-        # Header Bar & Live Status Ribbon
-        self._draw_header(cr)
-        self._draw_status_ribbon(cr)
-
-        # Mode Contents
-        if self.mode == "trackpad":
-            self._draw_trackpad_surface(cr, HEADER_HEIGHT, SCREEN_HEIGHT - HEADER_HEIGHT)
-        elif self.mode == "keyboard":
-            self._draw_keyboard(cr)
-        elif self.mode == "split":
-            self._draw_trackpad_surface(cr, HEADER_HEIGHT, SPLIT_Y - HEADER_HEIGHT)
-            self._draw_keyboard(cr)
-        elif self.mode == "settings":
-            self._draw_quick_settings(cr)
+        if self.ui_hidden:
+            # Only the Open button: outline only, shifted with the rest and dimmed by the idle veil below, never faded out
+            self._draw_open_button(cr)
+        else:
+            self._draw_ui(cr)
 
         cr.restore()
 
@@ -1061,6 +1076,26 @@ class ThorApp:
             self._draw_debug_hud(cr)
 
         return True
+
+    def _draw_open_button(self, cr: cairo.Context) -> None:
+        x, y, w, h = OPEN_BUTTON
+        self._draw_button(cr, x, y, w, h, "Open", False)
+
+    def _draw_ui(self, cr: cairo.Context) -> None:
+        # Header Bar & Live Status Ribbon
+        self._draw_header(cr)
+        self._draw_status_ribbon(cr)
+
+        # Mode Contents
+        if self.mode == "trackpad":
+            self._draw_trackpad_surface(cr, HEADER_HEIGHT, SCREEN_HEIGHT - HEADER_HEIGHT)
+        elif self.mode == "keyboard":
+            self._draw_keyboard(cr)
+        elif self.mode == "split":
+            self._draw_trackpad_surface(cr, HEADER_HEIGHT, SPLIT_Y - HEADER_HEIGHT)
+            self._draw_keyboard(cr)
+        elif self.mode == "settings":
+            self._draw_quick_settings(cr)
 
     def _draw_header(self, cr: cairo.Context) -> None:
         cr.set_source_rgb(*theme.DIVIDER)
@@ -1080,6 +1115,8 @@ class ThorApp:
             return key.capitalize(), self.mode == key, theme.BTN_FILL_ACTIVE
         if key == "settings":
             return "Quick Controls", self.mode == "settings", theme.BTN_FILL_ACTIVE
+        if key == "hide":
+            return "Hide", False, theme.BTN_ACCENT_DEFAULT
         if key == "hud":
             return "HUD", self.show_debug_hud, (0.18, 0.32, 0.24)
         if key == "left":

@@ -2,8 +2,8 @@
 """Render every bottom-screen mode of the real drawing code (ThorApp._paint) to PNG, without a window or devices.
 
 Usage (on the Thor, which has gi and pycairo): python3 tests/render_screens.py OUT_DIR
-Writes screen-trackpad.png, screen-split.png, screen-keyboard.png, screen-keyboard-shift.png, screen-settings.png and
-screen-trackpad-hud.png. Not a unit test (the name keeps it out of the test runs).
+Writes screen-trackpad.png, screen-split.png, screen-keyboard.png, screen-keyboard-shift.png, screen-settings.png,
+screen-trackpad-hud.png and screen-hidden.png (the UI hidden but for the Open button), among others. Not a unit test (the name keeps it out of the test runs).
 """
 import os
 import sys
@@ -54,9 +54,9 @@ class Bridge:
         return lambda *a, **k: None
 
 
-def make_app(mode, hud=False, shift=False, gleipnir=None):
+def make_app(mode, hud=False, shift=False, gleipnir=None, hidden=False):
     app = thor_app.ThorApp.__new__(thor_app.ThorApp)
-    app.mode, app.show_debug_hud = mode, hud
+    app.mode, app.show_debug_hud, app.ui_hidden = mode, hud, hidden
     app.frame_count, app.last_fps_calc, app.fps = 0, time.time(), 60.0
     app.burn_in = BurnInProtector()
     app.stats, app.bridge = Stats(), Bridge()
@@ -89,7 +89,7 @@ if __name__ == "__main__":
     shots = {
         "trackpad": make_app("trackpad"), "split": make_app("split"), "keyboard": make_app("keyboard"),
         "keyboard-shift": make_app("keyboard", shift=True), "settings": make_app("settings"),
-        "trackpad-hud": make_app("trackpad", hud=True),
+        "trackpad-hud": make_app("trackpad", hud=True), "hidden": make_app("trackpad", hidden=True),
         "settings-gleipnir-charging": make_app("settings", gleipnir={**GLEIPNIR, "current_ua": 2400000, "usb_online": 1, "capacity": 74}),
         "trackpad-gleipnir-held": make_app("trackpad", gleipnir={**GLEIPNIR, "limit": 0, "capacity": 80, "usb_online": 1, "current_ua": 0}),
     }
