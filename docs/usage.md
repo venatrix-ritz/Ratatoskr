@@ -50,6 +50,9 @@ In the Decky panel (Steam menu, Decky, Ratatoskr): sensitivity, glide and fricti
 
 The panel also shows service state, hardware stats, input telemetry (moves, scrolls, clicks, keys) and a **Run Diagnostics** button.
 
+## Hide and Open
+The **Hide** button at the right end of the header blanks the whole bottom screen except an **Open** button in the same corner. While it is hidden the whole screen works as a trackpad (the keyboard and Quick Controls are not usable). Tap within about 2 cm of the Open button (24 px around it) to bring the UI back in the mode it was in. The Open button is outline only, moves with the burn-in orbit and dims with the idle veil; it never fades out. The state is not saved: restarting the service shows the UI.
+
 ## The HUD
 "Bottom Screen HUD Overlay" draws live touch coordinates, FPS and event counters on the glass. It is for tuning and debugging.
 

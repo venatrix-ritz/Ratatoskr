@@ -69,7 +69,7 @@ def make(mode="keyboard"):
     app.mods, app._touch_owner, app.input_lock = ModifierState(), {}, threading.RLock()
     app.held_key = app.held_key_tid = app.active_key_press = app.active_key_tid = None
     app.held_ui_button = app.held_ui_button_tid = app._slider_drag = None
-    app.last_key_label, app.last_event_time, app.show_debug_hud = "", 0.0, False
+    app.last_key_label, app.last_event_time, app.show_debug_hud, app.ui_hidden = "", 0.0, False, False
     app._repeat_stop, app._repeat_thread = threading.Event(), None
     app._start_key_repeat = lambda key: None
     app.drawing_area = types.SimpleNamespace(queue_draw=lambda: None)
@@ -147,6 +147,48 @@ def test_turning_shift_off_clears_its_highlight():
     thor_app.ThorApp._handle_touch_up(app, 2, 5.1)
     check("no key is drawn pressed after the lift", app.active_key_press is None, app.active_key_press)
     check("shift is not drawn active", not app.kb_layout.shift_active and not app.kb_layout.caps_lock)
+
+
+def _centre(button):
+    key, x, w = next(b for b in thor_app.HEADER_BUTTONS if b[0] == button)
+    return x + w / 2.0, thor_app.HEADER_BUTTON_Y + thor_app.HEADER_BUTTON_H / 2.0
+
+
+def test_hide_button_blanks_the_ui_and_releases_modifiers():
+    app = make()
+    tap(app, "Ctrl", 1)
+    tap(app, "Ctrl", 2)  # locked
+    app.bridge.ev.clear()
+    x, y = _centre("hide")
+    thor_app.ThorApp._handle_touch_down(app, 5, x, y, 0.0)
+    thor_app.ThorApp._handle_touch_up(app, 5, 0.1)
+    check("the UI is hidden", app.ui_hidden)
+    check("the mode is kept for when the UI comes back", app.mode == "keyboard", app.mode)
+    check("ctrl goes up on hiding", app.bridge.ev == [(CTRL, "up")], app.bridge.ev)
+
+
+def test_hidden_screen_is_a_trackpad_except_the_open_button():
+    app = make("keyboard")
+    app.ui_hidden = True
+    ox, oy, ow, oh = thor_app.OPEN_BUTTON
+    check("the keyboard area is trackpad while hidden", app._owner_at(600.0, 800.0) == "trackpad")
+    check("the old header area is trackpad while hidden", app._owner_at(300.0, 40.0) == "trackpad")
+    check("the Open button is its own area", app._owner_at(ox + ow / 2, oy + oh / 2) == "open")
+    check("a finger just off the Open button still opens", app._owner_at(ox - 10.0, oy + oh + 10.0) == "open")
+    thor_app.ThorApp._handle_touch_down(app, 7, 600.0, 800.0, 0.0)
+    thor_app.ThorApp._handle_touch_up(app, 7, 0.1)
+    check("a touch on the hidden screen moves the pointer, types nothing", app.gesture.calls == [("touch_down", 7), ("touch_up", 7)] and app.bridge.ev == [], (app.gesture.calls, app.bridge.ev))
+
+
+def test_open_button_brings_the_ui_back():
+    app = make("keyboard")
+    app.ui_hidden = True
+    ox, oy, ow, oh = thor_app.OPEN_BUTTON
+    thor_app.ThorApp._handle_touch_down(app, 8, ox + ow / 2, oy + oh / 2, 0.0)
+    thor_app.ThorApp._handle_touch_up(app, 8, 0.1)
+    check("the UI is back", not app.ui_hidden)
+    check("the Open touch did not reach the pointer", app.gesture.calls == [], app.gesture.calls)
+    check("the keyboard is where it was", app._owner_at(600.0, 800.0) == "keyboard")
 
 
 if __name__ == "__main__":
