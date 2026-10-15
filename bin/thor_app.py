@@ -1190,7 +1190,7 @@ class ThorApp:
         cr.stroke()
         cr.new_path()
 
-        # Center prompt hint: fades out after 5s or first touch to prevent burn-in
+        # Center prompt hint: fades out 5s after start or the last mode change (a touch does not restore it) to prevent burn-in
         hint_alpha = self.burn_in.get_hint_alpha()
         if hint_alpha > 0.01:
             cr.set_source_rgba(theme.TEXT_SECONDARY[0], theme.TEXT_SECONDARY[1], theme.TEXT_SECONDARY[2], hint_alpha)

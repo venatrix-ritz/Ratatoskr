@@ -3,10 +3,11 @@
 Features:
 1. Orbital micro-shifter: periodic subpixel/pixel circular orbit (+-1.5 px) that moves
    rendering origins over a 90-second period, preventing sharp-edge static diode wear.
-2. Trackpad hint auto-fader: smoothly fades out center hint text after 5 seconds to eliminate
-   the primary burn-in hotspot in the center of the glass.
-3. Idle luminance throttling: scales static UI luminance down to 40% after 30 seconds of inactivity,
-   instantly waking back to 100% upon touch contact.
+2. Trackpad hint auto-fader: smoothly fades out center hint text 5 seconds after start or the last
+   mode change, to eliminate the primary burn-in hotspot in the center of the glass. A touch does not
+   bring it back.
+3. Idle luminance throttling (`get_luminance_scale`): returns 1.0 until 30 seconds after the last touch,
+   then eases down to 40%. Not called by the drawing code yet, so the screen does not dim on idle.
 """
 from __future__ import annotations
 
