@@ -21,7 +21,7 @@ class FakeStats:
     def get_stats(self):
         return {"bot_bright_pct": self.pct}
 
-    def set_bottom_brightness(self, pct, persist=True, minimum=5):
+    def set_bottom_brightness(self, pct, persist=True, minimum=1):
         self.calls.append((pct, persist, minimum))
         self.last_write_ok = self.ok
         if self.ok:

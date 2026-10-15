@@ -139,7 +139,7 @@ class CountingStats(ss.HardwareStats):
         self.samples += 1
         return {"bot_bright_pct": 40, "top_bright_pct": 50, "vol_pct": 30}
 
-    def set_bottom_brightness(self, pct, persist=True, minimum=5):
+    def set_bottom_brightness(self, pct, persist=True, minimum=1):
         self.written.append(pct)
         return pct
 
@@ -208,7 +208,7 @@ def test_mute_shows_at_once_and_fast_taps_stay_in_step():
 
 def test_requests_are_clamped():
     s = CountingStats()
-    assert s.request_bottom_brightness(-30) == 5
+    assert s.request_bottom_brightness(-30) == 1
     assert s.request_bottom_brightness(900) == 100
     assert s.request_volume(-1) == 0 and s.request_volume(400) == 100
 

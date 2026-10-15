@@ -358,7 +358,7 @@ function Content() {
                         children: SP_JSX.jsx(DFL.SliderField, {
                             label: `Top Screen Brightness: ${hw.top_bright_pct ?? 100}%`,
                             value: hw.top_bright_pct ?? 100,
-                            min: 5,
+                            min: 1,
                             max: 100,
                             step: 5,
                             showValue: true,
@@ -369,7 +369,7 @@ function Content() {
                         children: SP_JSX.jsx(DFL.SliderField, {
                             label: `Bottom AMOLED Brightness: ${hw.bot_bright_pct ?? 100}%`,
                             value: hw.bot_bright_pct ?? 100,
-                            min: 5,
+                            min: 1,
                             max: 100,
                             step: 5,
                             showValue: true,
