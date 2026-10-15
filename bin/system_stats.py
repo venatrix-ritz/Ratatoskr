@@ -233,13 +233,13 @@ class HardwareStats:
         return target
 
     def request_top_brightness(self, pct: int) -> int:
-        target = max(5, min(100, int(pct)))
+        target = max(1, min(100, int(pct)))
         self._show("top_bright_pct", target)
         self._writers["top"].submit(target)
         return target
 
     def request_bottom_brightness(self, pct: int) -> int:
-        target = max(5, min(100, int(pct)))
+        target = max(1, min(100, int(pct)))
         self._show("bot_bright_pct", target)
         self._writers["bottom"].submit(target)
         return target
@@ -401,7 +401,7 @@ class HardwareStats:
         return muted
 
     def set_top_brightness(self, pct: int) -> int:
-        target = max(5, min(100, int(pct)))
+        target = max(1, min(100, int(pct)))
         max_b = _read_int(f"{TOP_BACKLIGHT_PATH}/max_brightness", 4096)
         val = round(target * max_b / 100)
         _write_str(f"{TOP_BACKLIGHT_PATH}/brightness", str(val))
@@ -412,7 +412,7 @@ class HardwareStats:
         cur = self.get_stats().get("top_bright_pct", 100)
         return self.request_top_brightness(cur + delta)
 
-    def set_bottom_brightness(self, pct: int, persist: bool = True, minimum: int = 5) -> int:
+    def set_bottom_brightness(self, pct: int, persist: bool = True, minimum: int = 1) -> int:
         """Write the bottom backlight. persist=False leaves Armada's saved level alone (idle dimming)."""
         target = max(minimum, min(100, int(pct)))
         max_b = _read_int(f"{BOTTOM_BACKLIGHT_PATH}/max_brightness", 255)
