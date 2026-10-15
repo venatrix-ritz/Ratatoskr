@@ -44,8 +44,6 @@ from engine import (
     ABS_MT_TRACKING_ID,
     BTN_LEFT,
     BTN_RIGHT,
-    EV_ABS,
-    EV_SYN,
     EVENT_STRUCT,
     KEY_F24,
     SCREEN_HEIGHT,
