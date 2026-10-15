@@ -7,7 +7,8 @@ Features:
    mode change, to eliminate the primary burn-in hotspot in the center of the glass. A touch does not
    bring it back.
 3. Idle luminance throttling (`get_luminance_scale`): returns 1.0 until 30 seconds after the last touch,
-   then eases down to 40%. Not called by the drawing code yet, so the screen does not dim on idle.
+   then eases down to 40% over 5 seconds. `ThorApp._paint` draws a black veil of the missing share over
+   the whole screen; the next touch (`record_touch`) brings it back to 100%.
 """
 from __future__ import annotations
 

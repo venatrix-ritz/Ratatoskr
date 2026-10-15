@@ -1051,6 +1051,12 @@ class ThorApp:
 
         cr.restore()
 
+        # Idle luminance throttle: a black veil over the lit pixels (black stays black) once the screen has been untouched for a while
+        lum_scale = self.burn_in.get_luminance_scale(now_mono)
+        if lum_scale < 1.0:
+            cr.set_source_rgba(0, 0, 0, 1.0 - lum_scale)
+            cr.paint()
+
         # Live Debug HUD Overlay (when enabled)
         if self.show_debug_hud:
             self._draw_debug_hud(cr)
