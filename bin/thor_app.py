@@ -293,7 +293,7 @@ class ThorApp:
             self._gleipnir_wake.wait(10.0)
             self._gleipnir_wake.clear()
 
-    def set_mode(self, mode: str) -> None:
+    def set_mode(self, mode: str, restart_hint: bool = True) -> None:
         if mode not in ("trackpad", "split", "keyboard", "settings"):
             return
         with self.input_lock:
@@ -303,7 +303,8 @@ class ThorApp:
                 self._end_key_press()
                 self._send_keys(self.mods.release_all())
             self.mode = mode
-            self.burn_in.notify_mode_change()
+            if restart_hint:  # header and ribbon taps pass False: they must not bring the hint back
+                self.burn_in.notify_mode_change()
             self.update_mode_bounds()
         self.save_config()
         GLib.idle_add(self.drawing_area.queue_draw)
@@ -706,7 +707,7 @@ class ThorApp:
         if owner == "header":
             self._handle_header_touch(tid, x, y, True)
         elif owner == "ribbon":  # the status ribbon toggles Quick Controls
-            self.set_mode("trackpad" if self.mode == "settings" else "settings")
+            self.set_mode("trackpad" if self.mode == "settings" else "settings", restart_hint=False)
         elif owner == "settings":
             self._handle_settings_touch(tid, x, y)
         elif owner == "keyboard":
@@ -778,7 +779,7 @@ class ThorApp:
     def _handle_header_touch(self, tid: int, x: float, y: float, down: bool) -> None:
         key = next((k for k, bx, bw in HEADER_BUTTONS if bx <= x <= bx + bw), None)
         if key in ("trackpad", "split", "keyboard", "settings"):
-            self.set_mode(key)
+            self.set_mode(key, restart_hint=False)
         elif key == "hud":
             self.show_debug_hud = not self.show_debug_hud
             self.save_config()
