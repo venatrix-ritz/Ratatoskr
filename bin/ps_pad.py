@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 import os
+import select
 import subprocess
 import threading
 import time
@@ -49,8 +50,11 @@ ROTATIONS = (0, 90, 180, 270)
 STEAM_DISPLAY = ":0"
 FOCUS_ATOM = "GAMESCOPE_FOCUSED_APP"
 CHIAKI_COMMS = ("chiaki",)
-FOCUS_POLL_S = 1.0
-APP_ID_RESCAN_S = 5.0
+FOCUS_POLL_S = 1.0            # xprop polling, only when python-xlib cannot be imported
+FOCUS_SETTLE_S = 0.2          # gamescope writes the focused app in bursts (27 writes in 3 s seen): read once it settles
+LATE_START_S, LATE_RESCAN_S = 10.0, 1.0  # after a focus change, look for a late-starting Chiaki this long, this often
+RECONNECT_MIN_S, RECONNECT_MAX_S = 1.0, 30.0
+WATCH_WAIT_S = 30.0           # longest block on the X socket with no event
 
 
 class PsLayout:
@@ -316,31 +320,92 @@ def chiaki_app_ids(proc_root: str = "/proc", comms: tuple[str, ...] = CHIAKI_COM
     return ids
 
 
-class FocusWatcher:
-    """Polls whether Chiaki is the focused Game Mode app and calls on_change(bool) when that changes."""
+class XFocusSource:
+    """One X connection to Game Mode's display that hears every write of the root window's GAMESCOPE_FOCUSED_APP
+    (PropertyNotify), so nothing is polled. Raises (Xlib's ConnectionClosedError, OSError) once the display is gone.
+    Needs python-xlib (README: Dependencies)."""
 
-    def __init__(self, on_change, read_focus=read_focused_app, read_ids=chiaki_app_ids,
-                 interval: float = FOCUS_POLL_S, rescan: float = APP_ID_RESCAN_S, clock=time.monotonic) -> None:
+    def __init__(self, display: str = STEAM_DISPLAY) -> None:
+        from Xlib import X, display as xdisplay
+
+        self._X = X
+        self.d = xdisplay.Display(display)
+        self.root = self.d.screen().root
+        self.atom = self.d.intern_atom(FOCUS_ATOM)
+        self.root.change_attributes(event_mask=X.PropertyChangeMask)
+        self.d.flush()
+
+    def read(self) -> int | None:
+        prop = self.root.get_full_property(self.atom, self._X.AnyPropertyType)
+        return int(prop.value[0]) if prop is not None and len(prop.value) else None
+
+    def wait(self, timeout: float) -> bool:
+        """Block up to timeout s; True when the focused app was written. Consumes every queued event."""
+        if not self.d.pending_events():  # a reply may already have pulled events off the socket
+            ready, _, _ = select.select([self.d.fileno()], [], [], timeout)
+            if not ready:
+                return False
+        return self.drain()
+
+    def drain(self) -> bool:
+        hit = False
+        while self.d.pending_events():
+            ev = self.d.next_event()
+            if ev.type == self._X.PropertyNotify and ev.atom == self.atom:
+                hit = True
+        return hit
+
+    def close(self) -> None:
+        try:
+            self.d.close()
+        except Exception:
+            pass
+
+
+class FocusWatcher:
+    """Calls on_change(bool) when Chiaki becomes, or stops being, the focused Game Mode app.
+
+    Event-driven: an XFocusSource hears every write of GAMESCOPE_FOCUSED_APP, and a lost display (Game Mode
+    restarting) counts as no focus and reconnects with backoff (RECONNECT_MIN_S doubling to RECONNECT_MAX_S). Without
+    python-xlib it polls xprop every FOCUS_POLL_S. Chiaki's app ids are read from /proc only when the focused app
+    changes, then every `rescan` s for `late_start` s while that app is not yet a known Chiaki id."""
+
+    def __init__(self, on_change, read_focus=read_focused_app, read_ids=chiaki_app_ids, connect=XFocusSource,
+                 log=lambda msg: None, interval: float = FOCUS_POLL_S, rescan: float = LATE_RESCAN_S,
+                 late_start: float = LATE_START_S, settle: float = FOCUS_SETTLE_S, clock=time.monotonic) -> None:
         self.on_change = on_change
         self.read_focus = read_focus
         self.read_ids = read_ids
+        self.connect = connect
+        self.log = log
         self.interval = interval
         self.rescan = rescan
+        self.late_start = late_start
+        self.settle = settle
         self.clock = clock
         self.focused = False
         self.focused_app: int | None = None
+        self.source = "starting"  # x11 | xprop | no display: shown in get_debug
+        self.writes_heard = 0     # settled bursts of focus writes (x11 only)
+        self.id_scans = 0
+        self._seen: object = object()  # the app the ids were last looked up for; nothing matches it at first
         self._ids: set[int] = set()
         self._ids_at = float("-inf")
-        self._ids_for: int | None = None
+        self._late_until = float("-inf")
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
-    def poll_once(self) -> bool:
-        app = self.read_focus()
+    def update(self, app: int | None) -> bool:
         now = self.clock()
-        if app is not None and (app != self._ids_for or now - self._ids_at >= self.rescan):
-            self._ids = self.read_ids()
-            self._ids_at, self._ids_for = now, app
+        if app != self._seen:
+            self._seen = app
+            self._late_until = now + self.late_start
+            scan = app is not None
+        else:
+            scan = self._rescan_in(now) == 0.0
+        if scan:
+            self._ids, self._ids_at = self.read_ids(), now
+            self.id_scans += 1
         self.focused_app = app
         focused = app is not None and app in self._ids
         if focused != self.focused:
@@ -348,13 +413,70 @@ class FocusWatcher:
             self.on_change(focused)
         return focused
 
-    def _run(self) -> None:
+    def _rescan_in(self, now: float) -> float | None:
+        """Seconds until the next late-start rescan of Chiaki's ids, or None when none is pending."""
+        app = self._seen
+        if not isinstance(app, int) or app in self._ids or now >= self._late_until:
+            return None
+        return max(0.0, self._ids_at + self.rescan - now)
+
+    def poll_once(self) -> bool:
+        return self.update(self.read_focus())
+
+    def _watch(self, src) -> None:
+        self.update(src.read())
+        while not self._stop.is_set():
+            due = self._rescan_in(self.clock())
+            if src.wait(WATCH_WAIT_S if due is None else due):
+                self._stop.wait(self.settle)
+                src.drain()
+                self.writes_heard += 1
+            self.update(src.read())
+
+    def _poll(self) -> None:
         while not self._stop.is_set():
             try:
                 self.poll_once()
             except Exception:  # a failed poll must not end the watcher
                 pass
             self._stop.wait(self.interval)
+
+    def _run(self) -> None:
+        delay, failing = RECONNECT_MIN_S, False
+        while not self._stop.is_set():
+            try:
+                src = self.connect()
+            except ImportError as err:
+                self.source = "xprop"
+                self.log(f"python-xlib not importable ({err}); polling xprop every {self.interval:g} s instead")
+                self._poll()
+                return
+            except Exception as err:
+                self.source = "no display"
+                self.update(None)  # no Game Mode display: Chiaki cannot have focus
+                if not failing:
+                    self.log(f"cannot open X display {STEAM_DISPLAY} ({type(err).__name__}: {err}); retrying with backoff")
+                failing = True
+                self._stop.wait(delay)
+                delay = min(delay * 2, RECONNECT_MAX_S)
+                continue
+            failing = False
+            self.source = "x11"
+            self.log(f"watching {FOCUS_ATOM} on X display {STEAM_DISPLAY} (PropertyNotify, no polling)")
+            began = self.clock()
+            try:
+                self._watch(src)
+            except Exception as err:
+                if not self._stop.is_set():
+                    self.source = "no display"
+                    self.log(f"lost X display {STEAM_DISPLAY} ({type(err).__name__}: {err}); reconnecting")
+                    self.update(None)
+            finally:
+                src.close()
+            if self.clock() - began >= RECONNECT_MAX_S:
+                delay = RECONNECT_MIN_S  # it ran a while: a fresh failure starts the backoff over
+            self._stop.wait(delay)
+            delay = min(delay * 2, RECONNECT_MAX_S)
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._run, name="ps-focus", daemon=True)

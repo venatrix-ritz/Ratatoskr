@@ -23,7 +23,7 @@ Settings live in one JSON file, `~/.config/thor-input/config.json` (`/var/home/a
 | `keyboard_repeat_delay_ms` | `350` | 150 to 800 | how long a key must be held before it starts repeating |
 | `keyboard_repeat_interval_ms` | `60` | 20 to 200 | time between repeats of a held key (60 ms is about 16 per second) |
 | `keyboard_caps_window_ms` | `350` | 150 to 800 | a second Shift tap within this time turns on Caps Lock |
-| `gleipnir_ribbon` | `false` | bool | show [Gleipnir](https://github.com/venatrix-ritz/Gleipnir) (the 80 % charge cap) in the status ribbon's battery item and a Gleipnir line in Quick Controls; read-only, from `gleipnir --status --json` every 10 s. The Decky toggle appears only when Gleipnir is installed |
+| `gleipnir_ribbon` | `false` | bool | show [Gleipnir](https://github.com/venatrix-ritz/Gleipnir) (the 80 % charge cap) in the status ribbon's battery item and a Gleipnir line in Quick Controls; read-only: battery sysfs every 10 s and `gleipnir --status --json` when the charger or charge state changes or once a minute, only while the bottom screen shows the UI. The Decky toggle appears only when Gleipnir is installed |
 | `ps_mode_auto` | `true` | bool | switch to [PS mode](usage.md#ps-mode-chiaki-ng) while Chiaki-NG has focus, and back when it loses focus |
 | `haptics` | `true` | bool | a short buzz for tap clicks, keys and on-screen buttons ([usage](usage.md#haptic-feedback)) |
 | `ps_touch_rotation` | `0` | `0`, `90`, `180`, `270` (anything else reads as `0`) | turns PS mode's touch axes if swipes come out rotated on the PS5; no Decky control |

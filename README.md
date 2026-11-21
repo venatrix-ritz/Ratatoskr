@@ -28,6 +28,23 @@ git clone https://github.com/venatrix-ritz/Ratatoskr && cd Ratatoskr
 ```
 Then open the Steam menu, Decky, **Ratatoskr**. Full steps, requirements and uninstall: [docs/installation.md](docs/installation.md).
 
+## Optional dependency: python-xlib
+With **python-xlib** installed, the Chiaki-NG focus watch is event-driven: one X connection hears gamescope change the focused app, instead of an `xprop` process every second. Without it Ratatoskr works the same way and polls `xprop`. `get_debug` shows which one runs: `ps.focus_watch` is `x11` or `xprop`.
+
+| | |
+|---|---|
+| Package | python-xlib **0.33**, LGPL-2.1-or-later ([CREDITS](CREDITS.md)) |
+| Source | PyPI, `python_xlib-0.33-py2.py3-none-any.whl`: 182,185 bytes, sha256 `c3534038d42e0df2f1392a1b30a15a4ff5fdc2b86cfa94f072bf11b10a164398` |
+| Location on the Thor | `/var/home/armada/.local/lib/python3.14/site-packages/`: `Xlib/` (816 KB) and `python_xlib-0.33.dist-info/` (52 KB). This is armada's user site-packages: no rpm-ostree layering, and `deploy.sh` does not touch it |
+| Needs | `six` 1.10 or newer (the Thor has 1.17.0) |
+
+The Thor has no pip; the wheel is a zip:
+```bash
+scp python_xlib-0.33-py2.py3-none-any.whl armada@<thor-ip>:/tmp/
+ssh armada@<thor-ip> 'S=$(python3 -m site --user-site) && mkdir -p "$S" && python3 -m zipfile -e /tmp/python_xlib-0.33-py2.py3-none-any.whl "$S" && rm /tmp/python_xlib-0.33-py2.py3-none-any.whl'
+```
+Then restart Ratatoskr (`systemctl --user restart touch-master.service`).
+
 ## Documentation
 | Page | What is in it |
 |---|---|

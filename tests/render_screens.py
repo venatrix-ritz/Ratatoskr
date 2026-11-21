@@ -8,6 +8,7 @@ among others. Not a unit test (the name keeps it out of the test runs).
 """
 import os
 import sys
+import types
 
 import cairo
 
@@ -70,6 +71,9 @@ def make_app(mode, shift=False, press=None, gleipnir=None, hidden=False, ps_focu
     app.ps.active = ps_focused
     app.ps.button_tids = {i: name for i, name in enumerate(ps_held)}
     app.ps.clicking = ps_clicking
+    app._drawn, app._ribbon_draws = None, 0
+    app._cursor_status = {"cursor_stay_visible": False, "cursor_hide_delay_ms": None, "cursor_stay_visible_active": False}
+    app.dim_mirror = types.SimpleNamespace(dimmed=False)
     app.update_mode_bounds()
     if shift:
         app.mods.press("shift", 1, 0.0, 0.35)

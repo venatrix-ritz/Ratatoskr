@@ -62,7 +62,8 @@ def read_battery(root: str = PS_ROOT) -> dict:
     """The battery and charger attributes the card uses, as raw strings (missing ones are left out)."""
     out: dict = {}
     for dev, names in (("battery", ("charge_now", "charge_full", "charge_full_design", "cycle_count", "voltage_now",
-                                    "current_now", "temp", "health", "time_to_empty_avg", "time_to_full_avg", "capacity")),
+                                    "current_now", "temp", "health", "time_to_empty_avg", "time_to_full_avg", "capacity",
+                                    "status", "constant_charge_current")),
                        ("qcom-battmgr-usb", ("online", "usb_type", "voltage_now", "input_current_limit"))):
         for name in names:
             try:
@@ -70,6 +71,37 @@ def read_battery(root: str = PS_ROOT) -> dict:
                     out[f"{'usb_' if dev != 'battery' else ''}{name}"] = f.read().strip()
             except OSError:
                 pass
+    return out
+
+
+def status_key(batt: dict) -> tuple:
+    """What, when it changes, makes the full `gleipnir --status` worth running again: the charger and the charge state."""
+    return batt.get("usb_online"), batt.get("status")
+
+
+# Gleipnir's --status JSON takes these straight from sysfs (Gleipnir bin/gleipnir, the `status` + json branch), so
+# between two runs they are refreshed from read_battery's values.
+LIVE_FIELDS = (("capacity", "capacity", int), ("status", "status", str), ("usb_online", "usb_online", int),
+               ("current_ua", "current_now", int), ("voltage_uv", "voltage_now", int), ("temp_dc", "temp", int),
+               ("health", "health", str))
+
+
+def with_live_battery(status: dict | None, batt: dict) -> dict | None:
+    """The last status with its sysfs fields (and `limit`, when Gleipnir's node is constant_charge_current) from batt."""
+    if not status:
+        return status
+    out = dict(status)
+    for skey, bkey, conv in LIVE_FIELDS:
+        if bkey in batt:
+            try:
+                out[skey] = conv(batt[bkey])
+            except ValueError:
+                pass
+    if str(out.get("node", "")).endswith("/battery/constant_charge_current") and "constant_charge_current" in batt:
+        try:
+            out["limit"] = int(batt["constant_charge_current"])
+        except ValueError:
+            pass
     return out
 
 

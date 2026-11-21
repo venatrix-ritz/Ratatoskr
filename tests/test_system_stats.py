@@ -27,6 +27,7 @@ def _no_real_write(path, value):
 
 
 ss.subprocess.run = _no_real_command
+ss.subprocess.Popen = _no_real_command  # pactl subscribe (VolumeWatcher)
 ss._write_str = _no_real_write
 
 
@@ -131,7 +132,7 @@ def test_a_failing_write_does_not_end_the_writer():
 
 class CountingStats(ss.HardwareStats):
     def __init__(self, **kw):
-        super().__init__(**kw)
+        super().__init__(watch_volume=False, **kw)
         self.samples = 0
         self.written = []
 
@@ -211,6 +212,94 @@ def test_requests_are_clamped():
     assert s.request_bottom_brightness(-30) == 1
     assert s.request_bottom_brightness(900) == 100
     assert s.request_volume(-1) == 0 and s.request_volume(400) == 100
+
+
+def test_only_sink_and_server_events_mark_the_volume_dirty():
+    assert ss.is_volume_event("Event 'change' on sink #48")
+    assert ss.is_volume_event("Event 'new' on sink #61")
+    assert ss.is_volume_event("Event 'change' on server #-1")
+    assert not ss.is_volume_event("Event 'change' on sink-input #213")  # an app's stream, not the sink
+    assert not ss.is_volume_event("Event 'change' on source #49")
+    assert not ss.is_volume_event("Event 'new' on client #301")
+
+
+def test_the_volume_is_due_on_a_change_after_a_write_or_slowly_without_pactl():
+    clock, lit = [0.0], [True]
+    w = ss.VolumeWatcher(popen=_no_real_command, clock=lambda: clock[0], active=lambda: lit[0])
+    assert w.due()                       # read once at start
+    w.mark_read()
+    w.subscribed = True
+    clock[0] = 600.0
+    assert not w.due()                   # subscribed and nothing changed: never polled
+    w.invalidate()                       # pactl line or one of Ratatoskr's own writes
+    assert w.due()
+    w.mark_read()
+    w.subscribed = False                 # pactl gone
+    clock[0] = 604.0
+    assert not w.due()
+    clock[0] = 605.0
+    assert w.due()                       # every VOLUME_POLL_S without pactl
+    lit[0] = False
+    assert not w.due()                   # but not while the screen is hidden, dimmed or off
+
+
+def test_the_watcher_reads_pactl_lines_and_restarts_it():
+    class Proc:
+        def __init__(self, lines):
+            self.stdout = iter(lines)
+
+        def wait(self, timeout=None):
+            return 0
+
+        def poll(self):
+            return 0
+
+    runs = []
+
+    def popen(cmd, **kw):
+        runs.append(cmd)
+        if len(runs) == 1:
+            return Proc(["Event 'change' on sink #48", "Event 'change' on sink-input #2", "Event 'change' on server #-1"])
+        raise FileNotFoundError("pactl")  # second start: pactl is gone, so the watcher ends (polling takes over)
+
+    w = ss.VolumeWatcher(popen=popen, env=lambda: {})
+    w.mark_read()
+    w._stop.wait = lambda t=None: False  # no real backoff sleep
+    w._run()
+    assert runs == [["pactl", "subscribe"]] * 2, runs
+    assert w.events == 2 and w.restarts == 1 and not w.subscribed, (w.events, w.restarts, w.subscribed)
+    assert w.due()
+
+
+def test_the_sampler_reads_the_volume_only_when_it_is_due():
+    s = ss.HardwareStats(watch_volume=True)
+    reads = []
+    s._read_volume = lambda: reads.append(1) or (40, False)
+    s.volume_watch.subscribed = True     # as if pactl were running (nothing is started here)
+    for _ in range(10):
+        data = s._sample()
+    assert len(reads) == 1 and data["vol_pct"] == 40, (reads, data["vol_pct"])
+    s.volume_watch.invalidate()
+    s._sample()
+    assert len(reads) == 2
+
+
+def test_own_volume_and_mute_writes_mark_the_volume_dirty():
+    s = ss.HardwareStats(watch_volume=True)
+    s.volume_watch.mark_read()
+    s.volume_watch.subscribed = True
+    ran = []
+    real = ss.subprocess.run
+    ss.subprocess.run = lambda cmd, **kw: ran.append(cmd)  # recorded, not run
+    try:
+        s.set_volume(30)
+        assert s.volume_watch.due()
+        s.volume_watch.mark_read()
+        s.set_mute(True)
+        assert s.volume_watch.due()
+    finally:
+        ss.subprocess.run = real
+    assert [c[1] for c in ran] == ["set-volume", "set-mute"], ran
 
 
 def test_zz_nothing_touched_real_hardware():

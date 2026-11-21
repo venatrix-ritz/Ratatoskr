@@ -120,6 +120,22 @@ def test_card_items_from_real_readings():
     check("events are short", ev["Last"] == "11:24 clamp 80% · 15:18 release: charger unplugged", ev["Last"])
 
 
+def test_live_battery_values_refresh_the_last_status():
+    batt = {"capacity": "79", "status": "Charging", "usb_online": "1", "current_now": "4632683", "voltage_now": "4357376",
+            "temp": "361", "health": "Good", "constant_charge_current": "100000"}
+    live = gv.with_live_battery(dict(REAL, service_active=True), batt)
+    check("capacity, status, charger and current come from sysfs",
+          (live["capacity"], live["status"], live["usb_online"], live["current_ua"]) == (79, "Charging", 1, 4632683), live)
+    check("the limit node's value replaces the old limit", live["limit"] == 100000, live["limit"])
+    check("what only --status knows is kept", live["verified"] is True and live["service_active"] is True, live)
+    fork = dict(REAL, node="/sys/class/power_supply/battery/charge_control_limit")
+    check("another node's limit is left alone", gv.with_live_battery(fork, batt)["limit"] == 9000000)
+    check("no status stays None", gv.with_live_battery(None, batt) is None)
+    check("junk sysfs keeps the old value", gv.with_live_battery(REAL, {"capacity": "?"})["capacity"] == 78)
+    check("the full status is due again when the charger or charge state changes",
+          gv.status_key(batt) == ("1", "Charging") and gv.status_key(dict(batt, usb_online="0")) != gv.status_key(batt))
+
+
 def test_zz_junk_values_do_not_raise():
     check("junk numbers fall back", gv.summary(st(capacity="x", current_ua=None, limit="?")) is not None)
     check("junk detail does not raise", isinstance(gv.detail(st(temp_dc="hot", sleep_floor="?")), str))

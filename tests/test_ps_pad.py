@@ -347,6 +347,141 @@ def test_focus_watcher_rescans_when_chiaki_starts_late():
     assert calls == [True]
 
 
+class Gone(Exception):
+    """What python-xlib raises once the display has gone (ConnectionClosedError)."""
+
+
+class FakeSource:
+    """An XFocusSource stand-in: `script` is what each wait() does in turn: True (a write was heard), False (timeout),
+    or an exception to raise."""
+
+    def __init__(self, values, script, on_done=None):
+        self.values, self.script, self.on_done = list(values), list(script), on_done
+        self.reads = self.drains = 0
+        self.waits = []
+        self.closed = False
+
+    def read(self):
+        self.reads += 1
+        return self.values.pop(0) if len(self.values) > 1 else self.values[0]
+
+    def wait(self, timeout):
+        self.waits.append(timeout)
+        if not self.script:
+            self.on_done()
+            return False
+        step = self.script.pop(0)
+        if isinstance(step, Exception):
+            raise step
+        return step
+
+    def drain(self):
+        self.drains += 1
+        return False
+
+    def close(self):
+        self.closed = True
+
+
+def watcher(sources, **kw):
+    calls, logs = [], []
+    it = iter(sources)
+
+    def connect():
+        src = next(it)
+        if isinstance(src, Exception):
+            raise src
+        return src
+
+    w = ps_pad.FocusWatcher(calls.append, read_ids=lambda: {3174227830}, connect=connect, log=logs.append, settle=0.0, **kw)
+    return w, calls, logs
+
+
+def test_focus_watcher_reconnects_when_the_display_goes_away():
+    saved = ps_pad.RECONNECT_MIN_S
+    ps_pad.RECONNECT_MIN_S = 0.01
+    try:
+        second = FakeSource([769], [], on_done=lambda: w._stop.set())
+        first = FakeSource([3174227830], [Gone("server")])
+        w, calls, logs = watcher([first, second])
+        w._run()
+    finally:
+        ps_pad.RECONNECT_MIN_S = saved
+    assert calls == [True, False], calls  # focus on the first connection, lost with it, still lost after reconnecting
+    assert first.closed and second.reads >= 1
+    assert w.source == "x11" and w.focused_app == 769
+    assert any("lost X display" in m for m in logs) and sum("watching" in m for m in logs) == 2, logs
+
+
+def test_focus_watcher_backs_off_while_the_display_cannot_be_opened():
+    waits = []
+
+    class Stop:
+        def __init__(self):
+            self.flag = False
+
+        def is_set(self):
+            return self.flag
+
+        def wait(self, t):
+            waits.append(t)
+            return self.flag
+
+        def set(self):
+            self.flag = True
+
+    w, calls, logs = watcher([OSError("no display")] * 6 + [FakeSource([None], [], on_done=lambda: w._stop.set())])
+    w._stop = Stop()
+    w._run()
+    assert waits[:6] == [1.0, 2.0, 4.0, 8.0, 16.0, 30.0], waits
+    assert calls == [] and w.focused_app is None
+    assert sum("cannot open" in m for m in logs) == 1, logs  # one line per outage, not one per retry
+
+
+def test_without_python_xlib_the_watcher_polls_xprop():
+    polls = []
+
+    def read_focus():
+        polls.append(1)
+        if len(polls) == 3:
+            w._stop.set()
+        return 3174227830
+
+    w, calls, logs = watcher([ImportError("No module named 'Xlib'")], read_focus=read_focus, interval=0.0)
+    w._run()
+    assert w.source == "xprop" and len(polls) == 3 and calls == [True], (w.source, polls, calls)
+    assert "polling xprop" in logs[0], logs
+
+
+def test_a_burst_of_focus_writes_is_read_once_after_it_settles():
+    src = FakeSource([769, 3174227830], [True], on_done=lambda: w._stop.set())
+    w, calls, logs = watcher([src])
+    w._watch(src)
+    assert src.drains == 1 and w.writes_heard == 1 and calls == [True], (src.drains, w.writes_heard, calls)
+    assert src.reads == 3  # once on connect, once after the burst, once after the final timeout
+
+
+def test_chiaki_app_ids_are_scanned_only_when_the_focused_app_changes():
+    scans, clock = [], [0.0]
+
+    def read_ids():
+        scans.append(clock[0])
+        return {3174227830}
+
+    w = ps_pad.FocusWatcher(lambda f: None, read_ids=read_ids, clock=lambda: clock[0], rescan=1.0, late_start=10.0)
+    for i in range(30):  # Steam's UI stays focused for 30 s
+        clock[0] = float(i)
+        w.update(769)
+    assert scans == [float(i) for i in range(10)], scans  # the change, then once a second for 10 s (Chiaki may start late)
+    scans.clear()
+    for i in range(30, 60):
+        clock[0] = float(i)
+        w.update(3174227830)
+    assert scans == [30.0], scans  # Chiaki found at once: no more scans while it stays focused
+    w.update(None)
+    assert scans == [30.0], scans  # no app: nothing to look up
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

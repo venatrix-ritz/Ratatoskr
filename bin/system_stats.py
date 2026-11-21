@@ -84,6 +84,97 @@ def _wpctl_env() -> dict[str, str]:
     return env
 
 
+VOLUME_POLL_S = 5.0          # wpctl poll, only while `pactl subscribe` is not running
+PACTL_RESTART_MAX_S = 60.0   # restart backoff for pactl, doubling from 1 s
+
+
+def is_volume_event(line: str) -> bool:
+    """A `pactl subscribe` line that can change the default sink's volume or mute: a sink changing, appearing or going
+    ("on sink #", not "on sink-input #": those are per-app streams), or the server (a new default sink)."""
+    return " on sink #" in line or " on server" in line
+
+
+class VolumeWatcher:
+    """Says when the volume needs reading, so HardwareStats does not spawn wpctl every second.
+
+    A `pactl subscribe` child (pipewire-pulse) prints a line for every sink change; each one marks the volume dirty,
+    as do Ratatoskr's own writes (invalidate). While pactl is missing or restarting, the volume is due every
+    VOLUME_POLL_S instead, and only while `active()` (the bottom screen is lit and showing the UI)."""
+
+    def __init__(self, popen=None, env=_wpctl_env, clock=time.monotonic, active=lambda: True) -> None:
+        self.popen = popen or subprocess.Popen
+        self.env = env
+        self.clock = clock
+        self.active = active
+        self.subscribed = False
+        self.events = 0      # pactl lines that marked the volume dirty
+        self.restarts = 0
+        self.reads = 0
+        self._dirty = threading.Event()
+        self._dirty.set()    # read once at start
+        self._read_at = float("-inf")
+        self._proc: subprocess.Popen | None = None
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def due(self) -> bool:
+        if self._dirty.is_set():
+            return True
+        return not self.subscribed and self.clock() - self._read_at >= VOLUME_POLL_S and self.active()
+
+    def mark_read(self) -> None:
+        """Call just before reading: a change that lands during the read marks it dirty again."""
+        self._dirty.clear()
+        self._read_at = self.clock()
+        self.reads += 1
+
+    def invalidate(self) -> None:
+        self._dirty.set()
+
+    def start(self) -> None:
+        if self._thread is None:
+            self._thread = threading.Thread(target=self._run, name="volume-watch", daemon=True)
+            self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        proc = self._proc
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+    def _run(self) -> None:
+        delay = 1.0
+        while not self._stop.is_set():
+            try:
+                proc = self.popen(["pactl", "subscribe"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                  stdin=subprocess.DEVNULL, text=True, env=self.env())
+            except OSError:
+                return  # no pactl: volume is polled every VOLUME_POLL_S
+            self._proc, self.subscribed = proc, True
+            self._dirty.set()  # it may have changed while nothing listened
+            began = self.clock()
+            try:
+                for line in proc.stdout:
+                    if is_volume_event(line):
+                        self.events += 1
+                        self._dirty.set()
+            except (OSError, ValueError):
+                pass
+            proc.wait()
+            self._proc, self.subscribed = None, False
+            if self._stop.is_set():
+                return
+            self.restarts += 1
+            if self.clock() - began >= PACTL_RESTART_MAX_S:
+                delay = 1.0
+            self._stop.wait(delay)
+            delay = min(delay * 2, PACTL_RESTART_MAX_S)
+
+
 class _LatestWriter:
     """Runs fn(value) on its own thread. Values submitted while a write is in progress are folded into the
     newest one, so a fast slider drag costs one write per finished write instead of one per touch event."""
@@ -145,7 +236,9 @@ class HardwareStats:
 
     OPTIMISTIC_HOLD_S = 1.5
 
-    def __init__(self, cache_ttl: float = 0.5, optimistic_hold: float = OPTIMISTIC_HOLD_S) -> None:
+    def __init__(self, cache_ttl: float = 0.5, optimistic_hold: float = OPTIMISTIC_HOLD_S, watch_volume: bool = True) -> None:
+        self.volume_watch: VolumeWatcher | None = VolumeWatcher() if watch_volume else None
+        self._volume: tuple[int, bool] | None = None  # (percent, muted) as last read
         self.cache_ttl = cache_ttl
         self.optimistic_hold = optimistic_hold
         self._last_sample_time = 0.0
@@ -205,6 +298,8 @@ class HardwareStats:
         """Sample on a background thread so get_stats() (called from the draw and IPC threads) never blocks."""
         if self._sampler is not None:
             return
+        if self.volume_watch is not None:
+            self.volume_watch.start()
         self._refresh()
         self._sampler_stop.clear()
 
@@ -221,6 +316,8 @@ class HardwareStats:
     def stop_sampler(self) -> None:
         self._sampler_stop.set()
         self._sampler = None
+        if self.volume_watch is not None:
+            self.volume_watch.stop()
 
     def _show(self, key: str, value: Any) -> None:
         with self._lock:
@@ -308,28 +405,13 @@ class HardwareStats:
         c_now = _read_int(f"{BATTERY_PATH}/current_now")
         bat_watts = round(v_now * c_now / 1e12, 1)
 
-        # 5. Audio (Volume)
-        vol_pct = 0
-        is_muted = False
-        try:
-            res = subprocess.run(
-                ["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"],
-                capture_output=True,
-                text=True,
-                timeout=0.4,
-                env=_wpctl_env(),
-            )
-            if res.returncode == 0:
-                line = res.stdout.strip()
-                is_muted = "[MUTED]" in line or "MUTED" in line
-                parts = line.split()
-                if len(parts) >= 2:
-                    try:
-                        vol_pct = round(float(parts[1]) * 100)
-                    except ValueError:
-                        pass
-        except Exception:
-            pass
+        # 5. Audio (Volume): read when pactl saw a sink change or after Ratatoskr's own writes, not every sample
+        watch = self.volume_watch
+        if self._volume is None or watch is None or watch.due():
+            if watch is not None:
+                watch.mark_read()
+            self._volume = self._read_volume()
+        vol_pct, is_muted = self._volume
 
         # 6. Backlight
         top_b = _read_int(f"{TOP_BACKLIGHT_PATH}/brightness")
@@ -358,6 +440,30 @@ class HardwareStats:
             "bot_bright_pct": bot_pct,
         }
 
+    def _read_volume(self) -> tuple[int, bool]:
+        vol_pct = 0
+        is_muted = False
+        try:
+            res = subprocess.run(
+                ["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"],
+                capture_output=True,
+                text=True,
+                timeout=0.4,
+                env=_wpctl_env(),
+            )
+            if res.returncode == 0:
+                line = res.stdout.strip()
+                is_muted = "[MUTED]" in line or "MUTED" in line
+                parts = line.split()
+                if len(parts) >= 2:
+                    try:
+                        vol_pct = round(float(parts[1]) * 100)
+                    except ValueError:
+                        pass
+        except Exception:
+            pass
+        return vol_pct, is_muted
+
     # Control Methods
 
     def set_volume(self, pct: int) -> int:
@@ -373,6 +479,8 @@ class HardwareStats:
         except Exception:
             pass
         self._last_sample_time = 0.0  # Invalidate cache
+        if self.volume_watch is not None:
+            self.volume_watch.invalidate()
         return target
 
     def adjust_volume(self, delta: int) -> int:
@@ -390,6 +498,8 @@ class HardwareStats:
         except Exception:
             pass
         self._last_sample_time = 0.0
+        if self.volume_watch is not None:
+            self.volume_watch.invalidate()
         return muted
 
     def toggle_mute(self) -> bool:
