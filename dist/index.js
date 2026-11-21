@@ -21,7 +21,6 @@ const setSettings = (settings) => call("set_settings", settings);
 const setVolume = (volume) => call("set_volume", volume);
 const toggleMute = () => call("toggle_mute");
 const setBrightness = (target, percent) => call("set_brightness", target, percent);
-const toggleHud = () => call("toggle_hud");
 const setPenMode = (mode) => call("set_pen_mode", mode);
 const runDiagnostics = () => call("run_diagnostics");
 
@@ -112,7 +111,6 @@ function Content() {
         haptics: true,
         haptics_available: false,
         pen_mode: "off",
-        debug_hud: false,
         telemetry: {},
         hardware_stats: {},
         touch_device: "",
@@ -261,19 +259,6 @@ function Content() {
                 console.error("[touch-master] setBrightness bot error:", e);
             }
         });
-    };
-
-    const handleHudToggle = async () => {
-        markEdited("debug_hud");
-        setStatus((prev) => ({ ...prev, debug_hud: !prev.debug_hud }));
-        try {
-            const res = await toggleHud();
-            if (res && res.debug_hud !== undefined) {
-                setStatus((prev) => ({ ...prev, debug_hud: res.debug_hud }));
-            }
-        } catch (e) {
-            toaster.toast({ title: "Ratatoskr", body: "Failed to toggle HUD: " + String(e) });
-        }
     };
 
     const handleRunDiagnostics = async () => {
@@ -598,14 +583,6 @@ function Content() {
                         children: SP_JSX.jsx(DFL.Field, {
                             label: "System Health Monitor",
                             description: `Bat: ${hw.bat_cap ?? 0}% (${hw.bat_watts ?? 0}W) | CPU: ${hw.cpu_load ?? 0}% (${hw.cpu_temp ?? 0}°C) | GPU: ${hw.gpu_mhz ?? 0}M (${hw.gpu_temp ?? 0}°C) | RAM: ${hw.ram_used_gb ?? 0}/${hw.ram_total_gb ?? 0}G`
-                        })
-                    }),
-                    status.enabled && SP_JSX.jsx(DFL.PanelSectionRow, {
-                        children: SP_JSX.jsx(DFL.ToggleField, {
-                            label: "Bottom Screen HUD Overlay",
-                            description: "Renders live coordinates, FPS, and event stats on glass",
-                            checked: status.debug_hud,
-                            onChange: handleHudToggle
                         })
                     }),
                     status.enabled && SP_JSX.jsx(DFL.PanelSectionRow, {

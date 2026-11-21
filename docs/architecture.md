@@ -44,7 +44,7 @@ One request per connection on the stream socket `/run/user/<uid>/thor-input.sock
 
 | `action` | Request fields | Reply adds |
 |---|---|---|
-| `get_status` | | `mode`, `debug_hud`, `hardware_stats`, every gesture setting, `mirror_dim`, `mirror_dim_floor_percent`, `bottom_dimmed`, `pen_mode`, `cursor_stay_visible`, `cursor_hide_delay_ms`, `cursor_stay_visible_active`, `ps_mode_auto`, `ps_touch_rotation`, `ps_focused`, `haptics`, `haptics_available` |
+| `get_status` | | `mode`, `hardware_stats`, every gesture setting, `mirror_dim`, `mirror_dim_floor_percent`, `bottom_dimmed`, `pen_mode`, `cursor_stay_visible`, `cursor_hide_delay_ms`, `cursor_stay_visible_active`, `ps_mode_auto`, `ps_touch_rotation`, `ps_focused`, `haptics`, `haptics_available` |
 | `get_debug` | `reset` (optional): also zero the draw-time counters | `telemetry` (with `ps_touches`, `ps_touch_down`), `state`, `coords`, `touch_device`, `active_fingers`, `last_key`, `hardware_stats`, gesture settings, draw-time counters, `ps` (`focused`, `focused_app`, `finger`, `clicking`, `buttons`, `ps_mode_auto`, `ps_touch_rotation`), `haptics` (`enabled`, `device`, `available`, `pulses`, `failures`, `last_error`) |
 | `set_mode` | `mode`: `trackpad`, `split`, `keyboard`, `settings` or `ps` | |
 | `set_pen_mode` | `mode`: `off`, `pen` or `pen_plus` | `pen_mode` and the `cursor_*` fields; `pen_plus` also writes Game Mode's pointer-visible override, which applies when Game Mode next starts |
@@ -54,11 +54,10 @@ One request per connection on the stream socket `/run/user/<uid>/thor-input.sock
 | `set_top_brightness` | `brightness` (percent) | `top_bright_pct` |
 | `set_bottom_brightness` | `brightness` (percent) | `bot_bright_pct` |
 | `wake` | | taps `KEY_F24` on the virtual keyboard (no default binding anywhere) and counts as input for the dim mirror. Steam and the compositor treat it as input: a Steam-dimmed top screen is restored within about a second and the idle and sleep timers restart (verified on the Thor 2026-10-08) |
-| `toggle_hud` | | `debug_hud` |
 | `run_diagnostics` | | `diagnostics` |
 | `quit` | | |
 
-The Decky backend wraps these as `get_status`, `set_enabled`, `set_mode`, `set_settings`, `set_pen_mode`, `set_volume`, `toggle_mute`, `set_brightness(target, percent)`, `toggle_hud` and `run_diagnostics`. It starts and stops the service with `systemctl --user` (first trying `--machine=armada@.host`, which works from Decky's root context).
+The Decky backend wraps these as `get_status`, `set_enabled`, `set_mode`, `set_settings`, `set_pen_mode`, `set_volume`, `toggle_mute`, `set_brightness(target, percent)` and `run_diagnostics`. It starts and stops the service with `systemctl --user` (first trying `--machine=armada@.host`, which works from Decky's root context).
 
 ## Threads in the driver
 GTK main thread (drawing, 1 s ribbon refresh), touch reader (`select` on the grabbed node), IPC server (0.5 s accept timeout, 2 s per request), key repeat, momentum glide, idle tracker, dim mirror, Chiaki-NG focus watcher (every 1 s), haptics (one pulse at a time). Hardware stats are sampled with a 0.4 s cache.

@@ -50,7 +50,7 @@ Two-finger scroll, right-click taps, three-finger swipes and glide are off while
 ## PS mode (Chiaki-NG)
 While [Chiaki-NG](https://github.com/streetpea/chiaki-ng) (PS5 Remote Play, the Flatpak `io.github.streetpea.Chiaki4deck`) has focus in Game Mode, the bottom screen becomes the PS5 touchpad with a row of PS buttons under it. When Chiaki-NG loses focus, the bottom screen goes back to the mode it was in. The switch is **PS touchpad while Chiaki-NG has focus** in the Decky panel's **Screens** section (`ps_mode_auto`, on by default); PS mode can also be picked from the panel's mode list.
 
-While Chiaki-NG has focus the header shows a **PS** button after Keyboard, lit while PS mode is on. The mode buttons (Trackpad, Split, Keyboard, Quick Controls) leave PS mode as usual, and one tap on **PS** brings it back; the mode to return to when Chiaki-NG loses focus stays the one from before the stream. To make room, Trackpad, Split, Keyboard, HUD and Pen are a little narrower while the PS button is there, so Left Click, Right Click and Pen sit about 50 px further left; Hide stays where it is.
+While Chiaki-NG has focus the header shows a **PS** button after Keyboard, lit while PS mode is on. The mode buttons (Trackpad, Split, Keyboard, Quick Controls) leave PS mode as usual, and one tap on **PS** brings it back; the mode to return to when Chiaki-NG loses focus stays the one from before the stream. To make room, Trackpad, Split, Keyboard and Quick Controls are a little narrower while the PS button is there; Left Click, Right Click, Pen and Hide stay where they are.
 
 | Area | Sends | What Chiaki-NG does with it |
 |---|---|---|
@@ -75,15 +75,12 @@ Things to know:
 The Thor's vibration motor gives a short buzz (15 ms) when a touch does something: a tap click (one-, two- or three-finger tap, the pen double tap, a long press), a keyboard key, a header button, the status ribbon, the Open button, a Quick Controls button, a PS button or a PS pad click. Moving the pointer, scrolling, dragging a slider and key repeat do not buzz. Turn it off with **Haptic feedback** at the top of the Decky panel (`haptics`). If the motor is busy with something else, that buzz is skipped.
 
 ## Settings
-In the Decky panel (Steam menu, Decky, Ratatoskr): sensitivity, glide and friction, scroll speed, tap to click, long-press right click and its delay, two- and three-finger taps, navigation swipes, the **Pen** section (Pen mode and Pen +), the on-glass HUD, and the **Screens** toggles: dim the bottom screen with Steam's idle dim ([details](dim-mirror.md)) and [PS mode](#ps-mode-chiaki-ng). All keys and ranges are in [configuration.md](configuration.md).
+In the Decky panel (Steam menu, Decky, Ratatoskr): sensitivity, glide and friction, scroll speed, tap to click, long-press right click and its delay, two- and three-finger taps, navigation swipes, the **Pen** section (Pen mode and Pen +), and the **Screens** toggles: dim the bottom screen with Steam's idle dim ([details](dim-mirror.md)) and [PS mode](#ps-mode-chiaki-ng). All keys and ranges are in [configuration.md](configuration.md).
 
 The panel also shows service state, hardware stats, input telemetry (moves, scrolls, clicks, keys) and a **Run Diagnostics** button.
 
 ## Hide and Open
 The **Hide** button at the right end of the header blanks the whole bottom screen except an **Open** button in the same corner. While it is hidden the whole screen works as a trackpad (the keyboard and Quick Controls are not usable). Tap within about 2 cm of the Open button (24 px around it) to bring the UI back in the mode it was in. The Open button is outline only, moves with the burn-in orbit and dims with the idle veil; it never fades out. The state is not saved: restarting the service shows the UI.
-
-## The HUD
-"Bottom Screen HUD Overlay" draws live touch coordinates, FPS and event counters on the glass. It is for tuning and debugging.
 
 ## The standalone manager
 `touch_master_manager.py` opens a small window with a start/stop button, mode buttons, sensitivity, tap and two-finger switches, brightness sliders and the dim switch. Some of its controls do not take effect live yet; see [Known issues](troubleshooting.md#known-issues-not-yet-fixed). The Decky panel is the complete interface.

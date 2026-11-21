@@ -508,7 +508,7 @@ class TouchGestureProcessor:
         self.glide_thread: threading.Thread | None = None
         self.glide_stop = threading.Event()
 
-        # Telemetry / HUD
+        # State for IPC get_debug
         self.last_state_label = "IDLE"
         self.last_coords = (0.0, 0.0)
 

@@ -82,8 +82,7 @@ def request(path: str, payload: dict, timeout: float = 2.0) -> dict:
 
 
 # Request builders. The driver reads flat keys (a nested {"settings": {...}} is ignored), takes brightness through
-# set_top_brightness / set_bottom_brightness, and has no set_debug_hud action; tests/test_ipc_util.py checks these
-# against the actions thor_app.py really handles.
+# set_top_brightness / set_bottom_brightness; tests/test_ipc_util.py checks these against the actions thor_app.py really handles.
 
 def settings_request(**settings) -> dict:
     return {"action": "set_settings", **settings}
@@ -91,7 +90,3 @@ def settings_request(**settings) -> dict:
 
 def brightness_request(target: str, percent: int) -> dict:
     return {"action": "set_top_brightness" if target == "top" else "set_bottom_brightness", "brightness": int(percent)}
-
-
-def hud_request(enabled: bool) -> dict:
-    return settings_request(debug_hud=bool(enabled))

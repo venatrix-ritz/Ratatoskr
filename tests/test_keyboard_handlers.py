@@ -77,7 +77,7 @@ def make(mode="keyboard"):
     app.mods, app._touch_owner, app.input_lock = ModifierState(), {}, threading.RLock()
     app.held_key = app.held_key_tid = app.active_key_press = app.active_key_tid = None
     app.held_ui_button = app.held_ui_button_tid = app._slider_drag = None
-    app.last_key_label, app.last_event_time, app.show_debug_hud, app.ui_hidden = "", 0.0, False, False
+    app.last_key_label, app.last_event_time, app.ui_hidden = "", 0.0, False
     app._repeat_stop, app._repeat_thread = threading.Event(), None
     app._start_key_repeat = lambda key: None
     app.drawing_area = types.SimpleNamespace(queue_draw=lambda: None)
@@ -295,7 +295,7 @@ def test_keys_buttons_and_ps_buttons_buzz():
     app = make("keyboard")
     tap(app, "a", 1)
     check("a key buzzes once", app.buzzes == [1], app.buzzes)
-    x = next(bx + bw / 2 for k, bx, bw in thor_app.HEADER_BUTTONS if k == "hud")
+    x = next(bx + bw / 2 for k, bx, bw in thor_app.HEADER_BUTTONS if k == "left")
     thor_app.ThorApp._handle_touch_down(app, 2, x, thor_app.HEADER_BUTTON_Y + 5, 0.0)
     thor_app.ThorApp._handle_touch_up(app, 2, 0.1)
     check("a header button buzzes", app.buzzes == [1, 1], app.buzzes)
@@ -349,6 +349,37 @@ def test_both_header_layouts_fit_and_hide_stays_under_the_open_button():
     keys_ps = [b[0] for b in thor_app.HEADER_BUTTONS_PS]
     check("no PS button by default", "ps" not in keys_default, keys_default)
     check("with Chiaki focus: every button plus PS", keys_ps == keys_default[:3] + ["ps"] + keys_default[3:], keys_ps)
+    right_side = ("left", "right", "pen", "hide")
+    check("Left Click, Right Click, Pen and Hide do not move with Chiaki focus",
+          [b for b in thor_app.HEADER_BUTTONS if b[0] in right_side] == [b for b in thor_app.HEADER_BUTTONS_PS if b[0] in right_side],
+          (thor_app.HEADER_BUTTONS, thor_app.HEADER_BUTTONS_PS))
+
+
+def test_the_bottom_screen_hud_is_gone():
+    src = open(thor_app.__file__, encoding="utf-8").read()
+    check("no HUD header button", all(b[0] != "hud" for b in thor_app.HEADER_BUTTONS + thor_app.HEADER_BUTTONS_PS))
+    check("no toggle_hud action or HUD drawing", "toggle_hud" not in src and "_draw_debug_hud" not in src and "show_debug_hud" not in src)
+    check("three Quick Controls buttons, 20 px apart, inside the 30 px margins",
+          len(thor_app.QC_BUTTON_XS) == 3 and thor_app.QC_BUTTON_XS[0] == 30
+          and thor_app.QC_BUTTON_XS[-1] + thor_app.QC_BUTTON_W == thor_app.SCREEN_WIDTH - 30
+          and all(b - a == thor_app.QC_BUTTON_W + 20 for a, b in zip(thor_app.QC_BUTTON_XS, thor_app.QC_BUTTON_XS[1:])),
+          (thor_app.QC_BUTTON_XS, thor_app.QC_BUTTON_W))
+
+
+def test_the_quick_controls_buttons_act_and_buzz():
+    app = make("settings")
+    app.gesture.tap_to_click, app.gesture.two_finger_right_click, app.gesture.long_press_right_click = False, True, False
+    y = thor_app.QC_BUTTONS_Y + thor_app.QC_BUTTONS_H / 2
+    centre = [bx + thor_app.QC_BUTTON_W / 2 for bx in thor_app.QC_BUTTON_XS]
+    thor_app.ThorApp._handle_settings_touch(app, 1, centre[0], y)
+    check("Tap Click turns on", app.gesture.tap_to_click is True)
+    thor_app.ThorApp._handle_settings_touch(app, 2, centre[1], y)
+    check("right click goes to press-hold", (app.gesture.two_finger_right_click, app.gesture.long_press_right_click) == (False, True))
+    thor_app.ThorApp._handle_settings_touch(app, 3, thor_app.QC_BUTTON_XS[1] - 10, y)
+    check("the gap between buttons does nothing", app.buzzes == [1, 1] and app.mode == "settings", (app.buzzes, app.mode))
+    thor_app.ThorApp._handle_settings_touch(app, 4, centre[2], y)
+    check("Back to Trackpad", app.mode == "trackpad", app.mode)
+    check("each button buzzed once", app.buzzes == [1, 1, 1], app.buzzes)
 
 
 def test_the_ps_header_button_shows_only_while_chiaki_has_focus():

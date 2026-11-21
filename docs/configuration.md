@@ -6,7 +6,6 @@ Settings live in one JSON file, `~/.config/thor-input/config.json` (`/var/home/a
 |---|---|---|---|
 | `enabled` | `true` | bool | whether the Decky plugin starts the service when Decky loads (written by the plugin and the manager, not by the driver) |
 | `mode` | `"trackpad"` | `trackpad`, `split`, `keyboard`, `settings` | the active bottom-screen mode; while PS mode is on, the mode it will go back to (PS mode itself is never saved) |
-| `debug_hud` | `false` | bool | draw coordinates, FPS and counters on the bottom screen |
 | `sensitivity` | `1.5` | 0.2 to 5.0 (the Decky slider offers 0.5 to 3.5) | pointer speed multiplier |
 | `glide` | `true` | bool | momentum after a flick |
 | `friction` | `5` | 1 (slick) to 10 (heavy) | how fast the glide slows |

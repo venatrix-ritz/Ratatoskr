@@ -86,10 +86,11 @@ MODES = ("trackpad", "split", "keyboard", "settings", "ps")  # ps: PS5 touchpad 
 
 # Header buttons: (key, width, width while Chiaki-NG has focus), 0 = not shown. One table for drawing and for
 # hit-testing; header_layout() places the buttons 8 px apart from x = 12. While Chiaki-NG has focus a PS button joins the
-# mode buttons so PS mode is one tap away after leaving it; Pen gives up most of the room and Hide keeps its place.
+# mode buttons so PS mode is one tap away after leaving it; the mode buttons make room for it, so Left Click, Right Click,
+# Pen and Hide keep their places.
 HEADER_TABLE = (
-    ("trackpad", 138, 131), ("split", 100, 92), ("keyboard", 138, 131), ("ps", 0, 72), ("settings", 176, 176),
-    ("hud", 78, 70), ("left", 130, 130), ("right", 130, 130), ("pen", 150, 100), ("hide", 112, 112),
+    ("trackpad", 160, 138), ("split", 122, 100), ("keyboard", 160, 138), ("ps", 0, 78), ("settings", 196, 176),
+    ("left", 130, 130), ("right", 130, 130), ("pen", 150, 150), ("hide", 112, 112),
 )
 HEADER_X0, HEADER_GAP = 12, 8
 
@@ -118,6 +119,7 @@ QC_CARD_H = 120.0
 QC_CTRL_DY, QC_CTRL_H = 46.0, 56.0  # the -, slider, + row inside a card
 QC_HEALTH_Y, QC_HEALTH_H = HEADER_HEIGHT + 478.0, 220.0
 QC_BUTTONS_Y, QC_BUTTONS_H = HEADER_HEIGHT + 724.0, 64.0
+QC_BUTTON_XS, QC_BUTTON_W = (30.0, 430.0, 830.0), 380.0  # Tap Click, Right-click mode, Back to Trackpad
 
 # <linux/input.h> (include/uapi/linux/input.h): EVIOCGABS(abs) = _IOR('E', 0x40 + abs, struct input_absinfo), 24 bytes;
 # EVIOCGMTSLOTS(len) = _IOC(_IOC_READ, 'E', 0x0a, len) with a buffer of one u32 code and one s32 per slot.
@@ -138,7 +140,6 @@ class ThorApp:
         self.logger.log(DebugCode.DAEMON_STARTING)
 
         self.mode = "trackpad"  # one of MODES
-        self.show_debug_hud = False
         self.ui_hidden = False  # Hide button: everything but the Open button is blanked; not saved, a restart shows the UI
         self.touch_dev_node = ""
         self.exit_code = 0
@@ -195,9 +196,6 @@ class ThorApp:
         self.active_key_tid: int | None = None  # the touch that pressed active_key_press; its lift clears the highlight
         self.last_key_label = ""
         self.last_event_time = time.time()
-        self.fps = 60.0
-        self.frame_count = 0
-        self.last_fps_calc = time.time()
 
         # Continuous key repeat state
         self.held_key: Key | None = None
@@ -248,7 +246,6 @@ class ThorApp:
                     self.mode = mode if mode in MODES and mode != "ps" else "trackpad"
                     self._apply_ps_settings(cfg)
                     self._apply_haptics_settings(cfg)
-                    self.show_debug_hud = cfg.get("debug_hud", self.show_debug_hud)
                     self.gesture.set_settings(**cfg)
                     self._apply_mirror_settings(cfg)
                     keyboard_settings.apply(self.keyboard_cfg, cfg)
@@ -269,10 +266,10 @@ class ThorApp:
                     on_disk = {}
             except (OSError, ValueError):
                 on_disk = {}
+            on_disk.pop("debug_hud", None)  # the removed bottom-screen HUD's setting
             cfg = {
                 **on_disk,
                 "mode": self._ps_return_mode if self.mode == "ps" else self.mode,
-                "debug_hud": self.show_debug_hud,
                 "pen_mode": self.pen_mode,
                 **self.gesture.get_settings(),
                 **self.mirror_cfg,
@@ -822,8 +819,6 @@ class ThorApp:
             self._keyboard_down(tid, x, y)
         else:
             self.gesture.touch_down(tid, x, y, now)
-            if self.show_debug_hud:
-                GLib.idle_add(self.drawing_area.queue_draw)
 
     def _keyboard_down(self, tid: int, x: float, y: float) -> None:
         key = self.kb_layout.hit_test(x, y)
@@ -862,8 +857,6 @@ class ThorApp:
         elif owner == "trackpad" or (owner is None and self.mode != "settings"):
             # None: a contact from before a restart or a dropped frame; the engine ignores ids it does not hold
             self.gesture.touch_move(tid, x, y, now)
-            if self.show_debug_hud:
-                GLib.idle_add(self.drawing_area.queue_draw)
 
     def _handle_touch_up(self, tid: int, now: float) -> None:
         self.last_event_time = time.time()
@@ -887,8 +880,6 @@ class ThorApp:
             GLib.idle_add(self.drawing_area.queue_draw)
         elif owner == "trackpad" or (owner is None and self.mode != "settings"):
             self.gesture.touch_up(tid, now)
-            if self.show_debug_hud:
-                GLib.idle_add(self.drawing_area.queue_draw)
 
     def _header_buttons(self) -> tuple:
         return HEADER_BUTTONS_PS if self.ps.active else HEADER_BUTTONS
@@ -901,10 +892,6 @@ class ThorApp:
             self.set_mode(key, restart_hint=False)
         elif key == "hide":
             self.set_ui_hidden(True)
-        elif key == "hud":
-            self.show_debug_hud = not self.show_debug_hud
-            self.save_config()
-            GLib.idle_add(self.drawing_area.queue_draw)
         elif key in ("left", "right"):
             self.held_ui_button = key
             self.held_ui_button_tid = tid
@@ -968,12 +955,13 @@ class ThorApp:
 
         # Bottom Action Buttons
         if QC_BUTTONS_Y - 6 <= y <= QC_BUTTONS_Y + QC_BUTTONS_H + 6:
-            if any(lo <= x <= hi for lo, hi in ((30, 310), (330, 610), (630, 910), (930, 1210))):
+            slot = next((i for i, bx in enumerate(QC_BUTTON_XS) if bx <= x <= bx + QC_BUTTON_W), None)
+            if slot is not None:
                 self._haptic()
-            if 30 <= x <= 310:
+            if slot == 0:
                 self.gesture.tap_to_click = not self.gesture.tap_to_click
                 self.save_config()
-            elif 330 <= x <= 610:
+            elif slot == 1:
                 # Toggle right-click mode between 2-finger and long-press (mutually exclusive)
                 if self.gesture.two_finger_right_click:
                     self.gesture.two_finger_right_click = False
@@ -982,10 +970,7 @@ class ThorApp:
                     self.gesture.two_finger_right_click = True
                     self.gesture.long_press_right_click = False
                 self.save_config()
-            elif 630 <= x <= 910:
-                self.show_debug_hud = not self.show_debug_hud
-                self.save_config()
-            elif 930 <= x <= 1210:
+            elif slot == 2:
                 self.set_mode("trackpad")
             GLib.idle_add(self.drawing_area.queue_draw)
 
@@ -1043,7 +1028,6 @@ class ThorApp:
 
                         if action == "get_status":
                             res["mode"] = self.mode
-                            res["debug_hud"] = self.show_debug_hud
                             res["hardware_stats"] = self.stats.get_stats()
                             res.update(self.gesture.get_settings())
                             res.update(self.mirror_cfg)
@@ -1100,8 +1084,6 @@ class ThorApp:
                                 self._apply_gleipnir_settings(msg)
                                 self._apply_ps_settings(msg)
                                 self._apply_haptics_settings(msg)
-                                if "debug_hud" in msg:
-                                    self.show_debug_hud = bool(msg["debug_hud"])
                             self.save_config()
                             GLib.idle_add(self.drawing_area.queue_draw)
                         elif action == "set_volume":
@@ -1129,11 +1111,6 @@ class ThorApp:
                             self.bridge.tap_key(KEY_F24)
                             self.idle_tracker.poke()
                             self.burn_in.record_touch()
-                        elif action == "toggle_hud":
-                            self.show_debug_hud = not self.show_debug_hud
-                            self.save_config()
-                            res["debug_hud"] = self.show_debug_hud
-                            GLib.idle_add(self.drawing_area.queue_draw)
                         elif action == "run_diagnostics":
                             res["diagnostics"] = run_self_diagnostics()
                         elif action == "quit":
@@ -1168,13 +1145,6 @@ class ThorApp:
             self._draws += 1
 
     def _paint(self, cr: cairo.Context) -> bool:
-        self.frame_count += 1
-        now = time.time()
-        if now - self.last_fps_calc >= 1.0:
-            self.fps = self.frame_count / (now - self.last_fps_calc)
-            self.frame_count = 0
-            self.last_fps_calc = now
-
         # Pure OLED Black Background
         cr.set_source_rgb(0, 0, 0)
         cr.paint()
@@ -1198,10 +1168,6 @@ class ThorApp:
         if lum_scale < 1.0:
             cr.set_source_rgba(0, 0, 0, 1.0 - lum_scale)
             cr.paint()
-
-        # Live Debug HUD Overlay (when enabled)
-        if self.show_debug_hud:
-            self._draw_debug_hud(cr)
 
         return True
 
@@ -1249,8 +1215,6 @@ class ThorApp:
             return "PS", self.mode == "ps", theme.BTN_FILL_ACTIVE
         if key == "hide":
             return "Hide", False, theme.BTN_ACCENT_DEFAULT
-        if key == "hud":
-            return "HUD", self.show_debug_hud, (0.18, 0.32, 0.24)
         if key == "left":
             return "Left Click", self.held_ui_button == "left", (0.22, 0.26, 0.35)
         if key == "right":
@@ -1609,16 +1573,10 @@ class ThorApp:
         # Action Buttons
         tap_active = self.gesture.tap_to_click
         tap_label = "Tap Click: ON" if tap_active else "Tap Click: OFF"
-        self._draw_button(cr, 30, QC_BUTTONS_Y, 280, QC_BUTTONS_H, tap_label, tap_active, accent_color=theme.BTN_FILL_ACTIVE)
-
         right_2f = self.gesture.two_finger_right_click
         right_label = "Right: 2-Finger" if right_2f else "Right: Press-Hold"
-        self._draw_button(cr, 330, QC_BUTTONS_Y, 280, QC_BUTTONS_H, right_label, right_2f, accent_color=theme.BTN_FILL_ACTIVE)
-
-        hud_label = "Glass HUD: ON" if self.show_debug_hud else "Glass HUD: OFF"
-        self._draw_button(cr, 630, QC_BUTTONS_Y, 280, QC_BUTTONS_H, hud_label, self.show_debug_hud, accent_color=(0.18, 0.32, 0.24))
-
-        self._draw_button(cr, 930, QC_BUTTONS_Y, 280, QC_BUTTONS_H, "Back to Trackpad", False, accent_color=theme.BTN_FILL_ACTIVE)
+        for bx, (label, active) in zip(QC_BUTTON_XS, ((tap_label, tap_active), (right_label, right_2f), ("Back to Trackpad", False))):
+            self._draw_button(cr, bx, QC_BUTTONS_Y, QC_BUTTON_W, QC_BUTTONS_H, label, active, accent_color=theme.BTN_FILL_ACTIVE)
 
         if self.gleipnir_cfg["gleipnir_ribbon"]:
             line = gleipnir_view.detail(self.gleipnir_status)
@@ -1714,40 +1672,6 @@ class ThorApp:
             mute_x = plus_x + 100.0
             mute_col = (0.45, 0.22, 0.24) if is_muted else theme.BTN_FILL_ACTIVE
             self._draw_button(cr, mute_x, ctrl_y, 140, 56, "Muted" if is_muted else "Mute", is_muted, accent_color=mute_col)
-
-    def _draw_debug_hud(self, cr: cairo.Context) -> None:
-        """Render diagnostic telemetry HUD in top-right of trackpad area."""
-        hud_w, hud_h = 400.0, 190.0
-        hud_x, hud_y = SCREEN_WIDTH - hud_w - 30.0, HEADER_HEIGHT + 20.0
-
-        # HUD Box: pure black translucent background
-        self._round_rect(cr, hud_x, hud_y, hud_w, hud_h, 10.0)
-        cr.set_source_rgba(0.0, 0.0, 0.0, 0.88)
-        cr.fill_preserve()
-        cr.set_source_rgba(0.18, 0.35, 0.25, 0.8)
-        cr.set_line_width(1.0)
-        cr.stroke()
-        cr.new_path()
-
-        # Telemetry info
-        telem = self.bridge.get_telemetry()
-        lines = [
-            f"DIAGNOSTICS [FPS: {self.fps:.0f}]",
-            f"State: {self.gesture.last_state_label}",
-            f"Coords: ({self.gesture.last_coords[0]:.0f}, {self.gesture.last_coords[1]:.0f})",
-            f"Moves: {telem['mouse_moves']} | Scrolls: {telem['scrolls']}",
-            f"Clicks L/R: {telem['clicks_left']}/{telem['clicks_right']} | Keys: {telem['keystrokes']}",
-            f"HW Node: {self.touch_dev_node or 'None'}",
-        ]
-
-        cr.select_font_face("Monospace", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-        cr.set_font_size(15.0)
-        line_y = hud_y + 24.0
-        for i, text in enumerate(lines):
-            cr.set_source_rgb(0.35, 0.85, 0.50) if i == 0 else cr.set_source_rgb(*theme.TEXT_PRIMARY)
-            cr.move_to(hud_x + 14.0, line_y)
-            cr.show_text(text)
-            line_y += 22.0
 
     def _round_rect(self, cr: cairo.Context, x: float, y: float, w: float, h: float, r: float) -> None:
         cr.new_sub_path()

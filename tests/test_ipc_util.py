@@ -98,14 +98,13 @@ def test_the_request_builders_only_use_actions_the_driver_handles():
     src = open(os.path.join(ROOT, "bin", "thor_app.py"), encoding="utf-8").read()
     handled = set(re.findall(r'action == "([a-z_]+)"', src))
     for req in (iu.settings_request(sensitivity=2.0), iu.brightness_request("top", 40),
-                iu.brightness_request("bottom", 40), iu.hud_request(True)):
+                iu.brightness_request("bottom", 40)):
         assert req["action"] in handled, (req, sorted(handled))
 
 
 def test_settings_are_flat_and_brightness_uses_the_drivers_key():
     assert iu.settings_request(glide=False, friction=7) == {"action": "set_settings", "glide": False, "friction": 7}
     assert iu.brightness_request("bottom", 55) == {"action": "set_bottom_brightness", "brightness": 55}
-    assert iu.hud_request(True) == {"action": "set_settings", "debug_hud": True}
 
 
 def test_zz_the_drivers_reply_to_a_status_request_is_not_cut_at_4096():
