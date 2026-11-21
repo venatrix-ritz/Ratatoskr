@@ -44,7 +44,7 @@ One request per connection on the stream socket `/run/user/<uid>/thor-input.sock
 | `action` | Request fields | Reply adds |
 |---|---|---|
 | `get_status` | | `mode`, `debug_hud`, `hardware_stats`, every gesture setting, `mirror_dim`, `mirror_dim_floor_percent`, `bottom_dimmed`, `pen_mode`, `cursor_stay_visible`, `cursor_hide_delay_ms`, `cursor_stay_visible_active`, `ps_mode_auto`, `ps_touch_rotation`, `ps_focused` |
-| `get_debug` | `reset` (optional): also zero the draw-time counters | `telemetry` (with `ps_touches`, `ps_touch_down`), `state`, `coords`, `touch_device`, `active_fingers`, `last_key`, `hardware_stats`, gesture settings, draw-time counters, `ps` (`focused`, `focused_app`, `finger`, `buttons`, `ps_mode_auto`, `ps_touch_rotation`) |
+| `get_debug` | `reset` (optional): also zero the draw-time counters | `telemetry` (with `ps_touches`, `ps_touch_down`), `state`, `coords`, `touch_device`, `active_fingers`, `last_key`, `hardware_stats`, gesture settings, draw-time counters, `ps` (`focused`, `focused_app`, `finger`, `clicking`, `buttons`, `ps_mode_auto`, `ps_touch_rotation`) |
 | `set_mode` | `mode`: `trackpad`, `split`, `keyboard`, `settings` or `ps` | |
 | `set_pen_mode` | `mode`: `off`, `pen` or `pen_plus` | `pen_mode` and the `cursor_*` fields; `pen_plus` also writes Game Mode's pointer-visible override, which applies when Game Mode next starts |
 | `set_settings` | flat keys, e.g. `sensitivity`, `mirror_dim` | |
