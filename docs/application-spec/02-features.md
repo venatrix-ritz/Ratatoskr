@@ -155,7 +155,7 @@ edge gestures react to it, are unverified; `ps_touch_rotation` exists for the fi
 | F-132 | Each pulse uploads, plays and erases its effect (one effect slot); a busy slot skips the pulse; no device means no buzz and one `DBG-630` line | none | `bin/haptics.py:85-97`, `:124-152` |
 | F-133 | Decky toggle **Haptic feedback** | `haptics` | `dist/index.js` |
 
-Not yet felt on the Thor: the strength (`STRENGTH`, a quarter of full rumble) and length are first guesses.
+Not yet felt on the Thor: the strength (`STRENGTH`, a quarter of full rumble) and length are first guesses. The driver (Armada's kernel patches for `qcom-hv-haptics`) uploads only constant and periodic effects; a rumble reaches it through the kernel's rumble emulation (`drivers/input/ff-core.c` `compat_effect`: a sine at strong/3 + weak/6), which the driver plays as a constant level, so `STRENGTH` 0x4000 drives the motor at about 17 % of its direct-play maximum. Game rumble from the controller (RSInput) drives the same motor, so a buzz during game rumble can briefly change or end it.
 
 ## Diagnostics and logs
 
