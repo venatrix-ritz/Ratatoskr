@@ -4,32 +4,32 @@
 
 | Quantity | Value | Where | What it controls |
 |---|---|---|---|
-| Touch reader `select` timeout | 0.1 s | `bin/thor_app.py:581` | how often idle expiry runs with no touches |
+| Touch reader `select` timeout | 0.1 s | `bin/thor_app.py:597` | how often idle expiry runs with no touches |
 | Stale contact | 1.5 s | `bin/engine.py:105` | a silent contact is treated as lifted |
 | Tap time | 0.25 s | `bin/engine.py:86` | longest tap and the point where a hold becomes a move |
 | Tap travel | 12 px per finger | `bin/engine.py:87` | most travel a tap can have |
-| Long-press time | `long_press_delay_ms`, default 0.45 s, clamp 0.2 to 1.2 s | `bin/engine.py:88`, `:463`, `:546-547` | the right-click hold |
+| Long-press time | `long_press_delay_ms`, default 0.45 s, clamp 0.2 to 1.2 s | `bin/engine.py:88`, `:466`, `:549-550` | the right-click hold |
 | Long-press travel | 24 px | `bin/engine.py:89` | most travel a long press can have |
 | Glide idle | 0.1 s | `bin/engine.py:108` | longest gap between the last move and the lift for a glide |
-| Glide start speed | 140 px/s | `bin/engine.py:905` | minimum speed to glide |
-| Glide stop speed | 12 px/s | `bin/engine.py:931` | speed below which the glide ends |
-| Glide tick | 16 ms | `bin/engine.py:924-941` | glide step interval |
-| Glide decay | `0.97 - (friction - 1) / 9 * 0.23` per tick | `bin/engine.py:922` | 0.97 at friction 1, 0.74 at 10 |
+| Glide start speed | 140 px/s | `bin/engine.py:908` | minimum speed to glide |
+| Glide stop speed | 12 px/s | `bin/engine.py:934` | speed below which the glide ends |
+| Glide tick | 16 ms | `bin/engine.py:927-944` | glide step interval |
+| Glide decay | `0.97 - (friction - 1) / 9 * 0.23` per tick | `bin/engine.py:925` | 0.97 at friction 1, 0.74 at 10 |
 | Pointer wake | 2.0 s | `bin/engine.py:100` | stillness before a scroll or press gets a nudge |
 | Pen double tap | 0.45 s, 60 px | `bin/engine.py:122-123` | the second tap of a pen click |
 | Misuse fingers | 4 | `bin/engine.py:111` | fingers that lock out output |
 | Stats sampler period | 1.0 s | `bin/system_stats.py:204` | how often the sample runs |
-| Stats cache TTL | 0.4 s | `bin/thor_app.py:139` | used only when the sampler is not running |
+| Stats cache TTL | 0.4 s | `bin/thor_app.py:140` | used only when the sampler is not running |
 | Slider optimistic hold | 1.5 s | `bin/system_stats.py:146` | how long a requested value overrides the sample |
 | `wpctl` read timeout | 0.4 s | `bin/system_stats.py:319` | volume read |
 | `sudo tee` timeout | 2.0 s | `bin/system_stats.py:39` | a write that times out is checked by reading back |
-| Ribbon refresh | 1.0 s | `bin/thor_app.py:475`, `:483-488` | redraw and pointer-status refresh |
-| Burn-in orbit cycle | 90 s, radius 1.5 px | `bin/thor_app.py:153` | the UI's translation |
-| Idle veil | after 30 s, fades over 5 s to 40 % | `bin/thor_app.py:153`, `bin/burn_in.py:66-74` | luminance floor |
+| Ribbon refresh | 1.0 s | `bin/thor_app.py:490`, `:498-503` | redraw and pointer-status refresh |
+| Burn-in orbit cycle | 90 s, radius 1.5 px | `bin/thor_app.py:154` | the UI's translation |
+| Idle veil | after 30 s, fades over 5 s to 40 % | `bin/thor_app.py:154`, `bin/burn_in.py:66-74` | luminance floor |
 | Trackpad hint | shown 5 s, fades over 1.5 s | `bin/burn_in.py:54-64` | center hint |
-| Gleipnir poll | 10 s; journal every 6th poll (60 s) | `bin/thor_app.py:327-333` | status view |
-| Touch device retry | 5 s | `bin/thor_app.py:551-572` | missing or ungrabbable node |
-| IPC accept timeout | 0.5 s | `bin/thor_app.py:972` | shutdown responsiveness |
+| Gleipnir poll | 10 s; journal every 6th poll (60 s) | `bin/thor_app.py:341-347` | status view |
+| Touch device retry | 5 s | `bin/thor_app.py:567-588` | missing or ungrabbable node |
+| IPC accept timeout | 0.5 s | `bin/thor_app.py:1002` | shutdown responsiveness |
 | IPC request limit | 2 s | `bin/ipc_util.py:18` | a stalled client cannot hold the server |
 | Idle tracker rescan | 5.0 s | `bin/dim_mirror.py:119` | picks up devices that appear after start |
 | Idle tracker `select` | up to 1.0 s | `bin/dim_mirror.py:195` | |
@@ -40,13 +40,13 @@
 | Dim restore-failure log | at most every 30 s | `bin/dim_mirror.py:305`, `:321` | keeps the log quiet |
 | Slider input guard | 5 s | `bin/dim_mirror.py:35`, `:42` | a falling top with recent input is a slider drag |
 | Dim restore on input | input within 1 s | `bin/dim_mirror.py:402` | the bottom comes back when the user touches anything |
-| Panel poll | 2 s | `dist/index.js:141` | `get_status` |
+| Panel poll | 2 s | `dist/index.js:143` | `get_status` |
 | Panel hold after an edit | 3 s | `dist/index.js:29` | the value the user set wins over the poll |
-| Panel slider throttle | first at once, then at most every 120 ms | `dist/index.js:124` | backend call rate during a drag |
-| Panel refresh after a setting | 700 ms | `dist/index.js:183` | picks up the other right-click setting |
+| Panel slider throttle | first at once, then at most every 120 ms | `dist/index.js:126` | backend call rate during a drag |
+| Panel refresh after a setting | 700 ms | `dist/index.js:185` | picks up the other right-click setting |
 | Enable wait | up to 3.0 s, 0.1 s steps | `main.py` `set_enabled` | waits for the socket to agree |
 | Decky `systemctl` timeout | 5 s | `main.py` `_run_systemctl` | |
-| Manager refresh | 1 s, on a worker thread | `bin/touch_master_manager.py:288`, `:298-316` | window status |
+| Manager refresh | 1 s, on a worker thread | `bin/touch_master_manager.py:289`, `:299-317` | window status |
 
 ## Burn-in
 
@@ -58,8 +58,8 @@
 - **Hint.** `elapsed = min(t - start, t - mode_change)`, so the most recent of start and mode change sets the clock.
   Full alpha for 5 s, then linear to zero over 1.5 s (`:54-64`).
 - **Veil.** `idle = t - last_touch`. Up to 30 s the scale is 1.0. Then it falls linearly to 0.4 over 5 s and stays there
-  (`:66-74`). `ThorApp._paint` draws black over the frame with alpha `1 - scale` (`bin/thor_app.py:1133-1137`), so black
-  stays black. `record_touch` is called on every touch frame and on the `wake` action (`:612`, `:1068`).
+  (`:66-74`). `ThorApp._paint` draws black over the frame with alpha `1 - scale` (`bin/thor_app.py:1174-1178`), so black
+  stays black. `record_touch` is called on every touch frame and on the `wake` action (`:628`, `:1109`).
 
 ## Idle tracking
 
@@ -77,7 +77,7 @@
 - A select error drops every descriptor, and the next scan reopens them (`:194-199`). A read error drops that descriptor
   (`:205-208`).
 - The bottom touchscreen is not in the tracker. Ratatoskr grabs it, so the driver calls `poke()` for each frame instead
-  (`bin/thor_app.py:612`).
+  (`bin/thor_app.py:628`).
 
 The tracker's own start time is not used for anything but the slider guard. `DimMirror` passes the tracker's idle time
 and its own running time to `input_says_slider` (`bin/dim_mirror.py:38-42`, `:393`). Its docstring explains why: a
@@ -173,7 +173,7 @@ that is unreadable, out of range or corrupt is deleted.
 ## Throttles and merges in the panel
 
 - **Slider writes.** `makeThrottle(setTimer, 120)` sends the first value at once, then at most one more per 120 ms with
-  the latest value, and `flush()` sends what is waiting when the panel unmounts (`dist/index.js:51-87`, `:124`, `:143-145`).
+  the latest value, and `flush()` sends what is waiting when the panel unmounts (`dist/index.js:51-87`, `:126`, `:145-147`).
 - **Status merge.** `mergeStatus` keeps the value the user set for 3 s after the edit, for each key that was edited
   (`dist/index.js:29`, `:34-49`). The hardware keys inside `hardware_stats` get the same treatment.
 
@@ -184,14 +184,14 @@ that is unreadable, out of range or corrupt is deleted.
 - **Optimistic value.** `_show` puts the requested value into `_optimistic` for 1.5 s, and `get_stats` returns it over the
   real sample (`:225-227`, `:181-195`).
 - **Key repeat.** A worker waits for the delay, then taps the key and waits for the interval, while the key is still held
-  and is still the same key object. A new press stops the old worker first (`bin/thor_app.py:442-462`).
-- **Glide.** One worker per flick. A new press sets the old worker's own stop event (`bin/engine.py:678`, `:915-945`).
+  and is still the same key object. A new press stops the old worker first (`bin/thor_app.py:456-476`).
+- **Glide.** One worker per flick. A new press sets the old worker's own stop event (`bin/engine.py:681`, `:918-948`).
 
 ## Timing of the stats and drawing path
 
 - The sampler runs every second on its own thread. `get_stats` never samples on the caller's thread when the sampler is
   running (`bin/system_stats.py:181-187`, `:204-219`).
 - Drawing reads cached values and does no I/O except the pointer-status refresh, which is in a GLib timer, not in `_paint`
-  (`bin/thor_app.py:483-488`).
-- The draw path measures its own time (`on_draw`, `bin/thor_app.py:1097-1105`). The panel reports the average, maximum and
-  frame lag through `get_debug` (`:1015-1018`).
+  (`bin/thor_app.py:498-503`).
+- The draw path measures its own time (`on_draw`, `bin/thor_app.py:1138-1146`). The panel reports the average, maximum and
+  frame lag through `get_debug` (`:1047-1050`).

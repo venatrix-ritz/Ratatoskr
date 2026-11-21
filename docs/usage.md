@@ -69,6 +69,9 @@ Things to know:
 - Focus is checked once a second, so PS mode can take a second to come on or go off. Without focus the pad and buttons send nothing and the pad says "Waiting for Chiaki-NG to have focus".
 - If swipes come out turned on the PS5 (up moves right, for example), set `ps_touch_rotation` to 90, 180 or 270 in `config.json` ([configuration](configuration.md)).
 
+## Haptic feedback
+The Thor's vibration motor gives a short buzz (15 ms) when a touch does something: a tap click (one-, two- or three-finger tap, the pen double tap, a long press), a keyboard key, a header button, the status ribbon, the Open button, a Quick Controls button, a PS button or a PS pad click. Moving the pointer, scrolling, dragging a slider and key repeat do not buzz. Turn it off with **Haptic feedback** at the top of the Decky panel (`haptics`). If the motor is busy with something else, that buzz is skipped.
+
 ## Settings
 In the Decky panel (Steam menu, Decky, Ratatoskr): sensitivity, glide and friction, scroll speed, tap to click, long-press right click and its delay, two- and three-finger taps, navigation swipes, the **Pen** section (Pen mode and Pen +), the on-glass HUD, and the **Screens** toggles: dim the bottom screen with Steam's idle dim ([details](dim-mirror.md)) and [PS mode](#ps-mode-chiaki-ng). All keys and ranges are in [configuration.md](configuration.md).
 
