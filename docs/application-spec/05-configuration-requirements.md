@@ -63,7 +63,7 @@ of driver keys every time (`bin/thor_app.py:270-280`).
 | Path | What | Created or changed by | Source |
 |---|---|---|---|
 | `~/.config/thor-input/config.json` | settings | driver, Decky backend, manager | see above |
-| `/run/user/<uid>/thor-input.sock` | IPC socket | driver (created on start, removed on exit) | `bin/thor_app.py:75`, `:999-1017` |
+| `/run/user/<uid>/thor-input.sock` | IPC socket | driver (created on start, removed on exit) | `bin/thor_app.py:75`, `:1000-1018` |
 | `/tmp/thor-input-debug.log` | log lines | every component | `debug_codes.py:9` |
 | `~/.config/environment.d/50-ratatoskr-cursor.conf` | Pen + override, `HIDE_CURSOR_DELAY_MS=3600000` | driver when Pen + is on; removed when it is off | `bin/session_cursor.py:198-234` |
 | `~/.local/state/thor-input/dim-restore.json` | pre-dim bottom level `{"pct", "ts"}` | driver while the bottom is dimmed | `bin/dim_mirror.py:52-53`, `:262-278` |
@@ -131,10 +131,10 @@ exercises it. The tests that need a device are marked (device). "Status" is what
 | R-06 | Leaving Keyboard or Split releases latched and locked modifiers | `bin/thor_app.py:373-376`; `tests/test_keyboard_handlers.py` (device) | implemented |
 | R-07 | Each mode can be chosen from the header, the panel, the manager, the tray and the CLI | `bin/thor_app.py:366-368`, `dist/index.js:287-293`, `bin/touch_master_manager.py:415` | implemented; the manager and CLI cannot select Split |
 | R-08 | Hide blanks the UI and Open restores it; the state is not saved | `bin/thor_app.py:384-394`, `:746-764`; `tests/test_keyboard_handlers.py` (device) | implemented |
-| R-09 | Quick Controls writes are clamped and asynchronous; a slider keeps the finger that grabbed it | `bin/system_stats.py:87-136`, `bin/thor_app.py:980-993` | implemented |
+| R-09 | Quick Controls writes are clamped and asynchronous; a slider keeps the finger that grabbed it | `bin/system_stats.py:87-136`, `bin/thor_app.py:981-994` | implemented |
 | R-10 | The dim feature is off by default; it dims only on a steady fall of the top backlight and restores on a rise, on input, or when the fall stops | `bin/top_follower.py`, `bin/dim_mirror.py`; `tests/test_top_follower.py`, `tests/test_dim_mirror.py` | implemented; on-device timing unconfirmed (author's docs) |
 | R-11 | The pre-dim level survives a crash and is restored on the next start | `bin/dim_mirror.py:280-311`; `tests/test_dim_mirror.py` | implemented |
-| R-12 | IPC requests get a reply, or a `303` error; the driver does not wait more than 2 s for one request | `bin/ipc_util.py`, `bin/thor_app.py:1011-1126`; `tests/test_ipc_util.py` | implemented |
+| R-12 | IPC requests get a reply, or a `303` error; the driver does not wait more than 2 s for one request | `bin/ipc_util.py`, `bin/thor_app.py:1012-1127`; `tests/test_ipc_util.py` | implemented |
 | R-13 | Config writes are atomic | `bin/atomic_json.py`; `tests/test_atomic_json.py` | implemented |
 | R-14 | Stopping the service returns the bottom screen to Armada's session | `main.py:247-251`, `bin/touch_master_manager.py:107-119`, `bin/thor_app.py:459-470` | implemented; device behaviour per the CHANGELOG |
 | R-15 | The service restarts after a crash or a lost touch device | `systemd/touch-master.service:11-12`, `bin/thor_app.py:635-637`, `:726-729` | implemented |
@@ -147,7 +147,7 @@ exercises it. The tests that need a device are marked (device). "Status" is what
 
 | ID | Requirement | Evidence | Status |
 |---|---|---|---|
-| N-01 | Pure black UI with no container fills, to keep unlit pixels off | `bin/theme.py:1-12`, `bin/thor_app.py:1325`, `:1384`, `:1428` | implemented |
+| N-01 | Pure black UI with no container fills, to keep unlit pixels off | `bin/theme.py:1-12`, `bin/thor_app.py:1326`, `:1385`, `:1429` | implemented |
 | N-02 | Burn-in measures: orbit shift, fading hint, idle veil | `bin/burn_in.py`; `tests/test_burn_in.py` | implemented |
 | N-03 | Drawing and IPC never wait for a hardware sample | `bin/system_stats.py:204-219`, `:181-196` | implemented |
 | N-04 | Each component logs with a `DBG-nnn` code | `debug_codes.py:124-141` | implemented |

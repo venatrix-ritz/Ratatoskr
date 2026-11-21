@@ -29,7 +29,7 @@
 | Trackpad hint | shown 5 s, fades over 1.5 s | `bin/burn_in.py:54-64` | center hint |
 | Gleipnir poll | 10 s; journal every 6th poll (60 s) | `bin/thor_app.py:357-363` | status view |
 | Touch device retry | 5 s | `bin/thor_app.py:583-604` | missing or ungrabbable node |
-| IPC accept timeout | 0.5 s | `bin/thor_app.py:1009` | shutdown responsiveness |
+| IPC accept timeout | 0.5 s | `bin/thor_app.py:1010` | shutdown responsiveness |
 | IPC request limit | 2 s | `bin/ipc_util.py:18` | a stalled client cannot hold the server |
 | Idle tracker rescan | 5.0 s | `bin/dim_mirror.py:119` | picks up devices that appear after start |
 | Idle tracker `select` | up to 1.0 s | `bin/dim_mirror.py:195` | |
@@ -58,8 +58,8 @@
 - **Hint.** `elapsed = min(t - start, t - mode_change)`, so the most recent of start and mode change sets the clock.
   Full alpha for 5 s, then linear to zero over 1.5 s (`:54-64`).
 - **Veil.** `idle = t - last_touch`. Up to 30 s the scale is 1.0. Then it falls linearly to 0.4 over 5 s and stays there
-  (`:66-74`). `ThorApp._paint` draws black over the frame with alpha `1 - scale` (`bin/thor_app.py:1166-1170`), so black
-  stays black. `record_touch` is called on every touch frame and on the `wake` action (`:644`, `:1113`).
+  (`:66-74`). `ThorApp._paint` draws black over the frame with alpha `1 - scale` (`bin/thor_app.py:1167-1171`), so black
+  stays black. `record_touch` is called on every touch frame and on the `wake` action (`:644`, `:1114`).
 
 ## Idle tracking
 
@@ -193,5 +193,5 @@ that is unreadable, out of range or corrupt is deleted.
   running (`bin/system_stats.py:181-187`, `:204-219`).
 - Drawing reads cached values and does no I/O except the pointer-status refresh, which is in a GLib timer, not in `_paint`
   (`bin/thor_app.py:514-519`).
-- The draw path measures its own time (`on_draw`, `bin/thor_app.py:1137-1145`). The panel reports the average, maximum and
-  frame lag through `get_debug` (`:1053-1056`).
+- The draw path measures its own time (`on_draw`, `bin/thor_app.py:1138-1146`). The panel reports the average, maximum and
+  frame lag through `get_debug` (`:1054-1057`).

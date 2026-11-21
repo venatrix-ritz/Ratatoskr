@@ -106,9 +106,9 @@ Arrows are the calls in the code. `SVC` stands for `touch-master.service`; the d
 
 | Thread | Created by | What it does | Period or wait | Source |
 |---|---|---|---|---|
-| GTK main | `Gtk.main()` in `main()` | drawing, GLib timers, idle callbacks, tray, signal handlers | event driven | `bin/thor_app.py:1685-1702` |
+| GTK main | `Gtk.main()` in `main()` | drawing, GLib timers, idle callbacks, tray, signal handlers | event driven | `bin/thor_app.py:1708-1725` |
 | Touch reader | `_start_touch_reader` | `select` on the grabbed node, then reads frames and calls `_dispatch_frame` under `input_lock` | `select` timeout 0.1 s; expires stale contacts when idle | `bin/thor_app.py:607-657` |
-| IPC server | `_start_ipc_server` | accepts one connection at a time, reads one request, replies, closes | accept timeout 0.5 s; 2 s per request | `bin/thor_app.py:999-1131` |
+| IPC server | `_start_ipc_server` | accepts one connection at a time, reads one request, replies, closes | accept timeout 0.5 s; 2 s per request | `bin/thor_app.py:1000-1132` |
 | Stats sampler | `HardwareStats.start_sampler` | samples CPU, GPU, RAM, battery, volume, backlights | every 1.0 s | `bin/system_stats.py:204-219` |
 | Write threads (4) | `_LatestWriter.submit`, the first time each one is used | write top backlight, bottom backlight, volume, mute | each write, then wait for the next value | `bin/system_stats.py:87-136`, `:160-165` |
 | Idle tracker | `IdleTracker.start` | reads input events from every input device except the touchscreen; rescans the device list | `select` up to 1.0 s; rescan every 5.0 s | `bin/dim_mirror.py:140-216` |
@@ -126,7 +126,7 @@ Arrows are the calls in the code. `SVC` stands for `touch-master.service`; the d
 
 | Lock | Protects | Taken by | Source |
 |---|---|---|---|
-| `ThorApp.input_lock` (re-entrant) | gesture state, keyboard and modifier state, mode and settings changes | touch reader around each batch; `set_mode`, `set_ui_hidden`, `set_pen_mode`, IPC `set_settings`, `_on_chiaki_focus` | `bin/thor_app.py:183`, `:289`, `:369`, `:387`, `:622-649`, `:1080` |
+| `ThorApp.input_lock` (re-entrant) | gesture state, keyboard and modifier state, mode and settings changes | touch reader around each batch; `set_mode`, `set_ui_hidden`, `set_pen_mode`, IPC `set_settings`, `_on_chiaki_focus` | `bin/thor_app.py:183`, `:289`, `:369`, `:387`, `:622-649`, `:1081` |
 | `UInputBridge.lock` (re-entrant) | file descriptors and held-button and held-key sets, and the telemetry counters | every emit call; `release_all` holds it while it calls `mouse_button` and `key` | `bin/engine.py:136`, `:405-410` |
 | `HardwareStats._lock` | cached data and optimistic values | `get_stats`, `_refresh`, `_show` | `bin/system_stats.py:155`, `:181-202` |
 | `HardwareStats._sample_lock` | one sample at a time when the sampler is off | `_refresh` | `bin/system_stats.py:156`, `:197-202` |

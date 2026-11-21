@@ -13,7 +13,7 @@ repo checks the Armada version at run time, so other builds are **unverified**.
 | Mounting | rotated 90 degrees relative to the digitizer's raw axes | `raw_to_screen` `bin/engine.py:126-128`: `x = raw_y`, `y = 1079 - raw_x` |
 | Driver window | GTK window, fullscreen, undecorated, 1240 by 1080 | `bin/thor_app.py:224-229` |
 | Display | runs in the bottom-screen gamescope through `armada-run-bottom`; the code comments name the secondary display `:2` | `systemd/touch-master.service:10`, `debug_codes.py:20` (comment), `docs/architecture.md` ("DISPLAY :2") |
-| Pixel colour | pure black base; lit pixels are the only power draw | `bin/theme.py:1-10`, `bin/thor_app.py:1148-1150` |
+| Pixel colour | pure black base; lit pixels are the only power draw | `bin/theme.py:1-10`, `bin/thor_app.py:1149-1151` |
 
 The header is 80 px of buttons and an 88 px ribbon, so the drawing area starts at y = 168 (`bin/thor_app.py:79-83`).
 The split line is at y = 500 (`bin/thor_app.py:84`).

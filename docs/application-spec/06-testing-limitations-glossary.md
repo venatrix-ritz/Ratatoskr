@@ -62,7 +62,7 @@ bash -n scripts/deploy.sh
 4. **Dim mirror follows the top only.** It cannot dim the bottom when the top is not dimmed by Steam. It does not handle
    sleep (`bin/dim_mirror.py:14-17`), and its timing is tuned against one observed Steam ramp (`docs/dim-mirror.md`).
 5. **Narrow sudo rule incomplete** (see [05](05-configuration-requirements.md#backlight-write-access)).
-6. **Keyboard.** There is no Caps Lock key; Caps is a double-tapped Shift (`bin/keyboard_layout.py:94-192`). The keyboard
+6. **Keyboard.** There is no Caps Lock key; Caps is a double-tapped Shift (`bin/keyboard_layout.py:119-217`). The keyboard
    has no number pad. Layout is QWERTY only. Modifier state is kept only while the keyboard is shown.
 7. **Hide is not saved.** A restart shows the UI (`bin/thor_app.py:143`).
 8. **Manager is partial.** It cannot select Split, Pen, Hide, keyboard timings, or Gleipnir (`bin/touch_master_manager.py`).
@@ -90,7 +90,7 @@ These are defects or gaps found by reading the code. None has been reproduced in
 | K-07 | `bin/gleipnir_view.py:174` cites `docs/hardware/device-observed.md`, which is not in this repository | `bin/gleipnir_view.py:174` | Dangling reference in a comment | by grep |
 | K-08 | `tests/test_system_stats.py` says it also runs as `devcheck.sh` on the Thor; that script is not in the repository | `tests/test_system_stats.py` header | The on-device run described in the header cannot be reproduced from this repo | by grep |
 | K-09 | `docs/configuration.md` describes the dim mirror as reading Steam's `config.vdf` as current behaviour | `docs/configuration.md:34` | Misleading; the code reads no Steam file | by grep (no reference in code) |
-| K-10 | The IPC socket bind is not guarded. `DBG-301` is defined and never emitted | `bin/thor_app.py:1006-1008`, `debug_codes.py:36` | A failed bind raises out of `start()` and the driver exits without a `DBG-301` line | by reading |
+| K-10 | The IPC socket bind is not guarded. `DBG-301` is defined and never emitted | `bin/thor_app.py:1007-1009`, `debug_codes.py:36` | A failed bind raises out of `start()` and the driver exits without a `DBG-301` line | by reading |
 | K-11 | `DBG-701` for slider failures and `DBG-702` for volume failures are documented, but only the dim path emits `DBG-701`, and nothing emits `DBG-702` | `docs/troubleshooting.md` (the DBG-701 and DBG-702 rows), `bin/system_stats.py` (no logger), `bin/dim_mirror.py` | A slider that does nothing leaves no log line of its own | by grep |
 
 ## Documentation and code mismatches found in this review
@@ -128,7 +128,7 @@ Each item states what the existing `docs/` page says, what the code does, and wh
    (`bin/system_stats.py:160-165`) and a Gleipnir thread that is started at launch and polls only while the view is on
    (`bin/thor_app.py:501`, `:350-364`).
 10. **Keyboard layout wording.** `README.md` calls the keyboard a "5-row thumb layout". The code lays out five rows of a
-    full QWERTY-style keyboard, not a thumb layout (`bin/keyboard_layout.py:94-192`).
+    full QWERTY-style keyboard, not a thumb layout (`bin/keyboard_layout.py:119-217`).
 11. **Decky button label.** `docs/installation.md` and the other pages say "Run Diagnostics". The panel's button reads
     "Run Self-Test Diagnostics" (`dist/index.js:599`). Cosmetic.
 13. **Slider failure codes.** `docs/troubleshooting.md` says a brightness slider that does nothing logs `DBG-701`, and a
@@ -162,8 +162,8 @@ Each item states what the existing `docs/` page says, what the code does, and wh
 | Pen, Pen + | Pen mode; Pen + also keeps Game Mode's pointer visible | `bin/pen_mode.py` |
 | Nudge | a one-pixel out-and-back pointer move that wakes a hidden pointer | `bin/engine.py:298-306` |
 | Latched, locked | a modifier that applies to the next key only, and one that stays on | `bin/modifiers.py:1-16` |
-| Quick Controls | the settings screen with sliders and buttons | `bin/thor_app.py:1483` |
-| Ribbon | the status row under the header | `bin/thor_app.py:1224` |
+| Quick Controls | the settings screen with sliders and buttons | `bin/thor_app.py:1506` |
+| Ribbon | the status row under the header | `bin/thor_app.py:1225` |
 | Hide, Open | blank the UI except an Open button, and the button that brings it back | `bin/thor_app.py:384-394` |
 | Idle veil | the black overlay that dims lit pixels after 30 s without touch | `bin/burn_in.py:66-74` |
 | Orbit | the 1.5 px circular shift of the whole UI for burn-in | `bin/burn_in.py:46-52` |
@@ -173,7 +173,7 @@ Each item states what the existing `docs/` page says, what the code does, and wh
 | Saved level | Armada's stored bottom brightness, re-applied every 2 s by its root service | `bin/dim_mirror.py:49-51` |
 | Recovery file | the pre-dim bottom level, kept until restored | `bin/dim_mirror.py:52-53` |
 | Gleipnir | a separate charge-limiting project; Ratatoskr shows its status only | `bin/gleipnir_view.py` |
-| IPC socket | the UNIX socket the Decky backend and the manager talk to | `bin/thor_app.py:999-1017` |
+| IPC socket | the UNIX socket the Decky backend and the manager talk to | `bin/thor_app.py:1000-1018` |
 | `DBG-nnn` | a numbered diagnostic code | `debug_codes.py` |
 | Decky panel | the Quick Access Menu plugin UI, `dist/index.js` | `dist/index.js` |
 | Manager | `bin/touch_master_manager.py`, the standalone window and CLI | `bin/touch_master_manager.py` |

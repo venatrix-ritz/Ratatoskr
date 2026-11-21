@@ -54,7 +54,7 @@ from engine import (
     UInputBridge,
     raw_to_screen,
 )
-from keyboard_layout import Key, KeyboardLayout
+from keyboard_layout import Key, KeyboardLayout, preview_rect
 import key_render
 import keyboard_settings
 import gleipnir_view
@@ -836,9 +836,10 @@ class ThorApp:
             self.mods.key_typed()
             self.active_key_press = key.code
             self.active_key_tid = tid
+            # Before held_key: a draw in between must not show the previous key's label in the preview bubble
+            self.last_key_label = key.shift_label if self.mods.active("shift") else key.label
             self.held_key = key
             self.held_key_tid = tid
-            self.last_key_label = key.shift_label if self.mods.active("shift") else key.label
             self.bridge.tap_key(key.code)
             self._start_key_repeat(key)
         GLib.idle_add(self.drawing_area.queue_draw)
@@ -1479,6 +1480,28 @@ class ThorApp:
                         label = k.label
 
                     key_render.draw_plain_label(cr, k, label, is_active, shift_on and k.is_letter)
+
+        self._draw_key_preview(cr)
+
+    PREVIEW_FONT_PX = 64.0
+
+    def _draw_key_preview(self, cr: cairo.Context) -> None:
+        """The character the held key typed, in a bubble above the finger; drawn last so it covers whatever is there.
+        No redraw of its own: the press and the end of the press already redraw."""
+        key, label = self.held_key, self.last_key_label
+        if key is None or not key.is_character:
+            return
+        x, y, w, h = preview_rect(key, SCREEN_WIDTH, SCREEN_HEIGHT)
+        self._round_rect(cr, x, y, w, h, 14.0)
+        cr.set_source_rgb(*theme.KEY_FILL_ACTIVE)
+        cr.fill_preserve()
+        cr.set_source_rgb(*theme.KEY_BORDER_ACTIVE)
+        cr.set_line_width(1.5)
+        cr.stroke()
+        cr.new_path()
+        key_render._fit(cr, label, self.PREVIEW_FONT_PX, w - 2 * key_render.MARGIN_X)
+        cr.set_source_rgb(*theme.TEXT_ACTIVE)
+        key_render._show_centered(cr, label, x + w / 2.0, y + h / 2.0)
 
     def _draw_quick_settings(self, cr: cairo.Context) -> None:
         """Render full Quick Settings dashboard cards."""
