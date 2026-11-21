@@ -65,6 +65,7 @@ class DebugCode(IntEnum):
     VOLUME_UPDATED = 602
     DIM_MIRROR = 610            # bottom screen follows Steam's idle-dim timer
     PS_MODE = 620               # PS mode: Chiaki-NG focus changes and PS touchpad events
+    HAPTICS = 630               # haptics motor: missing, unopenable, or a pulse the driver refused
 
     # 7xx: Hardware Controls Errors
     ERR_BACKLIGHT_SYSFS = 701
@@ -114,6 +115,7 @@ CODE_DESCRIPTIONS: dict[DebugCode, str] = {
     DebugCode.VOLUME_UPDATED: "System volume level adjusted",
     DebugCode.DIM_MIRROR: "Bottom screen idle-dim mirror event",
     DebugCode.PS_MODE: "PS mode (Chiaki-NG touchpad and buttons) event",
+    DebugCode.HAPTICS: "Haptics (tap and button feedback) event",
     DebugCode.ERR_BACKLIGHT_SYSFS: "Backlight sysfs write failure",
     DebugCode.ERR_PIPEWIRE_WPCTL: "PipeWire wpctl execution failure",
 }

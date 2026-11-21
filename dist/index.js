@@ -109,6 +109,8 @@ function Content() {
         gleipnir_available: false,
         ps_mode_auto: true,
         ps_focused: false,
+        haptics: true,
+        haptics_available: false,
         pen_mode: "off",
         debug_hud: false,
         telemetry: {},
@@ -320,6 +322,16 @@ function Content() {
                             checked: status.enabled,
                             disabled: loading || inFlight,
                             onChange: handleToggleEnabled
+                        })
+                    }),
+                    status.enabled && SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.ToggleField, {
+                            label: "Haptic feedback",
+                            description: status.haptics_available
+                                ? "A short buzz for every tap click, key, on-screen button and PS button"
+                                : "A short buzz for every tap click, key and button (the haptics motor was not found)",
+                            checked: status.haptics ?? true,
+                            onChange: (val) => updateSetting("haptics", val)
                         })
                     }),
                     status.enabled && SP_JSX.jsx(DFL.PanelSectionRow, {

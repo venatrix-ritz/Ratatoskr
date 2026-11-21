@@ -137,6 +137,7 @@ class UInputBridge:
         self.mouse_fd = -1
         self.kb_fd = -1
         self.ps_fd = -1  # PS mode's virtual touchscreen; -1 if it could not be made (the rest still works)
+        self.on_click = None  # called for every gesture click (tap_button): the driver buzzes the haptics motor
         self.ps_touch_down = False
         self._ps_tracking_id = 0
         self.held_buttons: set[int] = set()
@@ -392,6 +393,8 @@ class UInputBridge:
 
     def tap_button(self, button_code: int, delay_s: float = 0.02) -> None:
         """Asynchronously emit a button click without blocking the caller."""
+        if self.on_click is not None:
+            self.on_click()
         def _do_click():
             self.mouse_button(button_code, True)
             time.sleep(delay_s)

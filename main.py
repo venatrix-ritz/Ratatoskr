@@ -131,6 +131,7 @@ def _default_config() -> dict:
         "gleipnir_ribbon": False,
         "ps_mode_auto": True,
         "ps_touch_rotation": 0,
+        "haptics": True,
         "debug_hud": False,
     }
 
@@ -281,6 +282,8 @@ class Plugin:
                     "gleipnir_available": res.get("gleipnir_available", False),
                     "ps_mode_auto": cfg.get("ps_mode_auto", True),
                     "ps_focused": res.get("ps_focused", False),
+                    "haptics": cfg.get("haptics", True),
+                    "haptics_available": res.get("haptics_available", False),
                     "bottom_dimmed": res.get("bottom_dimmed", False),
                     "pen_mode": res.get("pen_mode", "off"),
                     "cursor_stay_visible": res.get("cursor_stay_visible", False),

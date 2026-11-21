@@ -83,6 +83,9 @@ def make(mode="keyboard"):
     app.drawing_area = types.SimpleNamespace(queue_draw=lambda: None)
     app.save_config = lambda: None
     app.ps = ps_pad.PsPad(app.bridge, ps_pad.PsLayout(thor_app.HEADER_HEIGHT, thor_app.SCREEN_WIDTH, thor_app.SCREEN_HEIGHT))
+    app.buzzes = []
+    app.haptics = types.SimpleNamespace(pulse=lambda: app.buzzes.append(1), enabled=True, available=True)
+    app.ps.on_press = app._haptic
     app.ps_cfg, app._ps_return_mode = {"ps_mode_auto": True, "ps_touch_rotation": 0}, "trackpad"
     app.ps_focus = types.SimpleNamespace(focused_app=None)
     app.logger = types.SimpleNamespace(log=lambda *a: None)
@@ -279,6 +282,24 @@ def test_a_pad_tap_clicks_the_touchpad_then_lifts():
     check("touch, nudge, then T down with the touch still down", app.bridge.ev == [("ps_touch",), ("ps_touch",), (20, "down")], app.bridge.ev)
     time.sleep(ps_pad.TAP_CLICK_S + 0.1)
     check("then T up and the lift", app.bridge.ev[3:] == [(20, "up"), ("ps_lift",)], app.bridge.ev)
+
+
+def test_keys_buttons_and_ps_buttons_buzz():
+    app = make("keyboard")
+    tap(app, "a", 1)
+    check("a key buzzes once", app.buzzes == [1], app.buzzes)
+    x = next(bx + bw / 2 for k, bx, bw in thor_app.HEADER_BUTTONS if k == "hud")
+    thor_app.ThorApp._handle_touch_down(app, 2, x, thor_app.HEADER_BUTTON_Y + 5, 0.0)
+    thor_app.ThorApp._handle_touch_up(app, 2, 0.1)
+    check("a header button buzzes", app.buzzes == [1, 1], app.buzzes)
+    app._on_chiaki_focus(True)
+    thor_app.ThorApp._handle_touch_down(app, 3, *ps_point(app, "options"), 0.0)
+    thor_app.ThorApp._handle_touch_up(app, 3, 0.1)
+    check("a PS button buzzes", app.buzzes == [1, 1, 1], app.buzzes)
+    app.mode = "trackpad"
+    app._touch_owner.clear()
+    thor_app.ThorApp._handle_touch_down(app, 4, 600.0, 700.0, 0.0)
+    check("a trackpad touch does not buzz by itself (the engine buzzes its clicks)", app.buzzes == [1, 1, 1], app.buzzes)
 
 
 def test_focus_loss_mid_touch_lifts_it_and_the_late_lift_does_nothing():

@@ -182,6 +182,33 @@ def test_a_new_touch_during_a_tap_click_finishes_the_tap_first():
     assert pad.bridge.ev[-1][0] == "touch" and pad.finger == 2
 
 
+def test_buttons_and_pad_clicks_buzz_but_plain_touches_do_not():
+    pad = make()
+    buzz = []
+    pad.on_press = lambda: buzz.append(1)
+    x, y = centre(pad, "pad")
+    pad.touch_down(1, x, y)
+    pad.touch_move(1, x + 100, y)
+    pad.touch_up(1)
+    assert buzz == [], "a swipe does not buzz"
+    pad.touch_down(2, x, y)
+    pad.touch_up(2)
+    assert buzz == [1], "a tap click buzzes"
+    live(pad)[-1].fire()
+    pad.touch_down(3, x, y)
+    live(pad)[0].fire()
+    assert buzz == [1, 1], "a long press buzzes when the click goes down"
+    pad.touch_up(3)
+    for name in ("ps", "mic"):
+        pad.touch_down(9, *centre(pad, name))
+        pad.touch_up(9)
+    assert buzz == [1, 1, 1, 1]
+    off = make(active=False)
+    off.on_press = lambda: buzz.append(1)
+    off.touch_down(1, *centre(off, "ps"))
+    assert buzz == [1, 1, 1, 1], "nothing without focus"
+
+
 def test_losing_focus_during_a_tap_click_releases_it():
     pad = make()
     pad.touch_down(1, *centre(pad, "pad"))

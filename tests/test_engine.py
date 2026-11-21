@@ -764,6 +764,19 @@ def test_a_new_glide_stops_the_old_one_for_good():
     g.glide_stop.set()
 
 
+def test_every_gesture_click_calls_on_click():
+    b = E.UInputBridge.__new__(E.UInputBridge)
+    clicks, presses = [], []
+    b.on_click = lambda: clicks.append(1)
+    b.mouse_button = lambda code, down: presses.append((code, down))
+    b.tap_button(E.BTN_LEFT, 0)
+    for _ in range(100):
+        if len(presses) == 2:
+            break
+        time.sleep(0.01)
+    assert clicks == [1] and presses == [(E.BTN_LEFT, True), (E.BTN_LEFT, False)], (clicks, presses)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
