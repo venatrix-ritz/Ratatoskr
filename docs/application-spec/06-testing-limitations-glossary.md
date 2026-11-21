@@ -64,13 +64,13 @@ bash -n scripts/deploy.sh
 5. **Narrow sudo rule incomplete** (see [05](05-configuration-requirements.md#backlight-write-access)).
 6. **Keyboard.** There is no Caps Lock key; Caps is a double-tapped Shift (`bin/keyboard_layout.py:94-192`). The keyboard
    has no number pad. Layout is QWERTY only. Modifier state is kept only while the keyboard is shown.
-7. **Hide is not saved.** A restart shows the UI (`bin/thor_app.py:123`).
+7. **Hide is not saved.** A restart shows the UI (`bin/thor_app.py:141`).
 8. **Manager is partial.** It cannot select Split, Pen, Hide, keyboard timings, or Gleipnir (`bin/touch_master_manager.py`).
    Its sensitivity range (0.2 to 3.0) differs from the panel (0.5 to 3.5) and the driver (0.2 to 5.0).
 9. **Brightness failures are not reported for the top panel.** `set_top_brightness` ignores the result of its write
    (`bin/system_stats.py:403-409`); only the bottom path records `last_write_ok` (`:415-426`).
 10. **Gleipnir view depends on a separate program** and reads its output format (`bin/gleipnir_view.py:30-47`).
-11. **Single digitizer.** Only the first node whose name contains "bottom" and "touchscreen" is used (`bin/thor_app.py:699-708`).
+11. **Single digitizer.** Only the first node whose name contains "bottom" and "touchscreen" is used (`bin/thor_app.py:718-727`).
 12. **Uninstall does not hand the bottom screen back.** Stopping Ratatoskr from the tray, the manager or the Decky toggle
     starts Armada's session again (W-03). The manual uninstall in `docs/installation.md` disables the service and removes
     files, and it tells the user to run `enable --now armada-bottom-screen.service` afterwards.
@@ -81,7 +81,7 @@ These are defects or gaps found by reading the code. None has been reproduced in
 
 | ID | Defect | Where | Effect if hit | Status |
 |---|---|---|---|---|
-| K-01 | `DebugCode.ERR_SERVICE_START` and `ERR_SERVICE_STOP` are used but not defined in the enum | `main.py:201`, `main.py:237`, `bin/thor_app.py:528`; `debug_codes.py:12-119` | Reading an undefined `IntEnum` attribute raises `AttributeError`. In `main.py` that can stop `_main` or the `_run_systemctl` failure path. In `cleanup()` a failing step raises inside its `except` and stops the remaining cleanup steps | verified by grep; **not executed** |
+| K-01 | `DebugCode.ERR_SERVICE_START` and `ERR_SERVICE_STOP` are used but not defined in the enum | `main.py:201`, `main.py:237`, `bin/thor_app.py:547`; `debug_codes.py:12-119` | Reading an undefined `IntEnum` attribute raises `AttributeError`. In `main.py` that can stop `_main` or the `_run_systemctl` failure path. In `cleanup()` a failing step raises inside its `except` and stops the remaining cleanup steps | verified by grep; **not executed** |
 | K-02 | The narrow sudo rule does not allow the saved-level file, which the bottom backlight write also needs | `bin/system_stats.py:415-426`, `systemd/touch-master-backlight.sudoers:7-8` | With only the rule installed, bottom brightness writes and dims report failure and log `DBG-701` | by reading; the docs call the rule untested |
 | K-03 | Top-panel brightness write failures are not reported | `bin/system_stats.py:403-409` | A failed top write is silent | by reading |
 | K-04 | The panel and manager text describe the older Steam-delay design | see mismatch 5 | Users expect a Steam-delay dim | by reading |
@@ -90,7 +90,7 @@ These are defects or gaps found by reading the code. None has been reproduced in
 | K-07 | `bin/gleipnir_view.py:174` cites `docs/hardware/device-observed.md`, which is not in this repository | `bin/gleipnir_view.py:174` | Dangling reference in a comment | by grep |
 | K-08 | `tests/test_system_stats.py` says it also runs as `devcheck.sh` on the Thor; that script is not in the repository | `tests/test_system_stats.py` header | The on-device run described in the header cannot be reproduced from this repo | by grep |
 | K-09 | `docs/configuration.md` describes the dim mirror as reading Steam's `config.vdf` as current behaviour | `docs/configuration.md:34` | Misleading; the code reads no Steam file | by grep (no reference in code) |
-| K-10 | The IPC socket bind is not guarded. `DBG-301` is defined and never emitted | `bin/thor_app.py:969-971`, `debug_codes.py:36` | A failed bind raises out of `start()` and the driver exits without a `DBG-301` line | by reading |
+| K-10 | The IPC socket bind is not guarded. `DBG-301` is defined and never emitted | `bin/thor_app.py:991-993`, `debug_codes.py:36` | A failed bind raises out of `start()` and the driver exits without a `DBG-301` line | by reading |
 | K-11 | `DBG-701` for slider failures and `DBG-702` for volume failures are documented, but only the dim path emits `DBG-701`, and nothing emits `DBG-702` | `docs/troubleshooting.md` (the DBG-701 and DBG-702 rows), `bin/system_stats.py` (no logger), `bin/dim_mirror.py` | A slider that does nothing leaves no log line of its own | by grep |
 
 ## Documentation and code mismatches found in this review
@@ -99,15 +99,15 @@ Each item states what the existing `docs/` page says, what the code does, and wh
 `docs/` by this spec.
 
 1. **Fallback digitizer node.** `docs/architecture.md:35` says the digitizer is found by name "(fallback `/dev/input/event5`)".
-   `_find_bottom_touchscreen` returns the first match on name and `None` otherwise (`bin/thor_app.py:699-708`); there is no
-   fallback to `event5`, and the driver retries every 5 s instead (`bin/thor_app.py:551-552`).
+   `_find_bottom_touchscreen` returns the first match on name and `None` otherwise (`bin/thor_app.py:718-727`); there is no
+   fallback to `event5`, and the driver retries every 5 s instead (`bin/thor_app.py:570-571`).
 2. **Tests on deploy.** `docs/development.md` says the deploy routine runs the tests on the Thor. `scripts/deploy.sh` copies
    and restarts; it has no test step (`scripts/deploy.sh:18-73`).
 3. **Steam config as a dim input.** `docs/configuration.md:34` says the dim mirror reads `IdleBacklightDimBatterySeconds`
    and `IdleBacklightDimACSeconds` from Steam's `config.vdf`. No code reads that file or those keys (grep of the repo).
    `docs/dim-mirror.md` says the first version did that and the current one does not.
 4. **Open-button distance.** `docs/usage.md` ("Hide and Open") says to tap "within about 2 cm of the Open button (24 px around it)".
-   The code uses `OPEN_HIT_PAD = 24` px (`bin/thor_app.py:94`). The driver's own scale is about 16.5 px per mm
+   The code uses `OPEN_HIT_PAD = 24` px (`bin/thor_app.py:112`). The driver's own scale is about 16.5 px per mm
    (`bin/thor_app.py:76-77`), so 24 px is about 1.5 mm. The "2 cm" figure is not supported by the code.
 5. **Dim description in the panel and manager.** The Decky panel says the dim "dims the bottom screen after Steam's idle-dim
    delay ... and restores it on any input" (`dist/index.js:493-494`). The manager labels the switch "Dim bottom screen with
@@ -116,7 +116,7 @@ Each item states what the existing `docs/` page says, what the code does, and wh
 6. **What restores the dim.** `docs/dim-mirror.md` (step 3) says the bottom is restored "when the bottom screen is touched".
    The code restores on any input the idle tracker sees within the last second, which includes other input devices
    (`bin/dim_mirror.py:402-403`, `bin/dim_mirror.py:134-138`). The touch path is the one the driver calls `poke()` for
-   (`bin/thor_app.py:612`).
+   (`bin/thor_app.py:631`).
 7. **Name of the sudoers file.** `docs/installation.md` installs the file as `/etc/sudoers.d/92-ratatoskr-backlight`. The
    file's own install comment names `92-touch-master-backlight` (`systemd/touch-master-backlight.sudoers:6`). Both
    work, but the two should agree.
@@ -124,9 +124,9 @@ Each item states what the existing `docs/` page says, what the code does, and wh
    it omits the saved-level file that the driver writes too (defect K-02).
 9. **Architecture thread list.** `docs/architecture.md` ("Threads in the driver") lists the GTK main thread, touch reader,
    IPC server, key repeat, glide, idle tracker and dim mirror, with hardware stats sampled on a cache. The code also
-   starts a stats sampler thread (`bin/thor_app.py:465`, `bin/system_stats.py:204-219`), four writer threads
+   starts a stats sampler thread (`bin/thor_app.py:484`, `bin/system_stats.py:204-219`), four writer threads
    (`bin/system_stats.py:160-165`) and a Gleipnir thread that is started at launch and polls only while the view is on
-   (`bin/thor_app.py:471`, `:320-334`).
+   (`bin/thor_app.py:490`, `:339-353`).
 10. **Keyboard layout wording.** `README.md` calls the keyboard a "5-row thumb layout". The code lays out five rows of a
     full QWERTY-style keyboard, not a thumb layout (`bin/keyboard_layout.py:94-192`).
 11. **Decky button label.** `docs/installation.md` and the other pages say "Run Diagnostics". The panel's button reads
@@ -147,9 +147,9 @@ Each item states what the existing `docs/` page says, what the code does, and wh
 | Game Mode | Steam's game session on the top screen, run by gamescope | `bin/session_cursor.py` |
 | gamescope | the compositor for each screen session; hides the pointer after `--hide-cursor-delay` | `bin/session_cursor.py`, `bin/engine.py:93-100` |
 | Bottom screen | the 3.92-inch AMOLED panel that Ratatoskr draws on | [03](03-hardware-targets.md) |
-| Digitizer | the bottom touchscreen's input device, grabbed exclusively | `bin/thor_app.py:557-559` |
+| Digitizer | the bottom touchscreen's input device, grabbed exclusively | `bin/thor_app.py:576-578` |
 | evdev | Linux's input event interface, `/dev/input/event*` | `bin/touch_frames.py` |
-| `EVIOCGRAB` | ioctl that gives one process exclusive reads of an input device | `bin/thor_app.py:558` |
+| `EVIOCGRAB` | ioctl that gives one process exclusive reads of an input device | `bin/thor_app.py:577` |
 | uinput | Linux's interface for creating virtual input devices, `/dev/uinput` | `bin/engine.py:23` |
 | MT slot, tracking id | multitouch slot number and the id of the contact in it | `bin/touch_frames.py:19-22` |
 | `SYN_REPORT`, `SYN_DROPPED` | end-of-frame marker and the kernel's "buffer overflowed, state lost" marker | `bin/touch_frames.py:17-18` |
@@ -162,9 +162,9 @@ Each item states what the existing `docs/` page says, what the code does, and wh
 | Pen, Pen + | Pen mode; Pen + also keeps Game Mode's pointer visible | `bin/pen_mode.py` |
 | Nudge | a one-pixel out-and-back pointer move that wakes a hidden pointer | `bin/engine.py:297-305` |
 | Latched, locked | a modifier that applies to the next key only, and one that stays on | `bin/modifiers.py:1-16` |
-| Quick Controls | the settings screen with sliders and buttons | `bin/thor_app.py:1454` |
-| Ribbon | the status row under the header | `bin/thor_app.py:1195` |
-| Hide, Open | blank the UI except an Open button, and the button that brings it back | `bin/thor_app.py:354-364` |
+| Quick Controls | the settings screen with sliders and buttons | `bin/thor_app.py:1478` |
+| Ribbon | the status row under the header | `bin/thor_app.py:1219` |
+| Hide, Open | blank the UI except an Open button, and the button that brings it back | `bin/thor_app.py:373-383` |
 | Idle veil | the black overlay that dims lit pixels after 30 s without touch | `bin/burn_in.py:66-74` |
 | Orbit | the 1.5 px circular shift of the whole UI for burn-in | `bin/burn_in.py:46-52` |
 | Steam idle dim | Steam's ramp of the top backlight when the screen is idle; the thing Ratatoskr mirrors | `docs/dim-mirror.md` |
@@ -173,7 +173,7 @@ Each item states what the existing `docs/` page says, what the code does, and wh
 | Saved level | Armada's stored bottom brightness, re-applied every 2 s by its root service | `bin/dim_mirror.py:49-51` |
 | Recovery file | the pre-dim bottom level, kept until restored | `bin/dim_mirror.py:52-53` |
 | Gleipnir | a separate charge-limiting project; Ratatoskr shows its status only | `bin/gleipnir_view.py` |
-| IPC socket | the UNIX socket the Decky backend and the manager talk to | `bin/thor_app.py:962-980` |
+| IPC socket | the UNIX socket the Decky backend and the manager talk to | `bin/thor_app.py:984-1002` |
 | `DBG-nnn` | a numbered diagnostic code | `debug_codes.py` |
 | Decky panel | the Quick Access Menu plugin UI, `dist/index.js` | `dist/index.js` |
 | Manager | `bin/touch_master_manager.py`, the standalone window and CLI | `bin/touch_master_manager.py` |

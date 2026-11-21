@@ -83,11 +83,29 @@ HEADER_HEIGHT = HEADER_BUTTONS_H + STATUS_RIBBON_H
 SPLIT_Y = 500.0  # split mode: trackpad above, keyboard below
 MODES = ("trackpad", "split", "keyboard", "settings", "ps")  # ps: PS5 touchpad + buttons for Chiaki-NG (ps_pad.py)
 
-# Header buttons: (key, x, width). One table for drawing and for hit-testing.
-HEADER_BUTTONS = (
-    ("trackpad", 12, 138), ("split", 158, 100), ("keyboard", 266, 138), ("settings", 412, 176),
-    ("hud", 596, 78), ("left", 682, 130), ("right", 820, 130), ("pen", 958, 150), ("hide", 1116, 112),
+# Header buttons: (key, width, width while Chiaki-NG has focus), 0 = not shown. One table for drawing and for
+# hit-testing; header_layout() places the buttons 8 px apart from x = 12. While Chiaki-NG has focus a PS button joins the
+# mode buttons so PS mode is one tap away after leaving it; Pen gives up most of the room and Hide keeps its place.
+HEADER_TABLE = (
+    ("trackpad", 138, 131), ("split", 100, 92), ("keyboard", 138, 131), ("ps", 0, 72), ("settings", 176, 176),
+    ("hud", 78, 70), ("left", 130, 130), ("right", 130, 130), ("pen", 150, 100), ("hide", 112, 112),
 )
+HEADER_X0, HEADER_GAP = 12, 8
+
+
+def header_layout(ps_focused: bool = False) -> tuple:
+    """(key, x, width) of each header button shown."""
+    rows, x = [], HEADER_X0
+    for key, width, ps_width in HEADER_TABLE:
+        w = ps_width if ps_focused else width
+        if w:
+            rows.append((key, x, w))
+            x += w + HEADER_GAP
+    return tuple(rows)
+
+
+HEADER_BUTTONS = header_layout(False)
+HEADER_BUTTONS_PS = header_layout(True)
 HEADER_BUTTON_Y, HEADER_BUTTON_H = 8.0, 64.0
 # Hidden UI: only this button is drawn (where the Hide button was) and touches within OPEN_HIT_PAD of it open the UI again.
 OPEN_BUTTON = (1116.0, HEADER_BUTTON_Y, 112.0, HEADER_BUTTON_H)
@@ -305,9 +323,10 @@ class ThorApp:
         """Focus watcher thread: Chiaki-NG gained or lost focus in Game Mode."""
         with self.input_lock:
             self.ps.set_active(focused)  # losing focus lifts the touch and every held PS key
-            if focused and self.ps_cfg["ps_mode_auto"] and self.mode != "ps":
-                self._ps_return_mode = self.mode
-                self.set_mode("ps")
+            if focused and self.mode != "ps":
+                self._ps_return_mode = self.mode  # also with auto off: the header's PS button may enter PS mode
+                if self.ps_cfg["ps_mode_auto"]:
+                    self.set_mode("ps")
             elif not focused and self.mode == "ps":
                 self.set_mode(self._ps_return_mode)
             mode = self.mode
@@ -852,9 +871,12 @@ class ThorApp:
             if self.show_debug_hud:
                 GLib.idle_add(self.drawing_area.queue_draw)
 
+    def _header_buttons(self) -> tuple:
+        return HEADER_BUTTONS_PS if self.ps.active else HEADER_BUTTONS
+
     def _handle_header_touch(self, tid: int, x: float, y: float, down: bool) -> None:
-        key = next((k for k, bx, bw in HEADER_BUTTONS if bx <= x <= bx + bw), None)
-        if key in ("trackpad", "split", "keyboard", "settings"):
+        key = next((k for k, bx, bw in self._header_buttons() if bx <= x <= bx + bw), None)
+        if key in ("trackpad", "split", "keyboard", "settings", "ps"):  # "ps" is only shown while Chiaki-NG has focus
             self.set_mode(key, restart_hint=False)
         elif key == "hide":
             self.set_ui_hidden(True)
@@ -1172,7 +1194,7 @@ class ThorApp:
         cr.stroke()
         cr.new_path()
 
-        for key, x, w in HEADER_BUTTONS:
+        for key, x, w in self._header_buttons():
             label, active, accent = self._header_button_look(key)
             self._draw_button(cr, x, HEADER_BUTTON_Y, w, HEADER_BUTTON_H, label, active, accent_color=accent)
 
@@ -1182,6 +1204,8 @@ class ThorApp:
             return key.capitalize(), self.mode == key, theme.BTN_FILL_ACTIVE
         if key == "settings":
             return "Quick Controls", self.mode == "settings", theme.BTN_FILL_ACTIVE
+        if key == "ps":
+            return "PS", self.mode == "ps", theme.BTN_FILL_ACTIVE
         if key == "hide":
             return "Hide", False, theme.BTN_ACCENT_DEFAULT
         if key == "hud":

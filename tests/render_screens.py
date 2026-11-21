@@ -55,7 +55,8 @@ class Bridge:
         return lambda *a, **k: None
 
 
-def make_app(mode, hud=False, shift=False, gleipnir=None, hidden=False, ps_focused=True, ps_held=(), ps_clicking=False):
+def make_app(mode, hud=False, shift=False, gleipnir=None, hidden=False, ps_focused=None, ps_held=(), ps_clicking=False):
+    ps_focused = mode == "ps" if ps_focused is None else ps_focused
     app = thor_app.ThorApp.__new__(thor_app.ThorApp)
     app.mode, app.show_debug_hud, app.ui_hidden = mode, hud, hidden
     app.frame_count, app.last_fps_calc, app.fps = 0, time.time(), 60.0
@@ -97,6 +98,7 @@ if __name__ == "__main__":
         "trackpad-hud": make_app("trackpad", hud=True), "hidden": make_app("trackpad", hidden=True),
         "settings-gleipnir-charging": make_app("settings", gleipnir={**GLEIPNIR, "current_ua": 2400000, "usb_online": 1, "capacity": 74}),
         "ps": make_app("ps"), "ps-held": make_app("ps", ps_held=("ps", "options"), ps_clicking=True), "ps-waiting": make_app("ps", ps_focused=False),
+        "trackpad-chiaki": make_app("trackpad", ps_focused=True),
         "trackpad-gleipnir-held": make_app("trackpad", gleipnir={**GLEIPNIR, "limit": 0, "capacity": 80, "usb_online": 1, "current_ua": 0}),
     }
     for name, app in shots.items():

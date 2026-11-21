@@ -8,7 +8,7 @@
 | Decky backend `main.py` | Decky Loader, which calls `_main` on load | root (Decky) | as long as the plugin is loaded | `main.py:196-217`; `scripts/deploy.sh:15` (root-owned folder) |
 | Decky panel `dist/index.js` | Decky Loader, when the Steam Quick Access panel is open | Steam UI | while the panel is shown | `dist/index.js:90`, `:619-640` |
 | Standalone manager `bin/touch_master_manager.py` | the user, a desktop entry, or the driver's tray menu | user | while its window is open, or for one CLI command | `bin/touch_master_manager.py:423-463` |
-| Tray stop helper | `systemd-run --user --collect --quiet <python> touch_master_manager.py --stop` | user, transient unit | one command | `bin/tray_actions.py:11-12`, `bin/thor_app.py:429-440` |
+| Tray stop helper | `systemd-run --user --collect --quiet <python> touch_master_manager.py --stop` | user, transient unit | one command | `bin/tray_actions.py:11-12`, `bin/thor_app.py:448-459` |
 | Short-lived subprocesses | the driver and the backend | user, or root for `sudo` | per call | see the table below |
 
 Short-lived subprocesses and their timeouts:
@@ -22,7 +22,7 @@ Short-lived subprocesses and their timeouts:
 | `xprop -display :0 -root GAMESCOPE_FOCUSED_APP` | `ps_pad.read_focused_app` (Chiaki-NG focus watcher) | 1.0 s | `bin/ps_pad.py:274-282` |
 | `systemctl --user ...` and `systemctl --machine=armada@.host --user ...` | `main.py` `_run_systemctl` | 5.0 s, tried in that order | `main.py:216-240` |
 | `systemctl --user ...` | manager | 2.0 to 3.0 s | `bin/touch_master_manager.py:80-119` |
-| `systemd-run --user ... touch_master_manager.py --stop` | tray | none (`Popen`) | `bin/thor_app.py:435-438` |
+| `systemd-run --user ... touch_master_manager.py --stop` | tray | none (`Popen`) | `bin/thor_app.py:454-457` |
 
 ## Modules
 
@@ -105,17 +105,17 @@ Arrows are the calls in the code. `SVC` stands for `touch-master.service`; the d
 
 | Thread | Created by | What it does | Period or wait | Source |
 |---|---|---|---|---|
-| GTK main | `Gtk.main()` in `main()` | drawing, GLib timers, idle callbacks, tray, signal handlers | event driven | `bin/thor_app.py:1696-1713` |
-| Touch reader | `_start_touch_reader` | `select` on the grabbed node, then reads frames and calls `_dispatch_frame` under `input_lock` | `select` timeout 0.1 s; expires stale contacts when idle | `bin/thor_app.py:575-625` |
-| IPC server | `_start_ipc_server` | accepts one connection at a time, reads one request, replies, closes | accept timeout 0.5 s; 2 s per request | `bin/thor_app.py:962-1091` |
+| GTK main | `Gtk.main()` in `main()` | drawing, GLib timers, idle callbacks, tray, signal handlers | event driven | `bin/thor_app.py:1720-1737` |
+| Touch reader | `_start_touch_reader` | `select` on the grabbed node, then reads frames and calls `_dispatch_frame` under `input_lock` | `select` timeout 0.1 s; expires stale contacts when idle | `bin/thor_app.py:594-644` |
+| IPC server | `_start_ipc_server` | accepts one connection at a time, reads one request, replies, closes | accept timeout 0.5 s; 2 s per request | `bin/thor_app.py:984-1113` |
 | Stats sampler | `HardwareStats.start_sampler` | samples CPU, GPU, RAM, battery, volume, backlights | every 1.0 s | `bin/system_stats.py:204-219` |
 | Write threads (4) | `_LatestWriter.submit`, the first time each one is used | write top backlight, bottom backlight, volume, mute | each write, then wait for the next value | `bin/system_stats.py:87-136`, `:160-165` |
 | Idle tracker | `IdleTracker.start` | reads input events from every input device except the touchscreen; rescans the device list | `select` up to 1.0 s; rescan every 5.0 s | `bin/dim_mirror.py:140-216` |
 | Dim mirror | `DimMirror.start` | runs the top follower and applies dims and restores; retries recovery | every 0.25 s | `bin/dim_mirror.py:247-250`, `:376-404` |
-| Gleipnir view | `threading.Thread` in `start()` | reads Gleipnir status every 10 s while the view is on; the journal once a minute | `Event.wait(10.0)` | `bin/thor_app.py:320-334`, `:471` |
-| Chiaki-NG focus | `FocusWatcher.start` in `start()` | reads the focused app id; rescans `/proc` for `chiaki` processes when it changes or every 5 s; calls `_on_chiaki_focus` on a change | every 1.0 s | `bin/ps_pad.py:311-356`, `bin/thor_app.py:304-318`, `:472` |
+| Gleipnir view | `threading.Thread` in `start()` | reads Gleipnir status every 10 s while the view is on; the journal once a minute | `Event.wait(10.0)` | `bin/thor_app.py:339-353`, `:490` |
+| Chiaki-NG focus | `FocusWatcher.start` in `start()` | reads the focused app id; rescans `/proc` for `chiaki` processes when it changes or every 5 s; calls `_on_chiaki_focus` on a change | every 1.0 s | `bin/ps_pad.py:311-356`, `bin/thor_app.py:322-337`, `:491` |
 | PS pad click timers | `threading.Timer` in `PsPad.touch_down` and `touch_up` | the long press (holds the pad click) and a tap's click release; both take `input_lock` and drop out if they were replaced | `long_press_delay_ms`; 50 ms | `bin/ps_pad.py:173-187`, `:208-212`, `:238-243` |
-| Key repeat | `_start_key_repeat` per held key | taps the key after the delay and then at the interval | `Event.wait` | `bin/thor_app.py:442-462` |
+| Key repeat | `_start_key_repeat` per held key | taps the key after the delay and then at the interval | `Event.wait` | `bin/thor_app.py:461-481` |
 | Glide | `_start_glide` per flick | emits relative motion while speed is above 12 px/s | 16 ms | `bin/engine.py:915-945` |
 | Long-press timer | `threading.Timer` in `touch_down` | fires the right-click once | `long_press_delay_ms` | `bin/engine.py:716-720` |
 | Button tap | `tap_button` per tap | sends press, sleeps 20 ms, sends release | 20 ms | `bin/engine.py:393-400` |
@@ -124,7 +124,7 @@ Arrows are the calls in the code. `SVC` stands for `touch-master.service`; the d
 
 | Lock | Protects | Taken by | Source |
 |---|---|---|---|
-| `ThorApp.input_lock` (re-entrant) | gesture state, keyboard and modifier state, mode and settings changes | touch reader around each batch; `set_mode`, `set_ui_hidden`, `set_pen_mode`, IPC `set_settings`, `_on_chiaki_focus` | `bin/thor_app.py:160`, `:267`, `:339`, `:357`, `:590-617`, `:1034` |
+| `ThorApp.input_lock` (re-entrant) | gesture state, keyboard and modifier state, mode and settings changes | touch reader around each batch; `set_mode`, `set_ui_hidden`, `set_pen_mode`, IPC `set_settings`, `_on_chiaki_focus` | `bin/thor_app.py:178`, `:285`, `:358`, `:376`, `:609-636`, `:1056` |
 | `UInputBridge.lock` (re-entrant) | file descriptors and held-button and held-key sets, and the telemetry counters | every emit call; `release_all` holds it while it calls `mouse_button` and `key` | `bin/engine.py:136`, `:402-407` |
 | `HardwareStats._lock` | cached data and optimistic values | `get_stats`, `_refresh`, `_show` | `bin/system_stats.py:155`, `:181-202` |
 | `HardwareStats._sample_lock` | one sample at a time when the sampler is off | `_refresh` | `bin/system_stats.py:156`, `:197-202` |
@@ -132,14 +132,14 @@ Arrows are the calls in the code. `SVC` stands for `touch-master.service`; the d
 | `DimMirror._stop` (event) | ends the dim loop and any fade | `stop`, the loop, the fade | `bin/dim_mirror.py:234`, `:252-259`, `:341` |
 
 The modifier state (`ModifierState`) has no lock of its own. Its callers hold `input_lock`: the touch reader and the IPC
-`set_mode` path both do (`bin/thor_app.py:590-617`, `:339-351`). **Unverified** that no other path calls it without the lock.
+`set_mode` path both do (`bin/thor_app.py:609-636`, `:358-370`). **Unverified** that no other path calls it without the lock.
 
 `IdleTracker` writes `_last` from its own thread and reads it from others (`poke`, `idle_seconds`). Each is a single float
 assignment or read, so no lock is taken (`bin/dim_mirror.py:134-138`).
 
 ## Start-up and shutdown order
 
-Start (`ThorApp.start`, `bin/thor_app.py:464-476`):
+Start (`ThorApp.start`, `bin/thor_app.py:483-495`):
 1. stats sampler starts (one synchronous sample first);
 2. the cursor status is read and `wake_pointer` is set;
 3. touch reader starts (or schedules a retry);
@@ -148,7 +148,7 @@ Start (`ThorApp.start`, `bin/thor_app.py:464-476`):
 6. window shows;
 7. the one-second GLib timer for the ribbon starts.
 
-Shutdown (`ThorApp.cleanup`, `bin/thor_app.py:515-542`): dim restore (waits up to 2 s for the fade thread), idle tracker
+Shutdown (`ThorApp.cleanup`, `bin/thor_app.py:534-561`): dim restore (waits up to 2 s for the fade thread), idle tracker
 stop, sampler stop, key repeat stop, focus watcher stop and PS pad release, then the stop flags of the touch reader, Gleipnir and IPC; socket file removed,
 touchscreen released, virtual devices closed. Each step is wrapped so one failure does not stop the rest
 ([05](05-error-handling-os-constraints.md#shutdown)).
@@ -157,5 +157,5 @@ touchscreen released, virtual devices closed. Each step is wrapped so one failur
 
 The driver has one config dictionary per concern (`mirror_cfg`, `keyboard_cfg`, `gleipnir_cfg`, the gesture engine's
 attributes, `mode`, `pen_mode`, `show_debug_hud`). `save_config` merges them into the file's current content
-(`bin/thor_app.py:237-261`). The Decky backend and the manager keep no dictionary in memory: each call reads the file,
+(`bin/thor_app.py:255-279`). The Decky backend and the manager keep no dictionary in memory: each call reads the file,
 changes what it needs, and writes it back (`main.py:139-192`, `bin/touch_master_manager.py:58-73`).
