@@ -19,6 +19,7 @@ from engine import TouchGestureProcessor  # noqa: E402
 from keyboard_layout import KeyboardLayout  # noqa: E402
 from modifiers import ModifierState  # noqa: E402
 from burn_in import BurnInProtector  # noqa: E402
+import ps_pad  # noqa: E402
 
 STATS = {
     "bat_cap": 80, "bat_status": "Charging", "bat_watts": 12.4, "cpu_load": 23, "cpu_temp": 61, "cpu_ghz": 2.3,
@@ -54,7 +55,7 @@ class Bridge:
         return lambda *a, **k: None
 
 
-def make_app(mode, hud=False, shift=False, gleipnir=None, hidden=False):
+def make_app(mode, hud=False, shift=False, gleipnir=None, hidden=False, ps_focused=True, ps_held=()):
     app = thor_app.ThorApp.__new__(thor_app.ThorApp)
     app.mode, app.show_debug_hud, app.ui_hidden = mode, hud, hidden
     app.frame_count, app.last_fps_calc, app.fps = 0, time.time(), 60.0
@@ -68,6 +69,9 @@ def make_app(mode, hud=False, shift=False, gleipnir=None, hidden=False):
     app.gleipnir_status = gleipnir
     app.gleipnir_batt = dict(BATT_CHARGING if gleipnir and gleipnir.get("current_ua", 0) > 0 else BATT)
     app.gleipnir_events = [("11:24", "CLAMP at 80%"), ("15:18", "RELEASE (charger unplugged)")]
+    app.ps = ps_pad.PsPad(app.bridge, ps_pad.PsLayout(thor_app.HEADER_HEIGHT, thor_app.SCREEN_WIDTH, thor_app.SCREEN_HEIGHT))
+    app.ps.active = ps_focused
+    app.ps.button_tids = {i: name for i, name in enumerate(ps_held)}
     app.update_mode_bounds()
     if shift:
         app.mods.press("shift", 1, 0.0, 0.35)
@@ -91,6 +95,7 @@ if __name__ == "__main__":
         "keyboard-shift": make_app("keyboard", shift=True), "settings": make_app("settings"),
         "trackpad-hud": make_app("trackpad", hud=True), "hidden": make_app("trackpad", hidden=True),
         "settings-gleipnir-charging": make_app("settings", gleipnir={**GLEIPNIR, "current_ua": 2400000, "usb_online": 1, "capacity": 74}),
+        "ps": make_app("ps"), "ps-held": make_app("ps", ps_held=("ps", "click")), "ps-waiting": make_app("ps", ps_focused=False),
         "trackpad-gleipnir-held": make_app("trackpad", gleipnir={**GLEIPNIR, "limit": 0, "capacity": 80, "usb_online": 1, "current_ua": 0}),
     }
     for name, app in shots.items():

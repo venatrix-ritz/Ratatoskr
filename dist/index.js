@@ -107,6 +107,8 @@ function Content() {
         keyboard_caps_window_ms: 350,
         gleipnir_ribbon: false,
         gleipnir_available: false,
+        ps_mode_auto: true,
+        ps_focused: false,
         pen_mode: "off",
         debug_hud: false,
         telemetry: {},
@@ -299,7 +301,8 @@ function Content() {
         { data: "trackpad", label: "Trackpad" },
         { data: "split", label: "Split (Mouse + Keyboard)" },
         { data: "keyboard", label: "Keyboard" },
-        { data: "settings", label: "Quick Settings & Controls" }
+        { data: "settings", label: "Quick Settings & Controls" },
+        { data: "ps", label: "PS Touchpad (Chiaki-NG)" }
     ];
 
     const telem = status.telemetry || {};
@@ -499,6 +502,16 @@ function Content() {
                             description: "The battery item shows the 80 % cap (held, charging toward it, or off), and Quick Controls gets a Gleipnir status line. Read-only.",
                             checked: status.gleipnir_ribbon ?? false,
                             onChange: (val) => updateSetting("gleipnir_ribbon", val)
+                        })
+                    }),
+                    SP_JSX.jsx(DFL.PanelSectionRow, {
+                        children: SP_JSX.jsx(DFL.ToggleField, {
+                            label: "PS touchpad while Chiaki-NG has focus",
+                            description: status.ps_focused
+                                ? "Chiaki-NG has focus: the bottom screen is the PS5 touchpad with Create, PS, Options, Pad Click and Mic"
+                                : "Switches the bottom screen to the PS5 touchpad and PS buttons while Chiaki-NG streams, and back afterwards",
+                            checked: status.ps_mode_auto ?? true,
+                            onChange: (val) => updateSetting("ps_mode_auto", val)
                         })
                     })
                 ]

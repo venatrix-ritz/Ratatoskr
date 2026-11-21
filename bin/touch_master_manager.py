@@ -49,6 +49,8 @@ DEFAULT_CONFIG = {
     "keyboard_repeat_interval_ms": 60,
     "keyboard_caps_window_ms": 350,
     "gleipnir_ribbon": False,
+    "ps_mode_auto": True,
+    "ps_touch_rotation": 0,
     "debug_hud": False,
 }
 

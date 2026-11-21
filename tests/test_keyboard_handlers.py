@@ -21,6 +21,7 @@ except Exception as err:  # no GTK / cairo here
 import threading  # noqa: E402
 
 import keyboard_settings  # noqa: E402
+import ps_pad  # noqa: E402
 from keyboard_layout import KeyboardLayout  # noqa: E402
 from modifiers import ModifierState  # noqa: E402
 from burn_in import BurnInProtector  # noqa: E402
@@ -48,6 +49,12 @@ class Bridge:
     def mouse_button(self, *a):
         pass
 
+    def ps_touch(self, x, y):
+        self.ev.append(("ps_touch",))
+
+    def ps_touch_up(self):
+        self.ev.append(("ps_lift",))
+
 
 class Gesture:
     def __init__(self):
@@ -74,6 +81,10 @@ def make(mode="keyboard"):
     app._start_key_repeat = lambda key: None
     app.drawing_area = types.SimpleNamespace(queue_draw=lambda: None)
     app.save_config = lambda: None
+    app.ps = ps_pad.PsPad(app.bridge, ps_pad.PsLayout(thor_app.HEADER_HEIGHT, thor_app.SCREEN_WIDTH, thor_app.SCREEN_HEIGHT))
+    app.ps_cfg, app._ps_return_mode = {"ps_mode_auto": True, "ps_touch_rotation": 0}, "trackpad"
+    app.ps_focus = types.SimpleNamespace(focused_app=None)
+    app.logger = types.SimpleNamespace(log=lambda *a: None)
     app.update_mode_bounds()
     return app
 
@@ -189,6 +200,93 @@ def test_open_button_brings_the_ui_back():
     check("the UI is back", not app.ui_hidden)
     check("the Open touch did not reach the pointer", app.gesture.calls == [], app.gesture.calls)
     check("the keyboard is where it was", app._owner_at(600.0, 800.0) == "keyboard")
+
+
+def ps_point(app, name):
+    lay = app.ps.layout
+    if name == "pad":
+        return lay.pad_x + lay.pad_w / 2, lay.pad_y + lay.pad_h / 2
+    _n, _l, bx, bw = next(b for b in lay.buttons if b[0] == name)
+    return bx + bw / 2, lay.button_y + lay.button_h / 2
+
+
+def test_chiaki_focus_switches_to_ps_mode_and_back():
+    app = make("split")
+    app._on_chiaki_focus(True)
+    check("Chiaki focus turns PS mode on", app.mode == "ps" and app.ps.active, app.mode)
+    app._on_chiaki_focus(False)
+    check("losing focus goes back to split", app.mode == "split" and not app.ps.active, app.mode)
+
+
+def test_auto_off_keeps_the_mode():
+    app = make("trackpad")
+    app.ps_cfg["ps_mode_auto"] = False
+    app._on_chiaki_focus(True)
+    check("ps_mode_auto off: the mode stays", app.mode == "trackpad", app.mode)
+
+
+def test_ps_mode_sends_pad_touches_to_the_ps_device_not_the_pointer():
+    app = make("trackpad")
+    app._on_chiaki_focus(True)
+    x, y = ps_point(app, "pad")
+    thor_app.ThorApp._handle_touch_down(app, 1, x, y, 0.0)
+    thor_app.ThorApp._handle_touch_move(app, 1, x + 40, y, 0.05)
+    thor_app.ThorApp._handle_touch_up(app, 1, 0.1)
+    check("touch, nudge, move, lift", app.bridge.ev == [("ps_touch",)] * 3 + [("ps_lift",)], app.bridge.ev)
+    check("the pointer got nothing", app.gesture.calls == [], app.gesture.calls)
+
+
+def test_ps_buttons_send_chiaki_keys():
+    app = make("trackpad")
+    app._on_chiaki_focus(True)
+    thor_app.ThorApp._handle_touch_down(app, 2, *ps_point(app, "ps"), 0.0)
+    thor_app.ThorApp._handle_touch_up(app, 2, 0.1)
+    check("PS = Esc down, up", app.bridge.ev == [(1, "down"), (1, "up")], app.bridge.ev)
+
+
+def test_entering_ps_mode_releases_a_latched_ctrl():
+    app = make("keyboard")
+    tap(app, "Ctrl", 1)
+    app.bridge.ev.clear()
+    app._on_chiaki_focus(True)
+    thor_app.ThorApp._handle_touch_down(app, 2, *ps_point(app, "options"), 0.0)
+    check("ctrl goes up before Options (Ctrl+O would open Chiaki's stream menu)", app.bridge.ev == [(CTRL, "up"), (24, "down")], app.bridge.ev)
+
+
+def test_leaving_ps_mode_or_hiding_lifts_the_touch_and_keys():
+    app = make("trackpad")
+    app._on_chiaki_focus(True)
+    thor_app.ThorApp._handle_touch_down(app, 1, *ps_point(app, "pad"), 0.0)
+    thor_app.ThorApp._handle_touch_down(app, 2, *ps_point(app, "click"), 0.0)
+    app.bridge.ev.clear()
+    thor_app.ThorApp.set_mode(app, "keyboard")
+    check("mode change lifts the touch and the click key", app.bridge.ev == [("ps_lift",), (20, "up")], app.bridge.ev)
+    app = make("trackpad")
+    app._on_chiaki_focus(True)
+    thor_app.ThorApp._handle_touch_down(app, 1, *ps_point(app, "pad"), 0.0)
+    app.bridge.ev.clear()
+    thor_app.ThorApp.set_ui_hidden(app, True)
+    check("Hide lifts the touch", app.bridge.ev == [("ps_lift",)], app.bridge.ev)
+
+
+def test_focus_loss_mid_touch_lifts_it_and_the_late_lift_does_nothing():
+    app = make("trackpad")
+    app._on_chiaki_focus(True)
+    thor_app.ThorApp._handle_touch_down(app, 1, *ps_point(app, "pad"), 0.0)
+    app.bridge.ev.clear()
+    app._on_chiaki_focus(False)
+    thor_app.ThorApp._handle_touch_up(app, 1, 0.1)
+    check("one lift, on the focus loss", app.bridge.ev == [("ps_lift",)], app.bridge.ev)
+
+
+def test_the_ribbon_goes_to_quick_controls_and_back_to_ps():
+    app = make("trackpad")
+    app._on_chiaki_focus(True)
+    thor_app.ThorApp._handle_touch_down(app, 3, 600.0, thor_app.HEADER_BUTTONS_H + 10, 0.0)
+    thor_app.ThorApp._handle_touch_up(app, 3, 0.1)
+    check("ribbon opens Quick Controls", app.mode == "settings", app.mode)
+    thor_app.ThorApp._handle_touch_down(app, 4, 600.0, thor_app.HEADER_BUTTONS_H + 10, 0.2)
+    check("ribbon goes back to PS while Chiaki has focus", app.mode == "ps", app.mode)
 
 
 if __name__ == "__main__":
