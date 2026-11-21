@@ -62,7 +62,7 @@ A contact whose position did not change is in none of the lists. `live` is the n
 
 Timestamps: the frame carries the kernel time, and the gesture engine uses it for all timing. The reader's own clock is
 not used for gestures (`bin/touch_frames.py:3-5`). The engine's `expire_stale` takes the frame time too
-(`bin/thor_app.py:651`).
+(`bin/thor_app.py:670`).
 
 ## Coordinates
 
@@ -74,23 +74,23 @@ The panel's physical mounting is the reason for this, per the code comment and t
 ## Resynchronisation after `SYN_DROPPED`
 
 The kernel's buffer overflowed, so the parser has lost its state. The driver reads the kernel's slot table
-(`bin/thor_app.py:681-694`):
+(`bin/thor_app.py:700-713`):
 
 - `EVIOCGABS(ABS_MT_SLOT)` returns a 24-byte `input_absinfo`; its third int is the maximum slot, so there are
-  `maximum + 1` slots (`:683-685`).
+  `maximum + 1` slots (`:702-704`).
 - `EVIOCGMTSLOTS` is called once per code (tracking id, X, Y) with a buffer of one `u32` code followed by one `s32`
-  value per slot (`:687-690`). The ioctl number is `_IOC(_IOC_READ, 'E', 0x0a, len)` (`:113-114`).
-- Slots with a tracking id of 0 or more become contacts (`:691-694`).
+  value per slot (`:706-709`). The ioctl number is `_IOC(_IOC_READ, 'E', 0x0a, len)` (`:131-132`).
+- Slots with a tracking id of 0 or more become contacts (`:710-713`).
 
 `TouchFrameParser.resync` rebuilds the state from those slots and returns a frame whose `downs` are the live contacts;
-`_resync_contacts` passes each one to `_handle_touch_down` (`bin/touch_frames.py:72-84`, `bin/thor_app.py:696-708`).
+`_resync_contacts` passes each one to `_handle_touch_down` (`bin/touch_frames.py:72-84`, `bin/thor_app.py:715-727`).
 
 The layout of `EVIOCGABS` and `EVIOCGMTSLOTS` is checked against the kernel's `include/uapi/linux/input.h`, as the
 CHANGELOG says. **Unverified** in this review (the header was not read).
 
 ## Ownership of a touch
 
-`_owner_at` (`bin/thor_app.py:730-748`) decides an owner from where the finger lands, in this order:
+`_owner_at` (`bin/thor_app.py:749-767`) decides an owner from where the finger lands, in this order:
 
 | Condition | Owner |
 |---|---|
@@ -102,13 +102,13 @@ CHANGELOG says. **Unverified** in this review (the header was not read).
 | mode `keyboard`, or mode `split` and y >= 500 | `keyboard` |
 | otherwise | `trackpad` |
 
-The owner is stored per touch id in `_touch_owner` and kept until the touch lifts (`:190`, `:787`, `:851`). A drag that
+The owner is stored per touch id in `_touch_owner` and kept until the touch lifts (`:208`, `:806`, `:870`). A drag that
 crosses the split line stays a trackpad drag. A move or up for an id with no owner goes to the engine unless the mode is
-`settings` (`:843`, `:869`). Those touches come from before a restart or from a dropped frame.
+`settings` (`:862`, `:888`). Those touches come from before a restart or from a dropped frame.
 
-Frame handling order in `_dispatch_frame` (`:649-679`): `ups` first, then `downs`, then `moves`. If the frame has no
-contacts and no downs, the engine is reset (`:670-671`). A log line records when the digitizer's count and the
-engine's count differ (`:673-678`).
+Frame handling order in `_dispatch_frame` (`:668-698`): `ups` first, then `downs`, then `moves`. If the frame has no
+contacts and no downs, the engine is reset (`:689-690`). A log line records when the digitizer's count and the
+engine's count differ (`:692-697`).
 
 ## Gesture engine
 
@@ -187,12 +187,12 @@ timer is `moved_at`, set by every pointer move the bridge sends (`:293-295`).
 
 ## Keyboard path
 
-The keyboard's handlers are in `bin/thor_app.py` (`_keyboard_down` `:809-830`, `_handle_touch_move` `:832-847`,
-`_handle_touch_up` `:849-873`).
+The keyboard's handlers are in `bin/thor_app.py` (`_keyboard_down` `:828-849`, `_handle_touch_move` `:851-866`,
+`_handle_touch_up` `:868-892`).
 
 - A modifier key goes to `ModifierState.press`, which returns key events to send (`bin/modifiers.py:119-133`).
 - A normal key first ends any key already held, calls `mods.key_typed()`, sends a tap, and starts the key repeat
-  (`bin/thor_app.py:820-829`).
+  (`bin/thor_app.py:839-848`).
 - `UInputBridge.tap_key` sends the press, **sleeps 20 ms**, then sends the release (`bin/engine.py:388-392`). The keyboard
   calls it from the touch reader while `input_lock` is held, so each key tap delays the reader by about 20 ms.
   **Design observation from the code**; not measured here.
@@ -201,8 +201,8 @@ The keyboard's handlers are in `bin/thor_app.py` (`_keyboard_down` `:809-830`, `
 
 ## Header and Quick Controls
 
-- Header touches act on press only (`_handle_header_touch`, `:874-892`). The Left and Right header buttons send a button
-  press when touched and a release when the touch ends (`:887-890`, `:775-778`).
+- Header touches act on press only (`_handle_header_touch`, `:896-914`). The Left and Right header buttons send a button
+  press when touched and a release when the touch ends (`:909-912`, `:794-797`).
 - Quick Controls sliders take their value from the x coordinate, clamped to the slider span, and keep following the
-  finger that grabbed them (`_handle_settings_touch` `:894-945`, `_handle_settings_drag` `:973-986`).
-- The Quick Controls buttons act on press (`:947-968`).
+  finger that grabbed them (`_handle_settings_touch` `:916-967`, `_handle_settings_drag` `:995-1008`).
+- The Quick Controls buttons act on press (`:969-990`).

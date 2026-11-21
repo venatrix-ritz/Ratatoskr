@@ -50,6 +50,8 @@ Two-finger scroll, right-click taps, three-finger swipes and glide are off while
 ## PS mode (Chiaki-NG)
 While [Chiaki-NG](https://github.com/streetpea/chiaki-ng) (PS5 Remote Play, the Flatpak `io.github.streetpea.Chiaki4deck`) has focus in Game Mode, the bottom screen becomes the PS5 touchpad with a row of PS buttons under it. When Chiaki-NG loses focus, the bottom screen goes back to the mode it was in. The switch is **PS touchpad while Chiaki-NG has focus** in the Decky panel's **Screens** section (`ps_mode_auto`, on by default); PS mode can also be picked from the panel's mode list.
 
+While Chiaki-NG has focus the header shows a **PS** button after Keyboard, lit while PS mode is on. The mode buttons (Trackpad, Split, Keyboard, Quick Controls) leave PS mode as usual, and one tap on **PS** brings it back; the mode to return to when Chiaki-NG loses focus stays the one from before the stream. To make room, Trackpad, Split, Keyboard, HUD and Pen are a little narrower while the PS button is there, so Left Click, Right Click and Pen sit about 50 px further left; Hide stays where it is.
+
 | Area | Sends | What Chiaki-NG does with it |
 |---|---|---|
 | the pad (16:9 outline) | a touch on **Ratatoskr PS Touch**, a virtual touchscreen that gamescope hands to the focused window | a touchpad touch at the same spot; swipes follow the finger |

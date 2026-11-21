@@ -164,9 +164,16 @@ def test_turning_shift_off_clears_its_highlight():
     check("shift is not drawn active", not app.kb_layout.shift_active and not app.kb_layout.caps_lock)
 
 
-def _centre(button):
-    key, x, w = next(b for b in thor_app.HEADER_BUTTONS if b[0] == button)
+def _centre(button, app=None):
+    layout = app._header_buttons() if app is not None else thor_app.HEADER_BUTTONS
+    key, x, w = next(b for b in layout if b[0] == button)
     return x + w / 2.0, thor_app.HEADER_BUTTON_Y + thor_app.HEADER_BUTTON_H / 2.0
+
+
+def header_tap(app, button, tid):
+    x, y = _centre(button, app)
+    thor_app.ThorApp._handle_touch_down(app, tid, x, y, 0.0)
+    thor_app.ThorApp._handle_touch_up(app, tid, 0.1)
 
 
 def test_hide_button_blanks_the_ui_and_releases_modifiers():
@@ -302,6 +309,15 @@ def test_keys_buttons_and_ps_buttons_buzz():
     check("a trackpad touch does not buzz by itself (the engine buzzes its clicks)", app.buzzes == [1, 1, 1], app.buzzes)
 
 
+def test_the_ps_header_button_buzzes():
+    app = make("trackpad")
+    app._on_chiaki_focus(True)
+    header_tap(app, "trackpad", 1)
+    app.buzzes.clear()
+    header_tap(app, "ps", 2)
+    check("the header PS button buzzes once and enters PS mode", app.buzzes == [1] and app.mode == "ps", (app.buzzes, app.mode))
+
+
 def test_focus_loss_mid_touch_lifts_it_and_the_late_lift_does_nothing():
     app = make("trackpad")
     app._on_chiaki_focus(True)
@@ -320,6 +336,56 @@ def test_the_ribbon_goes_to_quick_controls_and_back_to_ps():
     check("ribbon opens Quick Controls", app.mode == "settings", app.mode)
     thor_app.ThorApp._handle_touch_down(app, 4, 600.0, thor_app.HEADER_BUTTONS_H + 10, 0.2)
     check("ribbon goes back to PS while Chiaki has focus", app.mode == "ps", app.mode)
+
+
+def test_both_header_layouts_fit_and_hide_stays_under_the_open_button():
+    for name, layout in (("default", thor_app.HEADER_BUTTONS), ("Chiaki focus", thor_app.HEADER_BUTTONS_PS)):
+        gaps = [nx - (x + w) for (_k, x, w), (_n, nx, _w) in zip(layout, layout[1:])]
+        check(f"{name}: buttons 8 px apart", gaps == [thor_app.HEADER_GAP] * (len(layout) - 1), gaps)
+        check(f"{name}: the row spans 12..1228", layout[0][1] == 12 and layout[-1][1] + layout[-1][2] == thor_app.SCREEN_WIDTH - 12, layout)
+        hide = next(b for b in layout if b[0] == "hide")
+        check(f"{name}: Hide is where the Open button is", (hide[1], hide[2]) == (thor_app.OPEN_BUTTON[0], thor_app.OPEN_BUTTON[2]), hide)
+    keys_default = [b[0] for b in thor_app.HEADER_BUTTONS]
+    keys_ps = [b[0] for b in thor_app.HEADER_BUTTONS_PS]
+    check("no PS button by default", "ps" not in keys_default, keys_default)
+    check("with Chiaki focus: every button plus PS", keys_ps == keys_default[:3] + ["ps"] + keys_default[3:], keys_ps)
+
+
+def test_the_ps_header_button_shows_only_while_chiaki_has_focus():
+    app = make("trackpad")
+    check("no PS button without focus", "ps" not in [b[0] for b in app._header_buttons()])
+    _k, x, w = next(b for b in thor_app.HEADER_BUTTONS_PS if b[0] == "ps")
+    thor_app.ThorApp._handle_touch_down(app, 1, x + w / 2, thor_app.HEADER_BUTTON_Y + 20, 0.0)
+    thor_app.ThorApp._handle_touch_up(app, 1, 0.1)
+    check("a tap where it would be does not enter PS mode", app.mode != "ps", app.mode)
+    app = make("trackpad")
+    app._on_chiaki_focus(True)
+    check("the PS button shows with focus", "ps" in [b[0] for b in app._header_buttons()])
+    app._on_chiaki_focus(False)
+    check("and goes with the focus", "ps" not in [b[0] for b in app._header_buttons()])
+
+
+def test_the_ps_header_button_returns_to_ps_and_keeps_the_return_mode():
+    app = make("split")
+    app._on_chiaki_focus(True)
+    header_tap(app, "trackpad", 1)
+    check("Trackpad leaves PS mode", app.mode == "trackpad", app.mode)
+    header_tap(app, "ps", 2)
+    check("one tap on PS brings PS mode back", app.mode == "ps", app.mode)
+    check("the return mode is still split", app._ps_return_mode == "split", app._ps_return_mode)
+    app._on_chiaki_focus(False)
+    check("losing focus goes back to split", app.mode == "split", app.mode)
+
+
+def test_with_auto_off_the_ps_button_returns_to_the_mode_held_at_focus():
+    app = make("keyboard")
+    app.ps_cfg["ps_mode_auto"] = False
+    app._on_chiaki_focus(True)
+    check("auto off: still the keyboard", app.mode == "keyboard", app.mode)
+    header_tap(app, "ps", 1)
+    check("the PS button enters PS mode", app.mode == "ps", app.mode)
+    app._on_chiaki_focus(False)
+    check("losing focus goes back to the keyboard", app.mode == "keyboard", app.mode)
 
 
 if __name__ == "__main__":
