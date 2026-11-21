@@ -155,8 +155,13 @@ class ThorApp:
         # Bridge & processors
         self.bridge = UInputBridge(self.logger)
         self.gesture = TouchGestureProcessor(self.bridge, self.logger)
+        # Touch frames (reader thread) and settings / mode changes (IPC thread, GTK) all change the gesture and keyboard
+        # state; one re-entrant lock keeps them from interleaving.
+        self.input_lock = threading.RLock()
         # PS mode: on while Chiaki-NG has focus (ps_mode_auto), back to the previous mode when it loses focus
-        self.ps = ps_pad.PsPad(self.bridge, ps_pad.PsLayout(HEADER_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT))
+        self.ps = ps_pad.PsPad(
+            self.bridge, ps_pad.PsLayout(HEADER_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT), lock=self.input_lock, settings=self.gesture
+        )
         self.ps_cfg: dict = {"ps_mode_auto": True, "ps_touch_rotation": 0}
         self._ps_return_mode = "trackpad"
         self.ps_focus = ps_pad.FocusWatcher(self._on_chiaki_focus)
@@ -178,9 +183,6 @@ class ThorApp:
         self._repeat_thread: threading.Thread | None = None
         self.mods = ModifierState()  # Shift / Ctrl / Alt / Win: off, latched (one-shot) or locked
         self._touch_owner: dict[int, str] = {}  # touch id -> the area it landed in; a touch stays there until it lifts
-        # Touch frames (reader thread) and settings / mode changes (IPC thread, GTK) all change the gesture and keyboard
-        # state; one re-entrant lock keeps them from interleaving.
-        self.input_lock = threading.RLock()
 
         self.load_config()
 
@@ -1022,6 +1024,7 @@ class ThorApp:
                                 "focused": self.ps.active,
                                 "focused_app": self.ps_focus.focused_app,
                                 "finger": self.ps.finger,
+                                "clicking": self.ps.clicking,
                                 "buttons": sorted(set(self.ps.button_tids.values())),
                                 **self.ps_cfg,
                             }
@@ -1318,13 +1321,15 @@ class ThorApp:
         """PS mode: the touchpad outline and the PS button row; a note while Chiaki-NG does not have focus."""
         lay = self.ps.layout
         self._round_rect(cr, lay.pad_x, lay.pad_y, lay.pad_w, lay.pad_h, 24.0)
-        cr.set_source_rgb(*theme.BORDER_HAIRLINE)
-        cr.set_line_width(1.0)
+        clicking = self.ps.clicking  # the outline lights up while the pad click is held
+        cr.set_source_rgb(*(theme.BTN_BORDER_ACTIVE if clicking else theme.BORDER_HAIRLINE))
+        cr.set_line_width(2.0 if clicking else 1.0)
         cr.stroke()
         cr.new_path()
 
         if self.ps.active:
-            hint, alpha = "PS touchpad · one finger · Pad Click presses the touchpad", self.burn_in.get_hint_alpha()
+            taps = "tap to click · " if self.gesture.tap_to_click else ""
+            hint, alpha = f"PS touchpad · one finger · {taps}hold to click", self.burn_in.get_hint_alpha()
         else:
             hint, alpha = "Waiting for Chiaki-NG to have focus", 1.0
         if alpha > 0.01:

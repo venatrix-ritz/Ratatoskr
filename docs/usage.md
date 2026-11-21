@@ -53,11 +53,14 @@ While [Chiaki-NG](https://github.com/streetpea/chiaki-ng) (PS5 Remote Play, the 
 | Area | Sends | What Chiaki-NG does with it |
 |---|---|---|
 | the pad (16:9 outline) | a touch on **Ratatoskr PS Touch**, a virtual touchscreen that gamescope hands to the focused window | a touchpad touch at the same spot; swipes follow the finger |
+| a short still tap on the pad | the touch, then T for 50 ms before the touch lifts | a touchpad click where the finger is |
+| press and hold on the pad | T from the long-press delay until the finger lifts; the pad outline lights up | the touchpad click held; moving the finger drags with it held |
 | **Create** | holds F | Create (Share) |
 | **PS** | holds Esc | PS button |
 | **Options** | holds O | Options |
-| **Pad Click** | holds T | touchpad click; with a finger on the pad it clicks where that finger is |
 | **Mic** | taps Ctrl+M | turns the controller microphone on or off |
+
+The tap and the hold use the trackpad's settings and limits: **Tap to click** (`tap_to_click`; off means a tap is only a touch), the long-press delay (`long_press_delay_ms`, 450 ms by default), a tap shorter than 0.25 s that moved under 12 px, and a hold that stays within 24 px.
 
 Things to know:
 - One finger only. gamescope turns a touch into a pointer move with the left button held, and Chiaki-NG reads that as one touchpad finger, so two-finger touchpad gestures cannot reach the PS5.

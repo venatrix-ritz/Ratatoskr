@@ -6,17 +6,22 @@ Flatpak builds without setsu, SDL3 reads gamepad touchpads only through HIDAPI, 
 - a left-button drag is a touchpad touch at that spot of the window (gui/src/streamsession.cpp HandleMouseMoveEvent),
   and real touch events are touches too (HandleTouchEvent);
 - keys: Esc = PS, O = Options, F = Share/Create, T = touchpad click (gui/src/settings.cpp GetControllerMapping);
-  Ctrl+M toggles the microphone (gui/src/qmlmainwindow.cpp).
+  Ctrl+M toggles the microphone (gui/src/qmlmainwindow.cpp);
+- each button change goes to the console as its own history event (lib/src/feedbacksender.c), and a mouse release
+  clears the touchpad click whatever set it (HandleMouseReleaseEvent), so a pad click goes up before the touch lifts.
 So the pad drives a virtual touchscreen that gamescope hands to the focused window (in Steam's default touch mode a
 touch is a pointer warp with the left button held, gamescope wlserver.cpp wlserver_touchdown), and the buttons are
 those keys. Only one finger reaches Chiaki this way.
 """
 from __future__ import annotations
 
+import math
 import os
 import subprocess
 import threading
 import time
+
+from engine import LONG_PRESS_MAX_DIST_PX, TAP_MAX_DISTANCE_PX, TAP_MAX_TIME_S
 
 KEY_ESC = 1
 KEY_T = 20
@@ -26,9 +31,12 @@ KEY_LEFTCTRL = 29
 KEY_M = 50
 
 # Buttons that stay down while the finger is on them, and the keys they hold.
-HOLD_KEYS = {"create": (KEY_F,), "ps": (KEY_ESC,), "options": (KEY_O,), "click": (KEY_T,)}
+HOLD_KEYS = {"create": (KEY_F,), "ps": (KEY_ESC,), "options": (KEY_O,)}
 MIC_CHORD = (KEY_LEFTCTRL, KEY_M)
-BUTTONS = (("create", "Create"), ("ps", "PS"), ("options", "Options"), ("click", "Pad Click"), ("mic", "Mic"))
+PAD_CLICK_KEY = KEY_T  # a tap on the pad, or a long press, clicks the touchpad where the finger is
+BUTTONS = (("create", "Create"), ("ps", "PS"), ("options", "Options"), ("mic", "Mic"))
+# A tap's click is held this long before the touch lifts, so a game that reads buttons once a frame still sees it.
+TAP_CLICK_S = 0.05
 
 # Keep the touch this far inside the window: in touch passthrough Chiaki makes its outer 5 % a touchpad click, and a
 # touch at the very edge of the top screen may start a gamescope edge gesture.
@@ -101,42 +109,107 @@ def normalize_rotation(value) -> int:
 
 class PsPad:
     """Touches on the PS screen to the virtual touchscreen and keys. Nothing goes out unless `active` (Chiaki has
-    focus). The caller serialises calls (thor_app's input_lock)."""
+    focus). The caller serialises calls with `lock` (thor_app's input_lock), which the click timers take too.
 
-    def __init__(self, bridge, layout: PsLayout) -> None:
+    `settings` is the trackpad's gesture processor: its `tap_to_click` and `long_press_delay_ms` apply here too."""
+
+    def __init__(self, bridge, layout: PsLayout, lock=None, settings=None, clock=time.monotonic,
+                 timer=threading.Timer) -> None:
         self.bridge = bridge
         self.layout = layout
+        self.lock = lock if lock is not None else threading.RLock()
+        self.settings = settings
+        self._clock = clock
+        self._timer = timer
         self.active = False
         self.rotation = 0
         self.finger: int | None = None  # the touch id that owns the virtual touch
         self.button_tids: dict[int, str] = {}  # touch id -> button it pressed
         self.blocked_touch_at = 0.0  # monotonic time of the last touch while Chiaki did not have focus
+        self.clicking = False  # the pad click key is down (a tap's short click or a long press)
+        self._down_at = 0.0
+        self._down_xy = (0.0, 0.0)
+        self._travel = 0.0  # furthest the owning finger got from where it landed, in screen px
+        self._long_press = None  # timer that turns a still finger into a held click
+        self._tap_release = None  # timer that ends a tap's click and lifts the touch
+        self._touch_down = False  # the virtual touch is down (it outlives the finger during a tap's click)
 
     def set_active(self, active: bool) -> None:
-        if not active:
-            self.release_all()
-        self.active = bool(active)
+        with self.lock:
+            if not active:
+                self.release_all()
+            self.active = bool(active)
 
     def pressed(self, name: str) -> bool:
         return name in self.button_tids.values()
 
+    def _tap_to_click(self) -> bool:
+        return bool(getattr(self.settings, "tap_to_click", True))
+
+    def _long_press_s(self) -> float:
+        return float(getattr(self.settings, "long_press_delay_ms", 450)) / 1000.0
+
     def _device_point(self, x: float, y: float) -> tuple[float, float]:
         return to_device(*self.layout.to_unit(x, y), rotation=self.rotation)
+
+    def _cancel(self, attr: str) -> None:
+        t = getattr(self, attr)
+        if t is not None:
+            t.cancel()
+            setattr(self, attr, None)
+
+    def _click(self, down: bool) -> None:
+        if down != self.clicking:
+            self.bridge.key(PAD_CLICK_KEY, down)
+            self.clicking = down
+
+    def _lift(self) -> None:
+        """Click up first (a lift clears Chiaki's touchpad click anyway), then the touch."""
+        self._click(False)
+        if self._touch_down:
+            self.bridge.ps_touch_up()
+            self._touch_down = False
+
+    def _finish_tap(self, timer=None) -> None:
+        with self.lock:
+            if timer is not None and timer is not self._tap_release:
+                return  # an older tap that was already finished
+            self._tap_release = None
+            if self.finger is None:
+                self._lift()
+
+    def _on_long_press(self, timer=None) -> None:
+        with self.lock:
+            if timer is not self._long_press:
+                return  # cancelled after it had already started waiting for the lock
+            self._long_press = None
+            if self.active and self.finger is not None and self._travel <= LONG_PRESS_MAX_DIST_PX:
+                self._click(True)
 
     def touch_down(self, tid: int, x: float, y: float) -> str | None:
         hit = self.layout.hit(x, y)
         if hit is None:
             return None
         if not self.active:
-            self.blocked_touch_at = time.monotonic()
+            self.blocked_touch_at = self._clock()
             return hit
         if hit == "pad":
             if self.finger is None:
+                if self._tap_release is not None:
+                    self._cancel("_tap_release")
+                    self._lift()  # the previous tap's click ends now, before this touch lands
                 self.finger = tid
+                self._down_at, self._down_xy, self._travel = self._clock(), (x, y), 0.0
                 u, v = self.layout.to_unit(x, y)
                 self.bridge.ps_touch(*to_device(u, v, self.rotation))
                 nudged = u + NUDGE if u + NUDGE <= 1.0 else u - NUDGE
                 self.bridge.ps_touch(*to_device(nudged, v, self.rotation))
+                self._touch_down = True
+                t = self._timer(self._long_press_s(), self._on_long_press)
+                t.args = (t,)
+                t.daemon = True
+                self._long_press = t
+                t.start()
             return hit
         if hit == "mic":
             for code in MIC_CHORD:
@@ -151,12 +224,25 @@ class PsPad:
 
     def touch_move(self, tid: int, x: float, y: float) -> None:
         if tid == self.finger:
+            self._travel = max(self._travel, math.hypot(x - self._down_xy[0], y - self._down_xy[1]))
+            if self._travel > LONG_PRESS_MAX_DIST_PX:
+                self._cancel("_long_press")
             self.bridge.ps_touch(*self._device_point(x, y))
 
     def touch_up(self, tid: int) -> None:
         if tid == self.finger:
-            self.bridge.ps_touch_up()
+            self._cancel("_long_press")
             self.finger = None
+            quick = self._clock() - self._down_at < TAP_MAX_TIME_S and self._travel <= TAP_MAX_DISTANCE_PX
+            if not self.clicking and quick and self._tap_to_click():
+                self._click(True)  # held for TAP_CLICK_S with the touch still down, then both go up
+                t = self._timer(TAP_CLICK_S, self._finish_tap)
+                t.args = (t,)
+                t.daemon = True
+                self._tap_release = t
+                t.start()
+            else:
+                self._lift()
         name = self.button_tids.pop(tid, None)
         if name in HOLD_KEYS and not self.pressed(name):
             for code in HOLD_KEYS[name]:
@@ -164,9 +250,10 @@ class PsPad:
 
     def release_all(self) -> None:
         """Lift the virtual touch and every held button key (focus lost, mode change, hidden UI, shutdown)."""
-        if self.finger is not None:
-            self.bridge.ps_touch_up()
-            self.finger = None
+        self._cancel("_long_press")
+        self._cancel("_tap_release")
+        self.finger = None
+        self._lift()
         held = set(self.button_tids.values())
         self.button_tids.clear()
         for name in held:

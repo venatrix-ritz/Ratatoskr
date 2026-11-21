@@ -19,6 +19,7 @@ except Exception as err:  # no GTK / cairo here
     print(f"skip: thor_app cannot be imported here ({type(err).__name__}: {err})")
     sys.exit(0)
 import threading  # noqa: E402
+import time  # noqa: E402
 
 import keyboard_settings  # noqa: E402
 import ps_pad  # noqa: E402
@@ -257,16 +258,27 @@ def test_leaving_ps_mode_or_hiding_lifts_the_touch_and_keys():
     app = make("trackpad")
     app._on_chiaki_focus(True)
     thor_app.ThorApp._handle_touch_down(app, 1, *ps_point(app, "pad"), 0.0)
-    thor_app.ThorApp._handle_touch_down(app, 2, *ps_point(app, "click"), 0.0)
+    thor_app.ThorApp._handle_touch_down(app, 2, *ps_point(app, "options"), 0.0)
     app.bridge.ev.clear()
     thor_app.ThorApp.set_mode(app, "keyboard")
-    check("mode change lifts the touch and the click key", app.bridge.ev == [("ps_lift",), (20, "up")], app.bridge.ev)
+    check("mode change lifts the touch and the Options key", app.bridge.ev == [("ps_lift",), (24, "up")], app.bridge.ev)
     app = make("trackpad")
     app._on_chiaki_focus(True)
     thor_app.ThorApp._handle_touch_down(app, 1, *ps_point(app, "pad"), 0.0)
     app.bridge.ev.clear()
     thor_app.ThorApp.set_ui_hidden(app, True)
     check("Hide lifts the touch", app.bridge.ev == [("ps_lift",)], app.bridge.ev)
+
+
+def test_a_pad_tap_clicks_the_touchpad_then_lifts():
+    app = make("trackpad")
+    app._on_chiaki_focus(True)
+    x, y = ps_point(app, "pad")
+    thor_app.ThorApp._handle_touch_down(app, 1, x, y, 0.0)
+    thor_app.ThorApp._handle_touch_up(app, 1, 0.05)
+    check("touch, nudge, then T down with the touch still down", app.bridge.ev == [("ps_touch",), ("ps_touch",), (20, "down")], app.bridge.ev)
+    time.sleep(ps_pad.TAP_CLICK_S + 0.1)
+    check("then T up and the lift", app.bridge.ev[3:] == [(20, "up"), ("ps_lift",)], app.bridge.ev)
 
 
 def test_focus_loss_mid_touch_lifts_it_and_the_late_lift_does_nothing():

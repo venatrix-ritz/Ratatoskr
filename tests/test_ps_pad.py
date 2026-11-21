@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -27,10 +28,40 @@ class Bridge:
         self.ev.append((code, "down" if down else "up"))
 
 
-def make(active=True):
-    pad = ps_pad.PsPad(Bridge(), ps_pad.PsLayout(168.0, 1240.0, 1080.0))
+class FakeTimer:
+    """Records timers; a test fires them by hand. `made` is shared by all timers of one pad."""
+
+    def __init__(self, made, delay, fn, args=()):
+        self.made, self.delay, self.fn, self.args = made, delay, fn, args
+        self.started = self.cancelled = self.fired = False
+        made.append(self)
+
+    def start(self):
+        self.started = True
+
+    def cancel(self):
+        self.cancelled = True
+
+    def fire(self):
+        assert self.started and not self.cancelled
+        self.fired = True
+        self.fn(*self.args)
+
+
+def make(active=True, tap_to_click=True, long_press_delay_ms=450):
+    clock, timers = [100.0], []
+    settings = SimpleNamespace(tap_to_click=tap_to_click, long_press_delay_ms=long_press_delay_ms)
+    pad = ps_pad.PsPad(
+        Bridge(), ps_pad.PsLayout(168.0, 1240.0, 1080.0), settings=settings, clock=lambda: clock[0],
+        timer=lambda delay, fn, args=(): FakeTimer(timers, delay, fn, args),
+    )
     pad.set_active(active)
+    pad.clock, pad.timers = clock, timers
     return pad
+
+
+def live(pad):
+    return [t for t in pad.timers if t.started and not t.cancelled and not t.fired]
 
 
 def centre(pad, name):
@@ -45,7 +76,7 @@ def test_layout_fits_the_screen_below_the_header():
     lay = ps_pad.PsLayout(168.0, 1240.0, 1080.0)
     assert lay.pad_y >= 168.0 and lay.button_y + lay.button_h <= 1080.0
     assert abs(lay.pad_w / lay.pad_h - 16 / 9) < 0.01
-    assert [b[0] for b in lay.buttons] == ["create", "ps", "options", "click", "mic"]
+    assert [b[0] for b in lay.buttons] == ["create", "ps", "options", "mic"]
     assert lay.hit(5.0, 500.0) is None and lay.hit(lay.pad_x + 1, lay.pad_y + 1) == "pad"
 
 
@@ -74,6 +105,90 @@ def test_a_pad_touch_lands_nudges_moves_and_lifts():
     assert pad.bridge.ev[2] == ("touch", ps_pad.EDGE_INSET, ps_pad.EDGE_INSET)
     pad.touch_up(1)
     assert pad.bridge.ev[-1] == ("lift",) and pad.finger is None
+    assert T not in [e[0] for e in pad.bridge.ev], "a swipe is no click"
+
+
+def test_a_tap_clicks_with_the_touch_still_down_then_lifts():
+    pad = make()
+    x, y = centre(pad, "pad")
+    pad.touch_down(1, x, y)
+    pad.clock[0] += 0.1
+    pad.touch_move(1, x + 5, y)
+    pad.touch_up(1)
+    assert pad.bridge.ev[-1] == (T, "down") and pad.clicking, pad.bridge.ev
+    release = live(pad)[-1]
+    assert abs(release.delay - ps_pad.TAP_CLICK_S) < 1e-9
+    release.fire()
+    assert pad.bridge.ev[-2:] == [(T, "up"), ("lift",)] and not pad.clicking
+
+
+def test_a_slow_or_moving_touch_is_no_tap():
+    for dt, dx in ((ps_pad.TAP_MAX_TIME_S + 0.01, 0.0), (0.05, ps_pad.TAP_MAX_DISTANCE_PX + 1)):
+        pad = make()
+        x, y = centre(pad, "pad")
+        pad.touch_down(1, x, y)
+        pad.clock[0] += dt
+        pad.touch_move(1, x + dx, y)
+        pad.touch_up(1)
+        assert T not in [e[0] for e in pad.bridge.ev] and pad.bridge.ev[-1] == ("lift",), (dt, dx, pad.bridge.ev)
+
+
+def test_tap_to_click_off_sends_only_the_touch():
+    pad = make(tap_to_click=False)
+    pad.touch_down(1, *centre(pad, "pad"))
+    pad.touch_up(1)
+    assert T not in [e[0] for e in pad.bridge.ev] and pad.bridge.ev[-1] == ("lift",)
+
+
+def test_a_long_press_holds_the_click_until_the_lift():
+    pad = make(long_press_delay_ms=600)
+    x, y = centre(pad, "pad")
+    pad.touch_down(1, x, y)
+    hold = live(pad)[0]
+    assert abs(hold.delay - 0.6) < 1e-9
+    pad.clock[0] += 0.6
+    hold.fire()
+    assert pad.bridge.ev[-1] == (T, "down") and pad.clicking
+    pad.touch_move(1, x + 200, y)  # dragging with the click held
+    assert pad.bridge.ev[-1][0] == "touch" and pad.clicking
+    pad.touch_up(1)
+    assert pad.bridge.ev[-2:] == [(T, "up"), ("lift",)] and not pad.clicking
+    assert len(live(pad)) == 0
+
+
+def test_moving_before_the_long_press_cancels_it():
+    pad = make()
+    x, y = centre(pad, "pad")
+    pad.touch_down(1, x, y)
+    hold = live(pad)[0]
+    pad.touch_move(1, x + ps_pad.LONG_PRESS_MAX_DIST_PX + 1, y)
+    assert hold.cancelled
+    hold.cancelled = False
+    hold.fire()  # a timer that was already waiting for the lock when it was cancelled
+    assert not pad.clicking and T not in [e[0] for e in pad.bridge.ev]
+
+
+def test_a_new_touch_during_a_tap_click_finishes_the_tap_first():
+    pad = make()
+    x, y = centre(pad, "pad")
+    pad.touch_down(1, x, y)
+    pad.touch_up(1)
+    old = live(pad)[-1]
+    pad.touch_down(2, x + 100, y)
+    assert pad.bridge.ev[3:6] == [(T, "up"), ("lift",), ("touch", pad.bridge.ev[5][1], 0.5)], pad.bridge.ev
+    assert old.cancelled
+    old.cancelled = False
+    old.fire()  # the old release must not lift the new touch
+    assert pad.bridge.ev[-1][0] == "touch" and pad.finger == 2
+
+
+def test_losing_focus_during_a_tap_click_releases_it():
+    pad = make()
+    pad.touch_down(1, *centre(pad, "pad"))
+    pad.touch_up(1)
+    pad.bridge.ev.clear()
+    pad.set_active(False)
+    assert pad.bridge.ev == [(T, "up"), ("lift",)] and not pad.clicking
 
 
 def test_a_touch_at_the_right_edge_nudges_inwards():
@@ -94,7 +209,7 @@ def test_a_second_finger_on_the_pad_is_ignored():
 
 
 def test_buttons_hold_their_key_while_the_finger_is_down():
-    for name, code in (("ps", ESC), ("options", O), ("create", F), ("click", T)):
+    for name, code in (("ps", ESC), ("options", O), ("create", F)):
         pad = make()
         pad.touch_down(3, *centre(pad, name))
         assert pad.bridge.ev == [(code, "down")] and pad.pressed(name)
@@ -117,13 +232,6 @@ def test_mic_taps_ctrl_m():
     pad.touch_down(4, *centre(pad, "mic"))
     pad.touch_up(4)
     assert pad.bridge.ev == [(CTRL, "down"), (M, "down"), (M, "up"), (CTRL, "up")]
-
-
-def test_click_while_touching_presses_the_touchpad_at_the_finger():
-    pad = make()
-    pad.touch_down(1, *centre(pad, "pad"))
-    pad.touch_down(2, *centre(pad, "click"))
-    assert pad.bridge.ev[-1] == (T, "down") and pad.finger == 1
 
 
 def test_nothing_goes_out_without_focus():

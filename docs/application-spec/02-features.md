@@ -8,14 +8,14 @@ constants in `bin/engine.py`, `bin/thor_app.py` or the other module named.
 
 | ID | Feature | Setting | Where |
 |---|---|---|---|
-| F-01 | Four modes: Trackpad, Split, Keyboard, Quick Controls | `mode` | `bin/thor_app.py:335`, `:365-369`, `:1151-1160` |
-| F-02 | Header: Trackpad, Split, Keyboard, Quick Controls, HUD, Left Click, Right Click, Pen, Hide | `pen_mode`, `debug_hud` | `HEADER_BUTTONS` `bin/thor_app.py:87-90`, `_handle_header_touch` `:853-869` |
-| F-03 | Ribbon: a tap on the status ribbon toggles Quick Controls | none | `bin/thor_app.py:774-775` |
-| F-04 | Hide and Open: the whole screen blanks except an Open button; not persisted | none | `bin/thor_app.py:352-362`, `:712-719` |
-| F-05 | Split: the split line is at y = 500; a touch belongs to the area it started in | none | `bin/thor_app.py:83`, `_owner_at` `:712-730` |
-| F-06 | Status ribbon: battery (with watts), CPU load and temperature, GPU clock and temperature, RAM, volume, top and bottom brightness; two rows of three | none | `_draw_status_ribbon` `bin/thor_app.py:1192-1252` |
-| F-07 | Bottom-screen debug HUD: coordinates, FPS, state, counters | `debug_hud` | `_draw_debug_hud` `bin/thor_app.py:1648-1680` |
-| F-08 | Live refresh: the ribbon redraws once a second, so the stats go stale by at most about a second | none | `GLib.timeout_add(1000, ...)` `bin/thor_app.py:473` |
+| F-01 | Four modes: Trackpad, Split, Keyboard, Quick Controls | `mode` | `bin/thor_app.py:337`, `:367-371`, `:1154-1163` |
+| F-02 | Header: Trackpad, Split, Keyboard, Quick Controls, HUD, Left Click, Right Click, Pen, Hide | `pen_mode`, `debug_hud` | `HEADER_BUTTONS` `bin/thor_app.py:87-90`, `_handle_header_touch` `:855-871` |
+| F-03 | Ribbon: a tap on the status ribbon toggles Quick Controls | none | `bin/thor_app.py:776-777` |
+| F-04 | Hide and Open: the whole screen blanks except an Open button; not persisted | none | `bin/thor_app.py:354-364`, `:714-721` |
+| F-05 | Split: the split line is at y = 500; a touch belongs to the area it started in | none | `bin/thor_app.py:83`, `_owner_at` `:714-732` |
+| F-06 | Status ribbon: battery (with watts), CPU load and temperature, GPU clock and temperature, RAM, volume, top and bottom brightness; two rows of three | none | `_draw_status_ribbon` `bin/thor_app.py:1195-1255` |
+| F-07 | Bottom-screen debug HUD: coordinates, FPS, state, counters | `debug_hud` | `_draw_debug_hud` `bin/thor_app.py:1653-1685` |
+| F-08 | Live refresh: the ribbon redraws once a second, so the stats go stale by at most about a second | none | `GLib.timeout_add(1000, ...)` `bin/thor_app.py:475` |
 
 ## Trackpad
 
@@ -37,7 +37,7 @@ Gesture constants are in `bin/engine.py`. The engine state machine is `TouchGest
 | F-20 | Held cursor until the touch is known to be a move | a tap does not nudge the pointer | none | `engine.py:765-771` |
 
 Long press and two-finger right click exclude each other. Turning one on turns the other off in the engine
-(`engine.py:537-545`) and in the Quick Controls button (`bin/thor_app.py:924-930`).
+(`engine.py:537-545`) and in the Quick Controls button (`bin/thor_app.py:926-932`).
 
 ## Keyboard
 
@@ -45,11 +45,11 @@ Long press and two-finger right click exclude each other. Turning one on turns t
 |---|---|---|---|
 | F-30 | Five-row QWERTY layout with Esc, Tab, Bksp, Enter, Space, arrows, Ctrl, Alt, Win | none | `create_qwerty_rows` `bin/keyboard_layout.py:94-192` |
 | F-31 | Dual-symbol keys (`1 / !`, `, / <`) with the typed symbol drawn large | none | `bin/key_render.py` `draw_dual_label` |
-| F-32 | Key repeat: first repeat after the delay, then at the interval | `keyboard_repeat_delay_ms` (default 350, range 150 to 800), `keyboard_repeat_interval_ms` (60, range 20 to 200) | `bin/thor_app.py:440-456`, `bin/keyboard_settings.py:9-16` |
-| F-33 | Modifiers: Shift, Ctrl, Alt, Win. Tap = next key only; quick second tap = locked; tap a locked one to release; hold with one finger to cover other keys | `keyboard_caps_window_ms` (default 350, range 150 to 800) | `bin/modifiers.py`, `bin/thor_app.py:789-809` |
-| F-34 | Caps Lock is a locked Shift. The Shift key shows "CAPS" when locked | `keyboard_caps_window_ms` | `bin/thor_app.py:1440-1441`, `bin/modifiers.py:80-88` |
-| F-35 | Leaving Keyboard or Split, or hiding the UI, releases every modifier, held or latched. A SYN_DROPPED resync ends the current key press and releases only the latched modifiers that no finger holds | none | `set_mode` `bin/thor_app.py:341-344`, `set_ui_hidden` `:357-359`, `_dispatch_frame` `:634-645`, `_end_key_press` `:745-754`, `ModifierState.key_released` `bin/modifiers.py:152-159` |
-| F-36 | Keyboard highlights on press; shifted letters are drawn in a brighter tone | none | `_draw_keyboard` `bin/thor_app.py:1369-1447` |
+| F-32 | Key repeat: first repeat after the delay, then at the interval | `keyboard_repeat_delay_ms` (default 350, range 150 to 800), `keyboard_repeat_interval_ms` (60, range 20 to 200) | `bin/thor_app.py:442-458`, `bin/keyboard_settings.py:9-16` |
+| F-33 | Modifiers: Shift, Ctrl, Alt, Win. Tap = next key only; quick second tap = locked; tap a locked one to release; hold with one finger to cover other keys | `keyboard_caps_window_ms` (default 350, range 150 to 800) | `bin/modifiers.py`, `bin/thor_app.py:791-811` |
+| F-34 | Caps Lock is a locked Shift. The Shift key shows "CAPS" when locked | `keyboard_caps_window_ms` | `bin/thor_app.py:1445-1446`, `bin/modifiers.py:80-88` |
+| F-35 | Leaving Keyboard or Split, or hiding the UI, releases every modifier, held or latched. A SYN_DROPPED resync ends the current key press and releases only the latched modifiers that no finger holds | none | `set_mode` `bin/thor_app.py:343-346`, `set_ui_hidden` `:359-361`, `_dispatch_frame` `:636-647`, `_end_key_press` `:747-756`, `ModifierState.key_released` `bin/modifiers.py:152-159` |
+| F-36 | Keyboard highlights on press; shifted letters are drawn in a brighter tone | none | `_draw_keyboard` `bin/thor_app.py:1374-1452` |
 
 Key codes come from `bin/keyboard_layout.py:4-66` (Linux `input-event-codes`). The virtual keyboard registers every key
 code from 1 to 247 (`bin/engine.py:191-195`).
@@ -65,9 +65,9 @@ code from 1 to 247 (`bin/engine.py:191-195`).
 | F-44 | Right strip (x >= 1130) scrolls vertically; bottom strip (y >= 980) scrolls horizontally | none | `_strip_at` `engine.py:614-619`; `STRIP_RIGHT_W = 110`, `STRIP_BOTTOM_H = 100` `engine.py:114-115` |
 | F-45 | Strips have a 4 px start dead zone, a 1.5 px jitter rule, and a speed-based boost of 1x to 3x (`STRIP_ACCEL_MAX = 2.0` added to 1.0) | none | `engine.py:116-119`, `_strip_scroll` `:637-662` |
 | F-46 | Two-finger scroll, right-click taps, three-finger gestures and glide are off in Pen mode | none | `engine.py:680-681`, `:904`, `:888-900` |
-| F-47 | Strips are drawn on the glass when Pen mode is on | none | `_draw_scroll_strips` `bin/thor_app.py:1341-1367` |
+| F-47 | Strips are drawn on the glass when Pen mode is on | none | `_draw_scroll_strips` `bin/thor_app.py:1346-1372` |
 
-The Pen header button is labelled "Pen" or "Pen +" and drawn lit whenever the mode is not Off (`bin/thor_app.py:1190`).
+The Pen header button is labelled "Pen" or "Pen +" and drawn lit whenever the mode is not Off (`bin/thor_app.py:1193`).
 
 ## Pointer visibility
 
@@ -77,8 +77,8 @@ events. The driver works around it in two ways.
 
 | ID | Mechanism | Setting | Where |
 |---|---|---|---|
-| F-50 | Nudge: before a scroll or a press that follows 2 s of pointer stillness, the driver moves the pointer one pixel out and back | none; on unless Pen + is active | `_wake_pointer_locked` `bin/engine.py:297-305`; `POINTER_WAKE_S = 2.0` `engine.py:100`; `wake_pointer` set by `_refresh_cursor_status` `bin/thor_app.py:476-479` |
-| F-51 | Pen +: writes the environment override so the next Game Mode start never hides the pointer | `pen_mode` = `pen_plus` | `bin/session_cursor.py`; `set_pen_mode` `bin/thor_app.py:261-277` |
+| F-50 | Nudge: before a scroll or a press that follows 2 s of pointer stillness, the driver moves the pointer one pixel out and back | none; on unless Pen + is active | `_wake_pointer_locked` `bin/engine.py:297-305`; `POINTER_WAKE_S = 2.0` `engine.py:100`; `wake_pointer` set by `_refresh_cursor_status` `bin/thor_app.py:478-481` |
+| F-51 | Pen +: writes the environment override so the next Game Mode start never hides the pointer | `pen_mode` = `pen_plus` | `bin/session_cursor.py`; `set_pen_mode` `bin/thor_app.py:263-279` |
 | F-52 | The driver reports whether the running Game Mode has the override (`cursor_stay_visible_active`) | none | `running_delay_ms` and `status` `bin/session_cursor.py:237-279` |
 
 `bin/session_cursor.py` reads `--hide-cursor-delay` from every `/proc/*/cmdline` and caches the result for 10 s.
@@ -87,12 +87,12 @@ events. The driver works around it in two ways.
 
 | ID | Feature | Setting | Where |
 |---|---|---|---|
-| F-60 | Volume slider 0 to 100 with -5, +5 and Mute buttons | none | `_handle_settings_touch` `bin/thor_app.py:871-889`, `_draw_quick_settings` `:1449-1559` |
-| F-61 | Top backlight slider, 1 to 100, with -10 and +10 | none | `bin/thor_app.py:891-902` |
-| F-62 | Bottom backlight slider, 1 to 100, with -10 and +10 | none | `bin/thor_app.py:904-915` |
-| F-63 | Sliders keep following the finger that grabbed them | none | `_handle_settings_drag` `bin/thor_app.py:941-954` |
-| F-64 | Tap Click on/off, Right-click 2-finger or press-hold, Glass HUD on/off, Back to Trackpad | `tap_to_click`, `two_finger_right_click`, `long_press_right_click`, `debug_hud` | `bin/thor_app.py:917-936` |
-| F-65 | Health card (CPU, GPU, RAM, battery) when Gleipnir is off; Battery and Gleipnir card when on | `gleipnir_ribbon` | `bin/thor_app.py:1496-1500` |
+| F-60 | Volume slider 0 to 100 with -5, +5 and Mute buttons | none | `_handle_settings_touch` `bin/thor_app.py:873-891`, `_draw_quick_settings` `:1454-1564` |
+| F-61 | Top backlight slider, 1 to 100, with -10 and +10 | none | `bin/thor_app.py:893-904` |
+| F-62 | Bottom backlight slider, 1 to 100, with -10 and +10 | none | `bin/thor_app.py:906-917` |
+| F-63 | Sliders keep following the finger that grabbed them | none | `_handle_settings_drag` `bin/thor_app.py:943-956` |
+| F-64 | Tap Click on/off, Right-click 2-finger or press-hold, Glass HUD on/off, Back to Trackpad | `tap_to_click`, `two_finger_right_click`, `long_press_right_click`, `debug_hud` | `bin/thor_app.py:919-938` |
+| F-65 | Health card (CPU, GPU, RAM, battery) when Gleipnir is off; Battery and Gleipnir card when on | `gleipnir_ribbon` | `bin/thor_app.py:1501-1505` |
 
 Writes are asynchronous. The requested value is drawn at once and a writer thread per control writes only the newest
 value (`bin/system_stats.py:87-136`, `request_*` `:229-245`). The displayed value is held for 1.5 s
@@ -114,10 +114,10 @@ Details are in the [design spec](../design-spec/03-timing-idle-throttling-dim.md
 |---|---|---|---|
 | F-80 | Orbit shift: the whole UI is translated on a circle | radius 1.5 px, cycle 90 s | `get_orbital_offset` `bin/burn_in.py:46-52`; `bin/thor_app.py:153` |
 | F-81 | Trackpad hint fades out | shown for 5 s after start or the last mode change, then fades over 1.5 s | `get_hint_alpha` `bin/burn_in.py:54-64` |
-| F-82 | Idle veil: after 30 s without a touch the lit pixels dim to 40 % over 5 s; the next touch restores them | `idle_timeout` 30, `idle_floor` 0.4 | `get_luminance_scale` `bin/burn_in.py:66-74`; veil drawn `bin/thor_app.py:1130-1134` |
-| F-83 | Pure black background; unlit pixels draw no power; no fills on containers | none | `bin/theme.py`, `_paint` `bin/thor_app.py:1112-1114` |
+| F-82 | Idle veil: after 30 s without a touch the lit pixels dim to 40 % over 5 s; the next touch restores them | `idle_timeout` 30, `idle_floor` 0.4 | `get_luminance_scale` `bin/burn_in.py:66-74`; veil drawn `bin/thor_app.py:1133-1137` |
+| F-83 | Pure black background; unlit pixels draw no power; no fills on containers | none | `bin/theme.py`, `_paint` `bin/thor_app.py:1115-1117` |
 
-The Open button in hidden mode is outline only and is dimmed by the same veil (`bin/thor_app.py:1122-1124`).
+The Open button in hidden mode is outline only and is dimmed by the same veil (`bin/thor_app.py:1125-1127`).
 
 ## Gleipnir view (optional, read-only)
 
@@ -125,7 +125,7 @@ The Open button in hidden mode is outline only and is dimmed by the same veil (`
 |---|---|---|---|
 | F-90 | Battery cell shows Gleipnir state: held at its cap, charging toward it, running, off, or unverified | `gleipnir_ribbon` | `summary` `bin/gleipnir_view.py:128-145` |
 | F-91 | Battery and Gleipnir card: charge in Ah, current, watts, time left, voltage, temperature, health, wear, charger, Gleipnir state, last two journal events | `gleipnir_ribbon` | `card_items` `bin/gleipnir_view.py:167-196` |
-| F-92 | Polls `gleipnir --status --json` and sysfs every 10 s; journal once a minute | none | `_gleipnir_loop` `bin/thor_app.py:318-332` |
+| F-92 | Polls `gleipnir --status --json` and sysfs every 10 s; journal once a minute | none | `_gleipnir_loop` `bin/thor_app.py:320-334` |
 
 The script is searched at `/var/local/bin/gleipnir`, `/usr/local/bin/gleipnir`, then `PATH`
 (`bin/gleipnir_view.py:15`, `:23-27`). The panel offers the toggle only when Gleipnir is found or the setting is on
@@ -135,11 +135,12 @@ The script is searched at `/var/local/bin/gleipnir`, `/usr/local/bin/gleipnir`, 
 
 | ID | Feature | Setting | Where |
 |---|---|---|---|
-| F-120 | PS mode turns on while Chiaki-NG has focus and goes back to the previous mode when it loses focus; never restored at start | `ps_mode_auto` | `_on_chiaki_focus` `bin/thor_app.py:302-316`, `:223` |
-| F-121 | Focus: `GAMESCOPE_FOCUSED_APP` on `:0` (xprop, 1 s timeout) against the `SteamAppId` of `chiaki` processes, polled every second | none | `bin/ps_pad.py:187-269` |
-| F-122 | 16:9 pad: one finger drives the **Ratatoskr PS Touch** virtual touchscreen; landing is followed by a 0.4 % nudge; edges inset 6 % | `ps_touch_rotation` | `PsPad.touch_down` `bin/ps_pad.py:126-150`, `to_device` `:80-91`; `bin/engine.py:209`, `:239`, `:265` |
-| F-123 | Buttons: Create (F), PS (Esc), Options (O), Pad Click (T) held while touched; Mic taps Ctrl+M | none | `bin/ps_pad.py` `HOLD_KEYS`, `MIC_CHORD` |
-| F-124 | Without focus nothing is sent and the pad shows "Waiting for Chiaki-NG to have focus"; losing focus, a mode change, Hide, `SYN_DROPPED` and shutdown lift the touch and release the keys | none | `PsPad.set_active`, `release_all` `bin/ps_pad.py:115`, `:165`; `bin/thor_app.py:339-340`, `:360`, `:533`, `:642` |
+| F-120 | PS mode turns on while Chiaki-NG has focus and goes back to the previous mode when it loses focus; never restored at start | `ps_mode_auto` | `_on_chiaki_focus` `bin/thor_app.py:304-318`, `:225` |
+| F-121 | Focus: `GAMESCOPE_FOCUSED_APP` on `:0` (xprop, 1 s timeout) against the `SteamAppId` of `chiaki` processes, polled every second | none | `bin/ps_pad.py:274-356` |
+| F-122 | 16:9 pad: one finger drives the **Ratatoskr PS Touch** virtual touchscreen; landing is followed by a 0.4 % nudge; edges inset 6 % | `ps_touch_rotation` | `PsPad.touch_down` `bin/ps_pad.py:189-223`, `to_device` `:88-99`; `bin/engine.py:209`, `:239`, `:265` |
+| F-123 | Buttons: Create (F), PS (Esc), Options (O) held while touched; Mic taps Ctrl+M | none | `bin/ps_pad.py` `HOLD_KEYS`, `MIC_CHORD` |
+| F-126 | Pad click: a still tap (under 0.25 s and 12 px) sends T for 50 ms with the touch still down, then lifts both; a press held for the long-press delay within 24 px holds T until the lift; the outline lights up while it is held | `tap_to_click`, `long_press_delay_ms` | `PsPad.touch_up` `bin/ps_pad.py:232-249`, `_on_long_press` `:181-187`, `_finish_tap` `:173-179` |
+| F-124 | Without focus nothing is sent and the pad shows "Waiting for Chiaki-NG to have focus"; losing focus, a mode change, Hide, `SYN_DROPPED` and shutdown lift the touch and release the keys | none | `PsPad.set_active`, `release_all` `bin/ps_pad.py:137`, `:251`; `bin/thor_app.py:341-342`, `:362`, `:535`, `:644` |
 | F-125 | Decky toggle "PS touchpad while Chiaki-NG has focus" and the mode list entry | `ps_mode_auto` | `dist/index.js` |
 
 Not yet tried in a live PS5 stream: the axis mapping of a virtual touchscreen with no connector, and whether gamescope's
@@ -152,7 +153,7 @@ edge gestures react to it, are unverified; `ps_touch_rotation` exists for the fi
 | F-100 | Numbered diagnostic codes in `DBG-nnn` format | `debug_codes.py:12-119` |
 | F-101 | Log lines to stdout and to `/tmp/thor-input-debug.log` | `DebugLogger.log` `debug_codes.py:122-139` |
 | F-102 | Self-test: uinput, touchscreen node, IPC socket path, bottom gamescope environment file | `run_self_diagnostics` `debug_codes.py:142-199` |
-| F-103 | Telemetry counters: moves, scrolls, clicks, keystrokes, pointer wakes; draw time and frame lag (read and reset with `reset: true`) | `get_telemetry` `bin/engine.py:410-423`; `get_debug` `bin/thor_app.py:1004-1020` |
+| F-103 | Telemetry counters: moves, scrolls, clicks, keystrokes, pointer wakes; draw time and frame lag (read and reset with `reset: true`) | `get_telemetry` `bin/engine.py:410-423`; `get_debug` `bin/thor_app.py:1006-1022` |
 | F-104 | Touch log: each touch's duration, travel, fingers, and outcome (click, long press, none) | `touch_up` `bin/engine.py:827-848` |
 
 ## Standalone manager
@@ -168,5 +169,5 @@ The manager window has no control for Split, Pen, Hide, the keyboard timings, or
 ## Tray menu (AppIndicator)
 
 When `AppIndicator3` is importable, the driver adds an indicator with: Trackpad, Split, Keyboard and Quick Controls mode
-items, "Ratatoskr Manager...", and "Stop Ratatoskr" (`bin/thor_app.py:370-413`). The indicator id is `touch-master`
-(`bin/thor_app.py:374-378`). If the import fails the driver runs without it (`bin/thor_app.py:27-32`, `:371-372`).
+items, "Ratatoskr Manager...", and "Stop Ratatoskr" (`bin/thor_app.py:372-415`). The indicator id is `touch-master`
+(`bin/thor_app.py:376-380`). If the import fails the driver runs without it (`bin/thor_app.py:27-32`, `:373-374`).

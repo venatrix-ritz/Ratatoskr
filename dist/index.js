@@ -508,7 +508,7 @@ function Content() {
                         children: SP_JSX.jsx(DFL.ToggleField, {
                             label: "PS touchpad while Chiaki-NG has focus",
                             description: status.ps_focused
-                                ? "Chiaki-NG has focus: the bottom screen is the PS5 touchpad with Create, PS, Options, Pad Click and Mic"
+                                ? "Chiaki-NG has focus: the bottom screen is the PS5 touchpad (tap to click, hold to keep it pressed) with Create, PS, Options and Mic"
                                 : "Switches the bottom screen to the PS5 touchpad and PS buttons while Chiaki-NG streams, and back afterwards",
                             checked: status.ps_mode_auto ?? true,
                             onChange: (val) => updateSetting("ps_mode_auto", val)
