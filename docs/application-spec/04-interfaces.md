@@ -4,7 +4,7 @@
 
 | Input | Read by | Format | Notes | Source |
 |---|---|---|---|---|
-| Bottom touchscreen | `_reader_loop` in the driver | Linux `input_event` records (`llHHi`, 24 bytes on 64-bit), read in batches of up to 256 events | exclusive grab; `SYN_REPORT` closes a frame; `SYN_DROPPED` discards state | `bin/thor_app.py:690-727`, `bin/touch_frames.py:13-18`, `:47-70` |
+| Bottom touchscreen | `_reader_loop` in the driver | Linux `input_event` records (`llHHi`, 24 bytes on 64-bit), read in batches of up to 256 events | exclusive grab; `SYN_REPORT` closes a frame; `SYN_DROPPED` discards state | `bin/thor_app.py:699-736`, `bin/touch_frames.py:13-18`, `:47-70` |
 | Other input devices (idle tracking only) | `IdleTracker` | same records | every `/dev/input/event*` except the touchscreen and names containing "haptics", "Jack", "lid", "Thor Virtual", "pmic_"; rescanned every 5 s | `bin/dim_mirror.py:62-63`, `:110-148` |
 | Config file | driver at start, Decky backend and manager on every call | JSON object | see [05](05-configuration-requirements.md#configuration-file) | `bin/thor_app.py:252-269`, `main.py:139-148`, `bin/touch_master_manager.py:58-66` |
 | Top backlight | `DimMirror`, `HardwareStats` | integers in sysfs files | read four times a second while the dim is on | `bin/dim_mirror.py:365-374`, `:379` |
@@ -17,8 +17,8 @@
 | `gleipnir --status --json` | `gleipnir_view.read_status` | JSON object | timeout 3 s; `systemctl is-active --quiet gleipnir` timeout 2 s | `bin/gleipnir_view.py:30-47` |
 | Gleipnir sysfs | `gleipnir_view.read_battery` | text values from `/sys/class/power_supply/battery` and `qcom-battmgr-usb` | | `bin/gleipnir_view.py:61-105` |
 | Journal, tag `gleipnir` | `gleipnir_view.read_events` | `journalctl -t gleipnir -n 400 --no-pager -o short` | keeps the last two decisions | `bin/gleipnir_view.py:108-125` |
-| IPC request | `_ipc_loop` in the driver, `ipc_util.read_json_request` | one JSON object per connection | see [IPC reference](#ipc-reference) | `bin/thor_app.py:1095-1225` |
-| Keyboard and mouse actions from the user | `_dispatch_frame` through `TouchGestureProcessor` and the keyboard handlers | touch frames | | `bin/thor_app.py:748-778` |
+| IPC request | `_ipc_loop` in the driver, `ipc_util.read_json_request` | one JSON object per connection | see [IPC reference](#ipc-reference) | `bin/thor_app.py:1104-1234` |
+| Keyboard and mouse actions from the user | `_dispatch_frame` through `TouchGestureProcessor` and the keyboard handlers | touch frames | | `bin/thor_app.py:757-787` |
 
 ## Outputs
 
@@ -26,8 +26,8 @@
 |---|---|---|---|
 | Virtual pointer | `UInputBridge` on `/dev/uinput` | relative motion, wheel and hi-res wheel, `BTN_LEFT`, `BTN_RIGHT`, `BTN_MIDDLE` | `bin/engine.py:279-365` |
 | Virtual keys | `UInputBridge.key` on `/dev/uinput` | `EV_KEY` press and release, key codes 1 to 247 | `bin/engine.py:367-392` |
-| Bottom screen | GTK drawing | cairo drawing on the 1240 by 1080 window | `bin/thor_app.py:1231-1275` |
-| IPC reply | driver | one JSON object, then close | `bin/thor_app.py:1214` |
+| Bottom screen | GTK drawing | cairo drawing on the 1240 by 1080 window | `bin/thor_app.py:1240-1284` |
+| IPC reply | driver | one JSON object, then close | `bin/thor_app.py:1223` |
 | Driver log | `DebugLogger` | lines `[time] [DBG-nnn] [context] description - details` to stdout and `/tmp/thor-input-debug.log` | `debug_codes.py:124-141` |
 | Config file | driver (`save_config`), Decky backend, manager | JSON, written by temp file and rename, owner and mode kept | `bin/thor_app.py:271-296`, `bin/atomic_json.py:18-49`, `main.py:151-192`, `bin/touch_master_manager.py:69-73` |
 | Backlight writes | `HardwareStats.set_top_brightness`, `set_bottom_brightness` | integer text to the `brightness` file; `sudo -n tee` when the direct write is denied | `bin/system_stats.py:68-76`, `:513-536` |
@@ -37,7 +37,7 @@
 | Driver files in the home folder (release zip only) | `main.py` `_sync_driver` | copies of `bin/*.py`, `debug_codes.py`, the unit and the desktop entries | `main.py:60-106` |
 | systemd service actions | `main.py` `_run_systemctl`, manager | `systemctl --user` and `systemctl --machine=armada@.host --user` | `main.py:216-240`, `bin/touch_master_manager.py:80-119` |
 | Dim recovery file | `DimMirror._write_record` | JSON | `bin/dim_mirror.py:262-278` |
-| Socket file | `_start_ipc_server` and `cleanup` | `/run/user/<uid>/thor-input.sock` created on start and removed on exit | `bin/thor_app.py:1083-1101`, `:654` |
+| Socket file | `_start_ipc_server` and `cleanup` | `/run/user/<uid>/thor-input.sock` created on start and removed on exit | `bin/thor_app.py:1092-1110`, `:663` |
 
 ## CLI reference
 
@@ -85,7 +85,7 @@ exits with an error if a mapped file is not tracked by git (`:40-42`).
 ### `bin/thor_app.py`
 
 Takes no arguments. `main()` installs signal handlers for SIGINT and SIGTERM and then runs the GTK main loop
-(`bin/thor_app.py:1829-1846`). SIGTERM leaves the loop and runs `cleanup()`. The exit code is 1 after a lost touch device
+(`bin/thor_app.py:1838-1855`). SIGTERM leaves the loop and runs `cleanup()`. The exit code is 1 after a lost touch device
 and 0 otherwise.
 
 ### `debug_codes.py`
@@ -106,18 +106,18 @@ A module only. It has no command line. `run_self_diagnostics()` is called from t
 | Property | Value | Source |
 |---|---|---|
 | Socket | `/run/user/<uid>/thor-input.sock` (the driver uses `os.getuid()`; `main.py` hard-codes uid 1000) | `bin/thor_app.py:75`, `main.py:25`, `bin/touch_master_manager.py:28` |
-| Type | UNIX stream | `bin/thor_app.py:1090` |
+| Type | UNIX stream | `bin/thor_app.py:1099` |
 | Requests per connection | one JSON object | `bin/ipc_util.py:18-43` |
 | Request size limit | 64 KiB | `bin/ipc_util.py:14` |
-| Request time limit | 2 s to complete | `bin/ipc_util.py:18`, `bin/thor_app.py:1105` |
-| Reply | one JSON object, then the driver closes; clients read to end of file | `bin/thor_app.py:1214`, `bin/ipc_util.py:46-64` |
+| Request time limit | 2 s to complete | `bin/ipc_util.py:18`, `bin/thor_app.py:1114` |
+| Reply | one JSON object, then the driver closes; clients read to end of file | `bin/thor_app.py:1223`, `bin/ipc_util.py:46-64` |
 | Reply size limit (clients) | 1 MiB | `bin/ipc_util.py:15`, `main.py` `_send_ipc` |
-| Accept timeout | 0.5 s | `bin/thor_app.py:1093` |
+| Accept timeout | 0.5 s | `bin/thor_app.py:1102` |
 | Client timeouts | 2.0 s in `main.py` and `ipc_util.request`; 1.0 s in the manager | `main.py:35-57`, `bin/touch_master_manager.py:76` |
 
-A connection that sends nothing and closes gets no reply (`bin/thor_app.py:1106-1107`). A request that is not a JSON object,
+A connection that sends nothing and closes gets no reply (`bin/thor_app.py:1115-1116`). A request that is not a JSON object,
 is malformed, is too large, or raises in its handler gets `{"ok": false, "code": 303, "error": "..."}` and is logged as
-`DBG-303` (`bin/thor_app.py:1215-1220`, `debug_codes.py:38`). An unknown `action` gets the same code.
+`DBG-303` (`bin/thor_app.py:1224-1229`, `debug_codes.py:38`). An unknown `action` gets the same code.
 
 ### Actions
 
@@ -125,18 +125,18 @@ Every successful reply contains `"ok": true` and `"code": 0`. Fields are added p
 
 | `action` | Request fields | Reply fields added | Effect | Source |
 |---|---|---|---|---|
-| `get_status` | none | `mode`, `hardware_stats`, the gesture settings (see below), `mirror_dim`, `mirror_dim_floor_percent`, the keyboard timings, `gleipnir_ribbon`, `gleipnir_available`, `bottom_dimmed`, `cursor_stay_visible`, `cursor_hide_delay_ms`, `cursor_stay_visible_active`, `pen_mode`, `ps_mode_auto`, `ps_touch_rotation`, `ps_focused`, `haptics`, `haptics_available` | reads state | `bin/thor_app.py:1113-1123` |
-| `get_debug` | `reset` (optional boolean) | `telemetry`, `state`, `coords`, `touch_device`, `active_fingers`, `digitizer_contacts`, `engine_contacts`, `last_key`, `draws`, `draw_ms_avg`, `draw_ms_max`, `frame_lag_ms_max`, `hardware_stats`, gesture settings, `ps` (`focused`, `focused_app`, `finger`, `clicking`, `buttons`, `ps_mode_auto`, `ps_touch_rotation`), `haptics` (`enabled`, `device`, `available`, `pulses`, `failures`, `last_error`) | counters are cleared only if `reset` is true | `bin/thor_app.py:1128-1151` |
-| `set_mode` | `mode`: `trackpad`, `split`, `keyboard`, `settings` or `ps` | none | other values are ignored and the reply is still `ok`; `ps` without Chiaki-NG focus shows the waiting pad | `bin/thor_app.py:1171-1172`, `:401-402` |
-| `set_settings` | flat keys, for example `sensitivity`, `mirror_dim`, `keyboard_repeat_delay_ms`, `gleipnir_ribbon` | none | keys are applied and saved; a nested `{"settings": {...}}` is ignored | `bin/thor_app.py:1173-1182`, `bin/ipc_util.py:87-100` |
-| `set_volume` | `volume`, default 50 | `vol_pct` | clamped 0 to 100, written asynchronously | `bin/thor_app.py:1183-1186`, `bin/system_stats.py:326-330` |
-| `toggle_mute` | none | `vol_muted` | flips the displayed state and writes it | `bin/thor_app.py:1187-1190`, `bin/system_stats.py:505-511` |
-| `set_top_brightness` | `brightness`, default 100 | `top_bright_pct` | clamped 1 to 100, written asynchronously | `bin/thor_app.py:1191-1194`, `bin/system_stats.py:332-336` |
-| `set_bottom_brightness` | `brightness`, default 100 | `bot_bright_pct` | clamped 1 to 100, written asynchronously; also saved to Armada's level | `bin/thor_app.py:1195-1198`, `bin/system_stats.py:338-342` |
-| `set_pen_mode` | `mode`: `off`, `pen` or `pen_plus` (other values become `off`) | `pen_mode` and the three `cursor_*` fields | writes or removes the Pen + override | `bin/thor_app.py:1199-1201`, `:298-314` |
-| `wake` | none | none | taps F24 on the virtual keyboard, pokes the idle tracker and the burn-in timer | `bin/thor_app.py:1202-1207` |
-| `run_diagnostics` | none | `diagnostics` | `run_self_diagnostics()` | `bin/thor_app.py:1208-1209` |
-| `quit` | none | none | closes the window, which runs `cleanup()` | `bin/thor_app.py:1210-1211` |
+| `get_status` | none | `mode`, `hardware_stats`, the gesture settings (see below), `mirror_dim`, `mirror_dim_floor_percent`, the keyboard timings, `gleipnir_ribbon`, `gleipnir_available`, `bottom_dimmed`, `cursor_stay_visible`, `cursor_hide_delay_ms`, `cursor_stay_visible_active`, `pen_mode`, `ps_mode_auto`, `ps_touch_rotation`, `ps_focused`, `haptics`, `haptics_available` | reads state | `bin/thor_app.py:1122-1132` |
+| `get_debug` | `reset` (optional boolean) | `telemetry`, `state`, `coords`, `touch_device`, `active_fingers`, `digitizer_contacts`, `engine_contacts`, `last_key`, `draws`, `draw_ms_avg`, `draw_ms_max`, `frame_lag_ms_max`, `hardware_stats`, gesture settings, `ps` (`focused`, `focused_app`, `finger`, `clicking`, `buttons`, `ps_mode_auto`, `ps_touch_rotation`), `haptics` (`enabled`, `device`, `available`, `pulses`, `failures`, `last_error`) | counters are cleared only if `reset` is true | `bin/thor_app.py:1137-1160` |
+| `set_mode` | `mode`: `trackpad`, `split`, `keyboard`, `settings` or `ps` | none | other values are ignored and the reply is still `ok`; `ps` without Chiaki-NG focus shows the waiting pad | `bin/thor_app.py:1180-1181`, `:401-402` |
+| `set_settings` | flat keys, for example `sensitivity`, `mirror_dim`, `keyboard_repeat_delay_ms`, `gleipnir_ribbon` | none | keys are applied and saved; a nested `{"settings": {...}}` is ignored | `bin/thor_app.py:1182-1191`, `bin/ipc_util.py:87-100` |
+| `set_volume` | `volume`, default 50 | `vol_pct` | clamped 0 to 100, written asynchronously | `bin/thor_app.py:1192-1195`, `bin/system_stats.py:326-330` |
+| `toggle_mute` | none | `vol_muted` | flips the displayed state and writes it | `bin/thor_app.py:1196-1199`, `bin/system_stats.py:505-511` |
+| `set_top_brightness` | `brightness`, default 100 | `top_bright_pct` | clamped 1 to 100, written asynchronously | `bin/thor_app.py:1200-1203`, `bin/system_stats.py:332-336` |
+| `set_bottom_brightness` | `brightness`, default 100 | `bot_bright_pct` | clamped 1 to 100, written asynchronously; also saved to Armada's level | `bin/thor_app.py:1204-1207`, `bin/system_stats.py:338-342` |
+| `set_pen_mode` | `mode`: `off`, `pen` or `pen_plus` (other values become `off`) | `pen_mode` and the three `cursor_*` fields | writes or removes the Pen + override | `bin/thor_app.py:1208-1210`, `:298-314` |
+| `wake` | none | none | taps F24 on the virtual keyboard, pokes the idle tracker and the burn-in timer | `bin/thor_app.py:1211-1216` |
+| `run_diagnostics` | none | `diagnostics` | `run_self_diagnostics()` | `bin/thor_app.py:1217-1218` |
+| `quit` | none | none | closes the window, which runs `cleanup()` | `bin/thor_app.py:1219-1220` |
 
 Gesture settings returned by `get_status` and `get_debug` (`bin/engine.py:564-577`): `sensitivity`, `glide`, `friction`,
 `scroll_speed`, `tap_to_click`, `long_press_right_click`, `long_press_delay_ms`, `two_finger_right_click`,

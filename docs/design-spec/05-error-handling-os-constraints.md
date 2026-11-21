@@ -4,18 +4,18 @@
 
 | Component | Failure | What happens | Log code | Source |
 |---|---|---|---|---|
-| Touchscreen node missing | no node named "bottom" and "touchscreen" | retry in 5 s, indefinitely | `DBG-201` | `bin/thor_app.py:664-668` |
-| Touchscreen open denied | `PermissionError` | retry in 5 s | `DBG-202` | `bin/thor_app.py:676-684` |
-| `EVIOCGRAB` fails | another holder, or other `OSError` | close the descriptor, retry in 5 s | `DBG-203` | `bin/thor_app.py:676-686` |
-| `select` on the device fails | `OSError` or `ValueError` | restart the service (`_device_lost`), unless shutting down | `DBG-204` | `bin/thor_app.py:696-703` |
-| Read on the device fails with `ENODEV`, `EIO`, `EBADF`, `ENOENT` | device gone | restart the service with exit code 1 | `DBG-204` | `bin/thor_app.py:712-720`, `:809-812` |
-| Other read error | `OSError` | log, sleep 50 ms, continue | `DBG-204` | `bin/thor_app.py:721-723` |
-| A frame handler raises | any exception | log at most every 5 s, keep reading with the grab held | `DBG-204` | `bin/thor_app.py:729-737` |
-| `SYN_DROPPED` | kernel buffer overflow | reset gesture state, end key press, release UI button, resync slots | `DBG-204` | `bin/thor_app.py:751-762` |
-| Slot read fails during resync | `OSError` or `struct.error` | log, leave the state empty | `DBG-204` | `bin/thor_app.py:799-803` |
+| Touchscreen node missing | no node named "bottom" and "touchscreen" | retry in 5 s, indefinitely | `DBG-201` | `bin/thor_app.py:673-677` |
+| Touchscreen open denied | `PermissionError` | retry in 5 s | `DBG-202` | `bin/thor_app.py:685-693` |
+| `EVIOCGRAB` fails | another holder, or other `OSError` | close the descriptor, retry in 5 s | `DBG-203` | `bin/thor_app.py:685-695` |
+| `select` on the device fails | `OSError` or `ValueError` | restart the service (`_device_lost`), unless shutting down | `DBG-204` | `bin/thor_app.py:705-712` |
+| Read on the device fails with `ENODEV`, `EIO`, `EBADF`, `ENOENT` | device gone | restart the service with exit code 1 | `DBG-204` | `bin/thor_app.py:721-729`, `:818-821` |
+| Other read error | `OSError` | log, sleep 50 ms, continue | `DBG-204` | `bin/thor_app.py:730-732` |
+| A frame handler raises | any exception | log at most every 5 s, keep reading with the grab held | `DBG-204` | `bin/thor_app.py:738-746` |
+| `SYN_DROPPED` | kernel buffer overflow | reset gesture state, end key press, release UI button, resync slots | `DBG-204` | `bin/thor_app.py:760-771` |
+| Slot read fails during resync | `OSError` or `struct.error` | log, leave the state empty | `DBG-204` | `bin/thor_app.py:808-812` |
 | `/dev/uinput` open or setup fails | `OSError` | raised from `UInputBridge.__init__`; logged with `DBG-101` or `DBG-102` | `DBG-101`, `DBG-102` | `bin/engine.py:163-206` |
 | Virtual device write fails | `OSError` | log, the event is lost; the key or button stays in the held set until a release succeeds | `DBG-104` | `bin/engine.py:292-296`, `:383-386`, `:362-365` |
-| IPC request malformed, unknown, or too slow | see [04](04-ipc-data-flow.md) | reply `303` or time out with no reply | `DBG-303` | `bin/thor_app.py:1215-1220` |
+| IPC request malformed, unknown, or too slow | see [04](04-ipc-data-flow.md) | reply `303` or time out with no reply | `DBG-303` | `bin/thor_app.py:1224-1229` |
 | IPC client cannot connect | socket missing or refused | client returns `{"ok": false, "code": 302}` or `304` | none in the client | `main.py:35-57` |
 | Config file unreadable or not JSON | `ValueError`, `OSError` | the defaults are used; the driver logs `save_config` or `load_config` failures under `DBG-303` | `DBG-303` | `bin/thor_app.py:268-269`, `:295-296` |
 | Config write fails | `OSError` | the driver logs it under `DBG-303`; the Decky backend and the manager ignore it silently. The in-memory value still applies in the driver | `DBG-303` (driver only) | `bin/thor_app.py:295-296`, `main.py:185-189`, `bin/touch_master_manager.py:72-73` |
@@ -24,16 +24,16 @@
 | Brightness write failure, top | any | ignored; no status is kept | none | `bin/system_stats.py:513-519` |
 | Volume `wpctl` fails or times out | `OSError`, `TimeoutExpired` | volume shown as 0 in the sample | `DBG-702` is defined but not used by the code | `bin/system_stats.py:447-465`, `:473-499` |
 | `pactl subscribe` missing or exiting | `OSError` on start, end of output | the volume is read every 5 s while the UI is lit; restarted with backoff (1 s doubling to 60 s) | none | `bin/system_stats.py:149-175` |
-| X display `:0` gone (Game Mode restarting) or python-xlib missing | `ConnectionClosedError` or `OSError`; `ImportError` | counts as no focus and reconnects with backoff; without python-xlib, `xprop` polling | one `DBG-620` line per outage | `bin/ps_pad.py:444-479` |
-| Gleipnir status fails | not installed, bad output, timeout | the view shows "not installed or not answering" or "off" | none | `bin/gleipnir_view.py:30-47`, `bin/thor_app.py:1361-1364` |
+| X display `:0` gone (Game Mode restarting) or python-xlib missing | `ConnectionClosedError` or `OSError`; `ImportError` | counts as no focus and reconnects with backoff; without python-xlib, `xprop` polling | one `DBG-620` line per outage | `bin/ps_pad.py:464-499` |
+| Gleipnir status fails | not installed, bad output, timeout | the view shows "not installed or not answering" or "off" | none | `bin/gleipnir_view.py:30-47`, `bin/thor_app.py:1370-1373` |
 | Dim recovery write fails | `OSError` or sudo fails | retry every 5 s, log at most every 30 s | `DBG-701` | `bin/dim_mirror.py:280-311`, `:380-382` |
 | Dim record cannot be written | `OSError` | log `DBG-701`, continue | `DBG-701` | `bin/dim_mirror.py:262-270` |
 | Idle tracker cannot list devices | exception | log `DBG-610`, skip this scan | `DBG-610` | `bin/dim_mirror.py:150-156` |
 | Idle tracker select fails | `OSError`, `ValueError` | drop every descriptor; the next scan reopens them | none | `bin/dim_mirror.py:194-199` |
 | Decky `systemctl` fails | non-zero exit or exception on both forms | logs `ERR_SERVICE_START` or `ERR_SERVICE_STOP` (undefined, see note below) | undefined | `main.py:216-240` |
 | Tray stop | the command cannot be started | logs `DBG-303` with the error text | `DBG-303` | `bin/thor_app.py:507-509` |
-| Driver socket bind at start | `OSError` (for example a stale file that cannot be removed) | not caught; the exception leaves `start()` and the process exits | `DBG-301` is defined but never emitted | `bin/thor_app.py:1083-1092`, `debug_codes.py:36` |
-| Cleanup step fails | any exception | log, continue with the next step (intended) | `ERR_SERVICE_STOP` (undefined, see below) | `bin/thor_app.py:638-642` |
+| Driver socket bind at start | `OSError` (for example a stale file that cannot be removed) | not caught; the exception leaves `start()` and the process exits | `DBG-301` is defined but never emitted | `bin/thor_app.py:1092-1101`, `debug_codes.py:36` |
+| Cleanup step fails | any exception | log, continue with the next step (intended) | `ERR_SERVICE_STOP` (undefined, see below) | `bin/thor_app.py:647-651` |
 
 **Undefined codes.** `main.py` (lines 199 and 235) and `bin/thor_app.py` (line 488) use `DebugCode.ERR_SERVICE_START` and
 `DebugCode.ERR_SERVICE_STOP`. `debug_codes.py` does not define them. The intent of `cleanup`'s per-step guard is that a
@@ -44,7 +44,7 @@ This is from reading the code, not from running it ([06](06-design-decisions-roa
 
 | Operation | Timeout or retry | Source |
 |---|---|---|
-| Touchscreen open and grab | every 5 s, forever | `bin/thor_app.py:666-687`, `:742-745` |
+| Touchscreen open and grab | every 5 s, forever | `bin/thor_app.py:675-696`, `:751-754` |
 | Driver restart after device loss | systemd, after 2 s (`RestartSec=2`), no start limit (`StartLimitIntervalSec=0`) | `systemd/touch-master.service:6`, `:11-12` |
 | Dim recovery | every 5 s until it succeeds | `bin/dim_mirror.py:380-382` |
 | Dim fade failure | next attempt after 60 s | `bin/dim_mirror.py:351` |
@@ -63,11 +63,11 @@ This is from reading the code, not from running it ([06](06-design-decisions-roa
 
 ## Shutdown
 
-Signals: SIGINT and SIGTERM call `request_quit`, which logs and leaves the GTK main loop (`bin/thor_app.py:608-613`,
-`:1839-1840`). systemd sends SIGTERM on stop and restart. The default action would end the process before cleanup
-(the comment at `bin/thor_app.py:1831-1832`).
+Signals: SIGINT and SIGTERM call `request_quit`, which logs and leaves the GTK main loop (`bin/thor_app.py:617-622`,
+`:1848-1849`). systemd sends SIGTERM on stop and restart. The default action would end the process before cleanup
+(the comment at `bin/thor_app.py:1840-1841`).
 
-`cleanup()` (`bin/thor_app.py:629-657`) runs once (`_cleaned`), and each step is guarded by `step()`:
+`cleanup()` (`bin/thor_app.py:638-666`) runs once (`_cleaned`), and each step is guarded by `step()`:
 
 1. dim mirror stop: sets the stop event, waits up to 2 s, restores the bottom level and clears the record;
 2. idle tracker stop;
@@ -75,11 +75,11 @@ Signals: SIGINT and SIGTERM call `request_quit`, which logs and leaves the GTK m
 4. key repeat stop;
 5. the stop events for the touch reader, Gleipnir and IPC are set;
 6. the IPC socket file is removed;
-7. the touchscreen grab is released and the descriptor closed (`_release_touch_device`, `:615-627`);
+7. the touchscreen grab is released and the descriptor closed (`_release_touch_device`, `:624-636`);
 8. the virtual devices are closed: all held buttons and keys are released first (`bin/engine.py:428-444`).
 
-`main()` calls `cleanup()` in a `finally` as well (`bin/thor_app.py:1842-1845`). The exit code is 1 when the device was
-lost, otherwise 0 (`:1846`).
+`main()` calls `cleanup()` in a `finally` as well (`bin/thor_app.py:1851-1854`). The exit code is 1 when the device was
+lost, otherwise 0 (`:1855`).
 
 ## Recovery
 
@@ -87,11 +87,11 @@ lost, otherwise 0 (`:1846`).
 |---|---|---|
 | Crash or kill during a dim | the record is read on the next start and the saved level is put back; retried every 5 s on failure | `bin/dim_mirror.py:280-311`, `:333` |
 | Restart during Steam's idle dim | the first sample at the floor starts a dim; the restore comes with the next rise or input | `bin/top_follower.py:171-174` |
-| Lost touch device | exit 1; systemd restarts the service; the new process grabs the node again | `bin/thor_app.py:718-720`, `:809-812` |
+| Lost touch device | exit 1; systemd restarts the service; the new process grabs the node again | `bin/thor_app.py:727-729`, `:818-821` |
 | Stuck fingers (lost lift) | 1.5 s silence drops the contact | `bin/engine.py:601-615` |
 | Stuck held button or key after an error | `release_all` on close; a failed release is kept in the held set | `bin/engine.py:405-410`, `:362-365`, `:384` |
 | Driver out of date after a deploy | the Decky backend restarts it when the code or unit changed (release zip) | `main.py:199-207` |
-| Stale socket file | removed before bind on start, and on cleanup | `bin/thor_app.py:1084-1088`, `:654` |
+| Stale socket file | removed before bind on start, and on cleanup | `bin/thor_app.py:1093-1097`, `:663` |
 | Brightness write that failed | the bottom path reports `last_write_ok` false; the dim does not record success | `bin/system_stats.py:525-536` |
 
 Recovery is local and automatic. Nothing rolls back a configuration change, because the file is replaced atomically and
@@ -127,7 +127,7 @@ The `session_cursor` override file is written with a plain temp file and `os.rep
 
 | Constraint | How the code deals with it | Source |
 |---|---|---|
-| Only one process can read the touchscreen at a time (`EVIOCGRAB`) | the driver grabs it and Armada's bottom session is disabled while the driver runs (`Conflicts=`) | `systemd/touch-master.service:5`, `bin/thor_app.py:672-674`; `docs/troubleshooting.md` |
+| Only one process can read the touchscreen at a time (`EVIOCGRAB`) | the driver grabs it and Armada's bottom session is disabled while the driver runs (`Conflicts=`) | `systemd/touch-master.service:5`, `bin/thor_app.py:681-683`; `docs/troubleshooting.md` |
 | `/dev/uinput` must be writable by the user | checked by the self-test; the driver fails to start if it cannot open it | `debug_codes.py:151-156`, `bin/engine.py:163-168` |
 | Backlights are root-only | `sudo -n tee` fallback and the optional narrow rule | `bin/system_stats.py:43-76`, `systemd/touch-master-backlight.sudoers` |
 | Armada's root service re-applies the saved bottom level every 2 s | the dim writes the saved file as well | `bin/dim_mirror.py:49-50`, `:337-347` (citing Armada's `armada-control`, **unverified** here) |
@@ -140,5 +140,5 @@ The `session_cursor` override file is written with a plain temp file and `os.rep
 | The bottom gamescope environment | the self-test checks for the file `/run/user/<uid>/armada-bottom-env` | `debug_codes.py:193-195` |
 | Python version | the modules use `from __future__ import annotations`, which defers most annotations. `Event = tuple[int, bool]` (`bin/modifiers.py:95`) is an assignment and is evaluated at import, so Python 3.9 or later is needed. **Unverified**: which Python Armada ships | `bin/modifiers.py:95` |
 | Linux-only calls | `os.chown`, `fcntl`, `CLOCK_BOOTTIME`, `EVIOCGRAB`, `/proc` are Linux; `fcntl` is optional in the engine, and `os.chown` is checked with `getattr` | `bin/engine.py:15-18`, `bin/atomic_json.py:44-45`, `bin/dim_mirror.py:48` |
-| Fonts and emoji | the Thor's fonts do not draw emoji, so the ribbon uses short text labels | `bin/thor_app.py:1351` (comment) |
+| Fonts and emoji | the Thor's fonts do not draw emoji, so the ribbon uses short text labels | `bin/thor_app.py:1360` (comment) |
 | Burn-in on AMOLED | pure black, no fills, orbit, hint fade, idle veil | [03](03-timing-idle-throttling-dim.md#burn-in) |

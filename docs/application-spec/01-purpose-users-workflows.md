@@ -16,7 +16,7 @@ The output is a pair of virtual uinput devices: "Thor Virtual Trackpad" (`bin/en
 ## Scope
 
 ### In scope
-- Grabbing the bottom touchscreen exclusively (`EVIOCGRAB`, `bin/thor_app.py:673`) and reading its multitouch frames.
+- Grabbing the bottom touchscreen exclusively (`EVIOCGRAB`, `bin/thor_app.py:682`) and reading its multitouch frames.
 - Gesture interpretation: pointer motion, taps, long press, two- and three-finger gestures, momentum glide, Pen mode
   (`bin/engine.py`).
 - Drawing the bottom-screen UI with GTK and cairo (`bin/thor_app.py`, `bin/key_render.py`, `bin/theme.py`).
@@ -91,7 +91,7 @@ reloads user systemd if the unit changed, and starts or restarts the service.
 ### W-04 Choose an input mode
 Modes are `trackpad`, `split`, `keyboard` and `settings` (`bin/thor_app.py:401`, which also accepts no others).
 They can be chosen from the header buttons (Trackpad, Split, Keyboard, Quick Controls, and PS while Chiaki-NG has focus), the status ribbon (a tap toggles
-Quick Controls, `bin/thor_app.py:892-894`), the Decky dropdown (`dist/index.js:287-293`), the tray menu, or
+Quick Controls, `bin/thor_app.py:901-903`), the Decky dropdown (`dist/index.js:287-293`), the tray menu, or
 `touch_master_manager.py --mode trackpad|keyboard|settings` (the CLI has no `split` choice, `bin/touch_master_manager.py:415`).
 
 ### W-05 Use the trackpad
@@ -119,7 +119,7 @@ same settings plus pointer tuning, keyboard timings and Pen controls (`dist/inde
 ### W-09 Hide the UI and bring it back
 The **Hide** header button blanks everything except an **Open** button in the same corner. While hidden, the whole
 screen is a trackpad (`bin/thor_app.py` `_owner_at`, lines 671-687). A touch within `OPEN_HIT_PAD = 24` px of the Open
-button restores the UI (`bin/thor_app.py:118-119`, `:889-891`). Hidden state is not saved (`bin/thor_app.py:148`).
+button restores the UI (`bin/thor_app.py:118-119`, `:898-900`). Hidden state is not saved (`bin/thor_app.py:148`).
 
 ### W-10 Dim the bottom screen with the top (opt-in)
 Turn on "Dim bottom screen with the top" in the Decky panel, or set `mirror_dim: true`. The driver then watches the top
@@ -129,7 +129,7 @@ input arrives (`bin/dim_mirror.py`, `bin/top_follower.py`). Needs write access t
 
 ### W-11 Wake the screens
 `touch_master_manager.py --wake` or the IPC `wake` action taps F24 on the virtual keyboard
-(`bin/thor_app.py:1202-1207`). The docs say Steam treats it as input and restores a dimmed top screen (`docs/usage.md`,
+(`bin/thor_app.py:1211-1216`). The docs say Steam treats it as input and restores a dimmed top screen (`docs/usage.md`,
 "Waking the screens"). That is the author's device observation, **unverified** in this review.
 
 ### W-12 Keep the pointer visible in Game Mode (Pen +)
@@ -152,7 +152,7 @@ does not allow.
 
 ### W-15 Read the status ribbon and Gleipnir card (optional)
 With `gleipnir_ribbon` on, the battery cell shows Gleipnir's state (held, charging toward its cap, off or unverified) and
-Quick Controls shows a Battery and Gleipnir card (`bin/gleipnir_view.py`, `bin/thor_app.py:1361-1364`, `:1747`).
+Quick Controls shows a Battery and Gleipnir card (`bin/gleipnir_view.py`, `bin/thor_app.py:1370-1373`, `:1756`).
 The view runs `gleipnir --status --json`, reads `systemctl is-active gleipnir` and the Gleipnir journal, and never writes
 (`bin/gleipnir_view.py:4-6`).
 

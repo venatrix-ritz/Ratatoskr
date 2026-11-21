@@ -13,7 +13,7 @@ repo checks the Armada version at run time, so other builds are **unverified**.
 | Mounting | rotated 90 degrees relative to the digitizer's raw axes | `raw_to_screen` `bin/engine.py:126-128`: `x = raw_y`, `y = 1079 - raw_x` |
 | Driver window | GTK window, fullscreen, undecorated, 1240 by 1080 | `bin/thor_app.py:237-242` |
 | Display | runs in the bottom-screen gamescope through `armada-run-bottom`; the code comments name the secondary display `:2` | `systemd/touch-master.service:10`, `debug_codes.py:20` (comment), `docs/architecture.md` ("DISPLAY :2") |
-| Pixel colour | pure black base; lit pixels are the only power draw | `bin/theme.py:1-10`, `bin/thor_app.py:1249-1251` |
+| Pixel colour | pure black base; lit pixels are the only power draw | `bin/theme.py:1-10`, `bin/thor_app.py:1258-1260` |
 
 The header is 80 px of buttons and an 88 px ribbon, so the drawing area starts at y = 168 (`bin/thor_app.py:79-83`).
 The split line is at y = 500 (`bin/thor_app.py:89`).
@@ -22,15 +22,15 @@ The split line is at y = 500 (`bin/thor_app.py:89`).
 
 | Property | Value | Source |
 |---|---|---|
-| Node selection | first `/dev/input/event*` whose `/sys/class/input/<node>/device/name` contains both "bottom" and "touchscreen" (case-insensitive) | `_find_bottom_touchscreen` `bin/thor_app.py:814-823` |
+| Node selection | first `/dev/input/event*` whose `/sys/class/input/<node>/device/name` contains both "bottom" and "touchscreen" (case-insensitive) | `_find_bottom_touchscreen` `bin/thor_app.py:823-832` |
 | Node name used by the diagnostic and the idle tracker | `bottom_touchscreen` | `debug_codes.py:162-167`, `bin/dim_mirror.py:119` |
-| Fallback node | **none in the code**. The docs say `/dev/input/event5` is a fallback (see [06](06-testing-limitations-glossary.md#documentation-and-code-mismatches-found-in-this-review)) | `bin/thor_app.py:814-823` |
-| Exclusive access | `EVIOCGRAB` (value 1) on the node; released on cleanup | `bin/thor_app.py:673-674`, `:619-622` |
+| Fallback node | **none in the code**. The docs say `/dev/input/event5` is a fallback (see [06](06-testing-limitations-glossary.md#documentation-and-code-mismatches-found-in-this-review)) | `bin/thor_app.py:823-832` |
+| Exclusive access | `EVIOCGRAB` (value 1) on the node; released on cleanup | `bin/thor_app.py:682-683`, `:628-631` |
 | Slots | at most five, and "the controller reports at most five fingers" | `bin/engine.py:109-111`; the docs say it loses lifts when several fingers are down (`docs/troubleshooting.md`, author's observation 2026-10-08, **unverified** here) |
-| Retry | if the node is missing or the grab fails, the driver retries every 5 s | `bin/thor_app.py:666-688`, `:742-745` |
+| Retry | if the node is missing or the grab fails, the driver retries every 5 s | `bin/thor_app.py:675-697`, `:751-754` |
 
 The digitizer is grabbed, so no other process can read it. The idle tracker is therefore told about bottom touches by the
-app (`bin/thor_app.py:727`, `poke()`). The docs also say a physical controller `/dev/input/event7` is root-only on the
+app (`bin/thor_app.py:736`, `poke()`). The docs also say a physical controller `/dev/input/event7` is root-only on the
 Thor (`docs/dim-mirror.md`, observed 2026-10-08). That is not in the code and is **unverified** here.
 
 ## Backlights

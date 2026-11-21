@@ -574,6 +574,15 @@ class ThorApp:
         """A ribbon-only repaint is right: the ribbon shows and nothing else is drawn over its band."""
         return not self.ui_hidden and self.mode != "settings" and self.held_key is None
 
+    def _visible_state(self) -> tuple:
+        """What touches, timers and other threads change on screen besides the stats. It is in the planner's key, so
+        any of it is drawn within a tick even where nothing queued a draw (the PS pad's long-press timer lights the
+        pad outline)."""
+        ps, key = self.ps, self.held_key
+        return (self.mode, ps.active, ps.clicking, tuple(sorted(set(ps.button_tids.values()))), self.pen_mode,
+                self.held_ui_button, key.label if key is not None else None, self.active_key_press,
+                tuple(sorted(self.mods.state.items())), self.gesture.tap_to_click, self.gesture.stylus_mode)
+
     def _frame_state(self, now: float, stats: dict | None = None, freeze: bool = True) -> dict:
         """What a frame drawn now would show, in the terms plan_redraw compares. With freeze, a dimmed screen keeps
         the status texts that are on it (they change at the next orbit step instead)."""
@@ -586,7 +595,7 @@ class ThorApp:
             "orbit": self.burn_in.orbit_step(now),
             "lum": round(lum, 2),
             "hint": round(hint, 2) if hint > 0.01 else 0.0,
-            "page": (hidden, self._cursor_status["cursor_stay_visible_active"]),
+            "page": (hidden, self._cursor_status["cursor_stay_visible_active"]) + self._visible_state(),
             "ribbon": None,
         }
         if hidden:

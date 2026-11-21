@@ -542,6 +542,10 @@ def test_the_frame_planner_repaints_only_what_changed():
         check("the first tick paints everything", tick() == "full")
         painted()
         check("nothing changed: no frame", tick() is None)
+        app.ps.clicking = True  # what the PS pad's long-press timer does, with no touch frame and no draw queued
+        check("a timer lit the PS pad outline: a full frame at the next tick", tick() == "full", queued)
+        app.ps.clicking = False
+        painted()
         app.st["cpu_load"] += 1
         check("a stats text changed: only the ribbon band", tick() == ("ribbon", thor_app.RIBBON_BAND), queued)
         painted()

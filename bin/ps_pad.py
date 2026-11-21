@@ -52,6 +52,9 @@ FOCUS_ATOM = "GAMESCOPE_FOCUSED_APP"
 CHIAKI_COMMS = ("chiaki",)
 FOCUS_POLL_S = 1.0            # xprop polling, only when python-xlib cannot be imported
 FOCUS_SETTLE_S = 0.2          # gamescope writes the focused app in bursts (27 writes in 3 s seen): read once it settles
+# Inside such a burst 17 of the 27 writes were empty (no app) for about 2 s before the app came back: an empty value
+# only counts once it has lasted this long, so a focused Chiaki does not drop out of PS mode and back.
+EMPTY_GRACE_S = 3.0
 LATE_START_S, LATE_RESCAN_S = 10.0, 1.0  # after a focus change, look for a late-starting Chiaki this long, this often
 RECONNECT_MIN_S, RECONNECT_MAX_S = 1.0, 30.0
 WATCH_WAIT_S = 30.0           # longest block on the X socket with no event
@@ -366,13 +369,15 @@ class FocusWatcher:
     """Calls on_change(bool) when Chiaki becomes, or stops being, the focused Game Mode app.
 
     Event-driven: an XFocusSource hears every write of GAMESCOPE_FOCUSED_APP, and a lost display (Game Mode
-    restarting) counts as no focus and reconnects with backoff (RECONNECT_MIN_S doubling to RECONNECT_MAX_S). Without
+    restarting) counts as no focus at once and reconnects with backoff (RECONNECT_MIN_S doubling to RECONNECT_MAX_S);
+    an empty value counts only after EMPTY_GRACE_S (gamescope writes short empty runs inside its bursts). Without
     python-xlib it polls xprop every FOCUS_POLL_S. Chiaki's app ids are read from /proc only when the focused app
     changes, then every `rescan` s for `late_start` s while that app is not yet a known Chiaki id."""
 
     def __init__(self, on_change, read_focus=read_focused_app, read_ids=chiaki_app_ids, connect=XFocusSource,
                  log=lambda msg: None, interval: float = FOCUS_POLL_S, rescan: float = LATE_RESCAN_S,
-                 late_start: float = LATE_START_S, settle: float = FOCUS_SETTLE_S, clock=time.monotonic) -> None:
+                 late_start: float = LATE_START_S, settle: float = FOCUS_SETTLE_S, empty_grace: float = EMPTY_GRACE_S,
+                 clock=time.monotonic) -> None:
         self.on_change = on_change
         self.read_focus = read_focus
         self.read_ids = read_ids
@@ -382,6 +387,7 @@ class FocusWatcher:
         self.rescan = rescan
         self.late_start = late_start
         self.settle = settle
+        self.empty_grace = empty_grace
         self.clock = clock
         self.focused = False
         self.focused_app: int | None = None
@@ -423,6 +429,20 @@ class FocusWatcher:
     def poll_once(self) -> bool:
         return self.update(self.read_focus())
 
+    def _settled_read(self, src) -> int | None:
+        """The focused app; an empty value is read again until it has lasted empty_grace s."""
+        app = src.read()
+        deadline = self.clock() + self.empty_grace
+        while app is None and self.focused_app is not None and not self._stop.is_set():
+            left = deadline - self.clock()
+            if left <= 0:
+                break
+            if src.wait(left):
+                self._stop.wait(self.settle)
+                src.drain()
+            app = src.read()
+        return app
+
     def _watch(self, src) -> None:
         self.update(src.read())
         while not self._stop.is_set():
@@ -431,7 +451,7 @@ class FocusWatcher:
                 self._stop.wait(self.settle)
                 src.drain()
                 self.writes_heard += 1
-            self.update(src.read())
+            self.update(self._settled_read(src))
 
     def _poll(self) -> None:
         while not self._stop.is_set():

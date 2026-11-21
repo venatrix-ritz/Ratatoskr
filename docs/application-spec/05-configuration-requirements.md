@@ -41,10 +41,10 @@ backend (`main.py` `_default_config`). The standalone manager has the same defau
 | `mirror_dim_floor_percent` | `3` | 1 to 50 | the level the bottom dims to | `bin/thor_app.py:170`, `:319-323` |
 | `keyboard_repeat_delay_ms` | `350` | 150 to 800 | hold time before a key repeats | `bin/keyboard_settings.py:9-16` |
 | `keyboard_repeat_interval_ms` | `60` | 20 to 200 | time between repeats | `bin/keyboard_settings.py:9-16` |
-| `keyboard_caps_window_ms` | `350` | 150 to 800 | second Shift tap within this time locks Caps Lock; also the window for the other modifiers | `bin/keyboard_settings.py:9-16`, `bin/thor_app.py:912` |
+| `keyboard_caps_window_ms` | `350` | 150 to 800 | second Shift tap within this time locks Caps Lock; also the window for the other modifiers | `bin/keyboard_settings.py:9-16`, `bin/thor_app.py:921` |
 | `haptics` | `true` | bool | a short buzz for tap clicks, keys and on-screen buttons | `_apply_haptics_settings` `bin/thor_app.py`; `bin/haptics.py` |
 | `ps_mode_auto` | `true` | bool | PS mode while Chiaki-NG has focus | `bin/thor_app.py:202`, `:339-344`, `:350-353` |
-| `ps_touch_rotation` | `0` | 0, 90, 180, 270; anything else is 0 | turns PS mode's touch axes | `normalize_rotation` `bin/ps_pad.py:106`; `bin/thor_app.py:342-344` |
+| `ps_touch_rotation` | `0` | 0, 90, 180, 270; anything else is 0 | turns PS mode's touch axes | `normalize_rotation` `bin/ps_pad.py:109`; `bin/thor_app.py:342-344` |
 | `gleipnir_ribbon` | `false` | bool | show Gleipnir in the ribbon and in Quick Controls (read-only) | `bin/thor_app.py:174`, `:325-330` |
 
 Keys the driver writes but the table does not list: `pen_mode` and `stylus_mode` above. `save_config` writes the full set
@@ -63,7 +63,7 @@ of driver keys every time (`bin/thor_app.py:283-293`).
 | Path | What | Created or changed by | Source |
 |---|---|---|---|
 | `~/.config/thor-input/config.json` | settings | driver, Decky backend, manager | see above |
-| `/run/user/<uid>/thor-input.sock` | IPC socket | driver (created on start, removed on exit) | `bin/thor_app.py:75`, `:1083-1101` |
+| `/run/user/<uid>/thor-input.sock` | IPC socket | driver (created on start, removed on exit) | `bin/thor_app.py:75`, `:1092-1110` |
 | `/tmp/thor-input-debug.log` | log lines | every component | `debug_codes.py:9` |
 | `~/.config/environment.d/50-ratatoskr-cursor.conf` | Pen + override, `HIDE_CURSOR_DELAY_MS=3600000` | driver when Pen + is on; removed when it is off | `bin/session_cursor.py:198-234` |
 | `~/.local/state/thor-input/dim-restore.json` | pre-dim bottom level `{"pct", "ts"}` | driver while the bottom is dimmed | `bin/dim_mirror.py:52-53`, `:262-278` |
@@ -109,7 +109,7 @@ reading of the code against the rule file. The docs call the narrow rule "untest
 | SSH key access and `sudo` on the Thor for the deploy | used by `deploy.sh` and `deploy-decky-panel.sh` | `scripts/deploy.sh`, `scripts/deploy-decky-panel.sh` |
 | `wpctl` (PipeWire) for volume | used for the volume slider and reading the level | `bin/system_stats.py:408-414`, `:443-465`, `:469-503` |
 | `pactl` (pulseaudio-utils, pipewire-pulse) | `pactl subscribe` tells when the volume changed; without it the volume is read every 5 s while the UI is lit | `bin/system_stats.py:91-175` |
-| python-xlib 0.33 in armada's user site-packages | the event-driven Chiaki-NG focus watch; without it `xprop` is polled every second | `bin/ps_pad.py:323-362`, `:444-479` |
+| python-xlib 0.33 in armada's user site-packages | the event-driven Chiaki-NG focus watch; without it `xprop` is polled every second | `bin/ps_pad.py:326-365`, `:464-499` |
 | `systemctl --user` with a running user session | used by the Decky backend and the manager | `main.py:216-240`, `bin/touch_master_manager.py:80-119` |
 | Gleipnir (optional) | only for the status view | `bin/gleipnir_view.py` |
 | AppIndicator3 (optional) | only for the tray menu | `bin/thor_app.py:27-32` |
@@ -125,21 +125,21 @@ exercises it. The tests that need a device are marked (device). "Status" is what
 
 | ID | Requirement | Evidence | Status |
 |---|---|---|---|
-| R-01 | The driver grabs the bottom touchscreen exclusively and retries every 5 s if it is missing or the grab fails | `bin/thor_app.py:663-688`, `:742-745` | implemented |
-| R-02 | Touches are read as frames; kernel timestamps are used for timing; `SYN_DROPPED` is handled by reading the slots back | `bin/touch_frames.py`, `tests/test_touch_frames.py`, `bin/thor_app.py:748-807` | implemented; `test_touch_frames` runs anywhere |
+| R-01 | The driver grabs the bottom touchscreen exclusively and retries every 5 s if it is missing or the grab fails | `bin/thor_app.py:672-697`, `:751-754` | implemented |
+| R-02 | Touches are read as frames; kernel timestamps are used for timing; `SYN_DROPPED` is handled by reading the slots back | `bin/touch_frames.py`, `tests/test_touch_frames.py`, `bin/thor_app.py:757-816` | implemented; `test_touch_frames` runs anywhere |
 | R-03 | One finger moves the pointer; a tap clicks; two fingers scroll; a two-finger tap right-clicks | `bin/engine.py:760-803`, `:891-903`; `tests/test_engine.py` | implemented |
 | R-04 | Four or more fingers produce no output until they all lift or go quiet | `bin/engine.py:693-701`; `tests/test_engine.py` | implemented |
 | R-05 | The keyboard sends Linux key codes; Shift, Ctrl, Alt, Win behave as in [02](02-features.md#keyboard) | `bin/modifiers.py`; `tests/test_modifiers.py`; `tests/test_keyboard_handlers.py` (device) | implemented |
 | R-06 | Leaving Keyboard or Split releases latched and locked modifiers | `bin/thor_app.py:407-410`; `tests/test_keyboard_handlers.py` (device) | implemented |
 | R-07 | Each mode can be chosen from the header, the panel, the manager, the tray and the CLI | `bin/thor_app.py:400-402`, `dist/index.js:287-293`, `bin/touch_master_manager.py:415` | implemented; the manager and CLI cannot select Split |
-| R-08 | Hide blanks the UI and Open restores it; the state is not saved | `bin/thor_app.py:421-433`, `:829-847`; `tests/test_keyboard_handlers.py` (device) | implemented |
-| R-09 | Quick Controls writes are clamped and asynchronous; a slider keeps the finger that grabbed it | `bin/system_stats.py:178-227`, `bin/thor_app.py:1064-1077` | implemented |
+| R-08 | Hide blanks the UI and Open restores it; the state is not saved | `bin/thor_app.py:421-433`, `:838-856`; `tests/test_keyboard_handlers.py` (device) | implemented |
+| R-09 | Quick Controls writes are clamped and asynchronous; a slider keeps the finger that grabbed it | `bin/system_stats.py:178-227`, `bin/thor_app.py:1073-1086` | implemented |
 | R-10 | The dim feature is off by default; it dims only on a steady fall of the top backlight and restores on a rise, on input, or when the fall stops | `bin/top_follower.py`, `bin/dim_mirror.py`; `tests/test_top_follower.py`, `tests/test_dim_mirror.py` | implemented; on-device timing unconfirmed (author's docs) |
 | R-11 | The pre-dim level survives a crash and is restored on the next start | `bin/dim_mirror.py:280-311`; `tests/test_dim_mirror.py` | implemented |
-| R-12 | IPC requests get a reply, or a `303` error; the driver does not wait more than 2 s for one request | `bin/ipc_util.py`, `bin/thor_app.py:1095-1220`; `tests/test_ipc_util.py` | implemented |
+| R-12 | IPC requests get a reply, or a `303` error; the driver does not wait more than 2 s for one request | `bin/ipc_util.py`, `bin/thor_app.py:1104-1229`; `tests/test_ipc_util.py` | implemented |
 | R-13 | Config writes are atomic | `bin/atomic_json.py`; `tests/test_atomic_json.py` | implemented |
 | R-14 | Stopping the service returns the bottom screen to Armada's session | `main.py:247-251`, `bin/touch_master_manager.py:107-119`, `bin/thor_app.py:498-509` | implemented; device behaviour per the CHANGELOG |
-| R-15 | The service restarts after a crash or a lost touch device | `systemd/touch-master.service:11-12`, `bin/thor_app.py:718-720`, `:809-812` | implemented |
+| R-15 | The service restarts after a crash or a lost touch device | `systemd/touch-master.service:11-12`, `bin/thor_app.py:727-729`, `:818-821` | implemented |
 | R-16 | Pen mode: one pointer, double tap clicks, hold right-clicks, edge strips scroll; Pen + writes the override | `bin/engine.py:624-665`, `bin/session_cursor.py`, `bin/pen_mode.py`; `tests/test_pen_mode.py`, `tests/test_session_cursor.py` | implemented |
 | R-17 | Gleipnir is read-only | `bin/gleipnir_view.py:4-6`; `tests/test_gleipnir_view.py` | implemented |
 | R-18 | The self-test changes nothing | `debug_codes.py:144-201` | implemented |
@@ -149,7 +149,7 @@ exercises it. The tests that need a device are marked (device). "Status" is what
 
 | ID | Requirement | Evidence | Status |
 |---|---|---|---|
-| N-01 | Pure black UI with no container fills, to keep unlit pixels off | `bin/theme.py:1-12`, `bin/thor_app.py:1447`, `:1506`, `:1550` | implemented |
+| N-01 | Pure black UI with no container fills, to keep unlit pixels off | `bin/theme.py:1-12`, `bin/thor_app.py:1456`, `:1515`, `:1559` | implemented |
 | N-02 | Burn-in measures: orbit shift, fading hint, idle veil | `bin/burn_in.py`; `tests/test_burn_in.py` | implemented |
 | N-03 | Drawing and IPC never wait for a hardware sample | `bin/system_stats.py:297-314`, `:274-289` | implemented |
 | N-04 | Each component logs with a `DBG-nnn` code | `debug_codes.py:124-141` | implemented |

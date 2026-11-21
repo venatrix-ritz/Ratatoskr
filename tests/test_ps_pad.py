@@ -461,6 +461,48 @@ def test_a_burst_of_focus_writes_is_read_once_after_it_settles():
     assert src.reads == 3  # once on connect, once after the burst, once after the final timeout
 
 
+class TimedSource:
+    """Values read in turn (the last one stays); each wait either hears a write (True) or times out ("timeout"),
+    advancing the shared clock."""
+
+    def __init__(self, values, script, clock, on_done):
+        self.values, self.script, self.clock, self.on_done = list(values), list(script), clock, on_done
+
+    def read(self):
+        return self.values.pop(0) if len(self.values) > 1 else self.values[0]
+
+    def wait(self, timeout):
+        if not self.script:
+            self.on_done()
+            return False
+        step = self.script.pop(0)
+        self.clock[0] += 0.3 if step is True else timeout
+        return step is True
+
+    def drain(self):
+        return False
+
+    def close(self):
+        pass
+
+
+def test_a_short_empty_run_inside_a_burst_does_not_drop_chiaki():
+    clock = [0.0]
+    # what the probe on the Thor saw: the app, a run of empty writes for about 2 s, then the app again
+    src = TimedSource([3174227830, None, None, None, 3174227830], [True, True, True, True], clock, lambda: w._stop.set())
+    w, calls, logs = watcher([src], clock=lambda: clock[0])
+    w._watch(src)
+    assert calls == [True], calls
+
+
+def test_an_empty_focus_that_lasts_drops_chiaki_after_the_grace():
+    clock = [0.0]
+    src = TimedSource([3174227830, None], [True, "timeout"], clock, lambda: w._stop.set())
+    w, calls, logs = watcher([src], clock=lambda: clock[0])
+    w._watch(src)
+    assert calls == [True, False] and clock[0] >= ps_pad.EMPTY_GRACE_S, (calls, clock)
+
+
 def test_chiaki_app_ids_are_scanned_only_when_the_focused_app_changes():
     scans, clock = [], [0.0]
 

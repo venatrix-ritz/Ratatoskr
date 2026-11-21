@@ -4,7 +4,7 @@
 
 | Quantity | Value | Where | What it controls |
 |---|---|---|---|
-| Touch reader `select` timeout | 0.1 s | `bin/thor_app.py:696` | how often idle expiry runs with no touches |
+| Touch reader `select` timeout | 0.1 s | `bin/thor_app.py:705` | how often idle expiry runs with no touches |
 | Stale contact | 1.5 s | `bin/engine.py:105` | a silent contact is treated as lifted |
 | Tap time | 0.25 s | `bin/engine.py:86` | longest tap and the point where a hold becomes a move |
 | Tap travel | 12 px per finger | `bin/engine.py:87` | most travel a tap can have |
@@ -30,9 +30,9 @@
 | Idle veil | after 30 s, fades over 5 s to 40 % | `bin/thor_app.py:186`, `bin/burn_in.py:115-123` | luminance floor |
 | Trackpad hint | shown 5 s, fades over 1.5 s | `bin/burn_in.py:103-113` | center hint |
 | Gleipnir view | sysfs every 10 s; `gleipnir --status` on a charger or charge-state change or 60 s; journal 60 s while Quick Controls is open; nothing while hidden, dimmed or off | `bin/thor_app.py:88`, `:369-390` | status view |
-| Chiaki-NG focus | event-driven; read 0.2 s after a burst; reconnect 1 s doubling to 30 s; app-id rescans 1 s for 10 s after a change; `xprop` every 1 s without python-xlib | `bin/ps_pad.py:53-57` | PS mode on and off |
-| Touch device retry | 5 s | `bin/thor_app.py:666-687` | missing or ungrabbable node |
-| IPC accept timeout | 0.5 s | `bin/thor_app.py:1093` | shutdown responsiveness |
+| Chiaki-NG focus | event-driven; read 0.2 s after a burst; an empty value counts after 3 s; reconnect 1 s doubling to 30 s; app-id rescans 1 s for 10 s after a change; `xprop` every 1 s without python-xlib | `bin/ps_pad.py:53-60` | PS mode on and off |
+| Touch device retry | 5 s | `bin/thor_app.py:675-696` | missing or ungrabbable node |
+| IPC accept timeout | 0.5 s | `bin/thor_app.py:1102` | shutdown responsiveness |
 | IPC request limit | 2 s | `bin/ipc_util.py:18` | a stalled client cannot hold the server |
 | Idle tracker rescan | 5.0 s | `bin/dim_mirror.py:119` | picks up devices that appear after start |
 | Idle tracker `select` | up to 1.0 s | `bin/dim_mirror.py:195` | |
@@ -61,8 +61,8 @@
 - **Hint.** `elapsed = min(t - start, t - mode_change)`, so the most recent of start and mode change sets the clock.
   Full alpha for 5 s, then linear to zero over 1.5 s (`:54-64`).
 - **Veil.** `idle = t - last_touch`. Up to 30 s the scale is 1.0. Then it falls linearly to 0.4 over 5 s and stays there
-  (`:66-74`). `ThorApp._paint` draws black over the frame with alpha `1 - scale` (`bin/thor_app.py:1268-1272`), so black
-  stays black. `record_touch` is called on every touch frame and on the `wake` action (`:727`, `:1207`).
+  (`:66-74`). `ThorApp._paint` draws black over the frame with alpha `1 - scale` (`bin/thor_app.py:1277-1281`), so black
+  stays black. `record_touch` is called on every touch frame and on the `wake` action (`:736`, `:1216`).
 
 ## Idle tracking
 
@@ -80,7 +80,7 @@
 - A select error drops every descriptor, and the next scan reopens them (`:194-199`). A read error drops that descriptor
   (`:205-208`).
 - The bottom touchscreen is not in the tracker. Ratatoskr grabs it, so the driver calls `poke()` for each frame instead
-  (`bin/thor_app.py:727`).
+  (`bin/thor_app.py:736`).
 
 The tracker's own start time is not used for anything but the slider guard. `DimMirror` passes the tracker's idle time
 and its own running time to `input_says_slider` (`bin/dim_mirror.py:38-42`, `:393`). Its docstring explains why: a
@@ -196,6 +196,6 @@ that is unreadable, out of range or corrupt is deleted.
   running (`bin/system_stats.py:274-280`, `:297-314`).
 - Drawing reads cached values and does no I/O except the pointer-status refresh, which is in the frame planner's GLib timer, not in
   `_paint` (`bin/thor_app.py:552-569`). A ribbon-only repaint is a `queue_draw_area` over `RIBBON_BAND`; `_paint` sees the clip
-  and repaints just that band with the orbit and veil already on screen (`bin/thor_app.py:1241-1297`).
-- The draw path measures its own time (`on_draw`, `bin/thor_app.py:1231-1239`). The panel reports the average, maximum and
-  frame lag through `get_debug` (`:1137-1142`).
+  and repaints just that band with the orbit and veil already on screen (`bin/thor_app.py:1250-1306`).
+- The draw path measures its own time (`on_draw`, `bin/thor_app.py:1240-1248`). The panel reports the average, maximum and
+  frame lag through `get_debug` (`:1146-1151`).
