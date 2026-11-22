@@ -5,6 +5,8 @@ Ratatoskr exists because other people did the hard parts first.
 ## Built on
 - **[Project Barry / Barry Launcher](https://github.com/project-barry/barry-launcher)** by **lavachemist** and the Project Barry community (GPL-2.0): the dual-display gamescope approach on the Thor, the digitizer coordinate mapping for the rotated panel, trackpad multi-touch gesture ideas and momentum physics, and sensor-discovery patterns, as this project's earlier README stated.
 - **[Armada OS](https://armadaos.dev)** by the Armada team: the bottom-screen gamescope session (`armada-run-bottom`, `armada-bottom-gamescope`), the SM8550 device tree and backlight bindings, and the Decky setup this plugin sits in. Armada's own scripts are GPL-2.0-or-later.
+- **[chiaki-ng](https://github.com/streetpea/chiaki-ng)** by streetpea and the Chiaki contributors (AGPL-3.0): PS mode relies on how its stream window turns touches and keys into DualSense input. No code is copied; `bin/ps_pad.py` names the files read.
+- **[gamescope](https://github.com/ValveSoftware/gamescope)** by Valve (BSD-2-Clause): PS mode relies on how it routes a touchscreen to the focused window and on its `GAMESCOPE_FOCUSED_APP` property. No code is copied.
 - **[Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader)** by the SteamDeckHomebrew community: the plugin framework and Quick Access Menu components.
 - Research on the Thor and Armada that this was built from: [venatrix-ritz/AynThor](https://github.com/venatrix-ritz/AynThor).
 

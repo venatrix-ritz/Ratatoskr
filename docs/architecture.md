@@ -12,7 +12,7 @@
  │ main.py              │  socket       └───────────────┬────────────────────────────┘
  └──────────┬───────────┘                               │ /dev/uinput
             │ systemctl --user                          ▼
-            ▼                              virtual mouse + keyboard → game on the top screen
+            ▼                              virtual mouse, keyboard, PS touch → game on the top screen
    touch-master.service  ──runs──▶  armada-run-bottom -- python3 thor_app.py
 ```
 
@@ -23,8 +23,9 @@
 - **`bin/key_render.py`** draws the key labels (pure cairo, sized from the key; `tests/render_keyboard.py` renders them to PNG).
 - **`bin/keyboard_settings.py`** holds the keyboard timing settings, their limits and clamping.
 - **`bin/modifiers.py`** is the Shift / Ctrl / Alt / Win state machine (off, one-shot, locked; held while a finger is on it); it returns the key events and `thor_app` sends them.
+- **`bin/ps_pad.py`** is PS mode for Chiaki-NG: the pad and button layout, the pad-to-touchscreen mapping, the button keys, and the focus watcher that compares gamescope's `GAMESCOPE_FOCUSED_APP` (read with `xprop` on Steam's display `:0`) with the `SteamAppId` of running `chiaki` processes.
 - **`bin/gleipnir_view.py`** reads Gleipnir's `--status --json` and `systemctl is-active gleipnir` (both as the normal user) and turns them into the ribbon text and the Quick Controls line. It never writes.
-- Every touch is owned by the area it landed in (header, ribbon, Quick Controls, keyboard or trackpad) until it lifts, so a drag that crosses the split line stays a trackpad drag. One re-entrant lock (`input_lock`) keeps touch frames and IPC setting or mode changes from interleaving. After `SYN_DROPPED` the driver reads the slot table back (`EVIOCGMTSLOTS`) so fingers already down are not lost.
+- Every touch is owned by the area it landed in (header, ribbon, Quick Controls, keyboard, trackpad or the PS pad) until it lifts, so a drag that crosses the split line stays a trackpad drag. One re-entrant lock (`input_lock`) keeps touch frames and IPC setting or mode changes from interleaving. After `SYN_DROPPED` the driver reads the slot table back (`EVIOCGMTSLOTS`) so fingers already down are not lost.
 - **`bin/system_stats.py`** reads battery, CPU, GPU, RAM, backlights and volume (PipeWire through `wpctl`), and writes volume and brightness. A background thread samples once a second, so drawing and IPC never wait on a sample (a sample took about 29 ms on the Thor, 2026-10-08). Slider writes go through `request_*`: the requested value is drawn at once and a writer thread per control writes only the newest value (each `sudo tee` write took about 25 ms, and the bottom slider needs two).
 - **`bin/dim_mirror.py`** is the optional idle-dim follower ([dim-mirror.md](dim-mirror.md)).
 - **`bin/touch_master_manager.py`** is the standalone GTK window and CLI.
@@ -35,16 +36,16 @@
 The digitizer node is the input device whose name contains "bottom" and "touchscreen" (fallback `/dev/input/event5`). Raw coordinates are mapped to the 1240 by 1080 drawing space with `raw_to_screen` (the panel is mounted rotated, so `x = raw_y`, `y = height - 1 - raw_x`). Because the node is grabbed, nothing else can read it: the idle tracker is told about touches by the app instead.
 
 ## Virtual devices
-Two uinput devices on the virtual bus: **Thor Virtual Trackpad** (vendor `0x1234`, product `0x5678`) and **Thor Virtual Keyboard** (`0x5679`).
+Three uinput devices on the virtual bus: **Thor Virtual Trackpad** (vendor `0x1234`, product `0x5678`), **Thor Virtual Keyboard** (`0x5679`) and **Ratatoskr PS Touch** (`0x567A`). The PS touch device is a one-slot direct touchscreen (`INPUT_PROP_DIRECT`, `BTN_TOUCH`, multi-touch slot 0 and plain `ABS_X`/`ABS_Y`, 0 to 32767) used only in PS mode. If it cannot be created the driver logs `DBG-102` and runs without it.
 
 ## IPC protocol
 One request per connection on the stream socket `/run/user/<uid>/thor-input.sock`: the client sends one JSON object (at most 64 KiB, in as many pieces as it likes, complete within 2 s) and reads one JSON reply, `{"ok": true, "code": 0, ...}`, until the driver closes the connection. A bad request, a failing handler or an unknown action gets `{"ok": false, "code": 303, "error": ...}` and is logged (`DBG-303`). Helpers for both sides are in `bin/ipc_util.py`; the Decky backend carries its own small copy of the read loop because only `main.py` is installed in the plugin folder.
 
 | `action` | Request fields | Reply adds |
 |---|---|---|
-| `get_status` | | `mode`, `debug_hud`, `hardware_stats`, every gesture setting, `mirror_dim`, `mirror_dim_floor_percent`, `bottom_dimmed`, `pen_mode`, `cursor_stay_visible`, `cursor_hide_delay_ms`, `cursor_stay_visible_active` |
-| `get_debug` | `reset` (optional): also zero the draw-time counters | `telemetry`, `state`, `coords`, `touch_device`, `active_fingers`, `last_key`, `hardware_stats`, gesture settings, draw-time counters |
-| `set_mode` | `mode` | |
+| `get_status` | | `mode`, `debug_hud`, `hardware_stats`, every gesture setting, `mirror_dim`, `mirror_dim_floor_percent`, `bottom_dimmed`, `pen_mode`, `cursor_stay_visible`, `cursor_hide_delay_ms`, `cursor_stay_visible_active`, `ps_mode_auto`, `ps_touch_rotation`, `ps_focused` |
+| `get_debug` | `reset` (optional): also zero the draw-time counters | `telemetry` (with `ps_touches`, `ps_touch_down`), `state`, `coords`, `touch_device`, `active_fingers`, `last_key`, `hardware_stats`, gesture settings, draw-time counters, `ps` (`focused`, `focused_app`, `finger`, `clicking`, `buttons`, `ps_mode_auto`, `ps_touch_rotation`) |
+| `set_mode` | `mode`: `trackpad`, `split`, `keyboard`, `settings` or `ps` | |
 | `set_pen_mode` | `mode`: `off`, `pen` or `pen_plus` | `pen_mode` and the `cursor_*` fields; `pen_plus` also writes Game Mode's pointer-visible override, which applies when Game Mode next starts |
 | `set_settings` | flat keys, e.g. `sensitivity`, `mirror_dim` | |
 | `set_volume` | `volume` (0 to 100) | `vol_pct` |
@@ -59,7 +60,7 @@ One request per connection on the stream socket `/run/user/<uid>/thor-input.sock
 The Decky backend wraps these as `get_status`, `set_enabled`, `set_mode`, `set_settings`, `set_pen_mode`, `set_volume`, `toggle_mute`, `set_brightness(target, percent)`, `toggle_hud` and `run_diagnostics`. It starts and stops the service with `systemctl --user` (first trying `--machine=armada@.host`, which works from Decky's root context).
 
 ## Threads in the driver
-GTK main thread (drawing, 1 s ribbon refresh), touch reader (`select` on the grabbed node), IPC server (0.5 s accept timeout, 2 s per request), key repeat, momentum glide, idle tracker, dim mirror. Hardware stats are sampled with a 0.4 s cache.
+GTK main thread (drawing, 1 s ribbon refresh), touch reader (`select` on the grabbed node), IPC server (0.5 s accept timeout, 2 s per request), key repeat, momentum glide, idle tracker, dim mirror, Chiaki-NG focus watcher (every 1 s). Hardware stats are sampled with a 0.4 s cache.
 
 ## Logging
 Every component logs `[time] [DBG-nnn] [context] description - details` to stdout (the service journal) and to `/tmp/thor-input-debug.log`. The codes are listed in the README and defined in `debug_codes.py`; `DBG-610` is the dim mirror.

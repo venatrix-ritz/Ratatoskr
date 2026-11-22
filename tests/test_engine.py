@@ -672,6 +672,7 @@ def test_a_failed_key_up_stays_held_so_release_all_can_retry_it():
     b.logger = E.DebugLogger("test")
     b.held_keys, b.held_buttons = set(), set()
     b.count_keystrokes = 0
+    b.ps_fd, b.ps_touch_down = -1, False
     b.kb_fd = r  # the read end: every write fails
     b.key(30, True)
     b.key(30, False)
@@ -681,6 +682,76 @@ def test_a_failed_key_up_stays_held_so_release_all_can_retry_it():
     assert not b.held_keys, "release_all() must send the missing key-up"
     os.close(r)
     os.close(w)
+
+
+def ps_bridge_with_pipe():
+    r, w = os.pipe()
+    real = E.UInputBridge._init_devices
+    E.UInputBridge._init_devices = lambda self: None
+    try:
+        b = E.UInputBridge(E.DebugLogger("test"))
+    finally:
+        E.UInputBridge._init_devices = real
+    b.ps_fd = w
+    return b, r, w
+
+
+def test_ps_touch_lands_moves_and_lifts_one_contact():
+    b, r, w = ps_bridge_with_pipe()
+    b.ps_touch(0.5, 0.25)
+    M = E.PS_TOUCH_MAX
+    x, y = round(0.5 * M), round(0.25 * M)
+    assert read_events(r, 8) == [
+        (E.EV_ABS, E.ABS_MT_SLOT, 0), (E.EV_ABS, E.ABS_MT_TRACKING_ID, 1), (E.EV_ABS, E.ABS_MT_POSITION_X, x),
+        (E.EV_ABS, E.ABS_MT_POSITION_Y, y), (E.EV_KEY, E.BTN_TOUCH, 1), (E.EV_ABS, E.ABS_X, x), (E.EV_ABS, E.ABS_Y, y),
+        (E.EV_SYN, 0, 0)]
+    b.ps_touch(2.0, -1.0)  # clamped to the device
+    assert read_events(r, 5) == [(E.EV_ABS, E.ABS_MT_POSITION_X, M), (E.EV_ABS, E.ABS_MT_POSITION_Y, 0),
+                                 (E.EV_ABS, E.ABS_X, M), (E.EV_ABS, E.ABS_Y, 0), (E.EV_SYN, 0, 0)]
+    b.ps_touch_up()
+    assert read_events(r, 4) == [(E.EV_ABS, E.ABS_MT_SLOT, 0), (E.EV_ABS, E.ABS_MT_TRACKING_ID, -1),
+                                 (E.EV_KEY, E.BTN_TOUCH, 0), (E.EV_SYN, 0, 0)]
+    assert not b.ps_touch_down and b.count_ps_touches == 1
+    b.ps_touch_up()  # already up: nothing more
+    b.ps_touch(0.1, 0.1)
+    assert read_events(r, 2)[1] == (E.EV_ABS, E.ABS_MT_TRACKING_ID, 2), "each landing gets a new tracking id"
+    os.close(r)
+    os.close(w)
+
+
+def test_release_all_lifts_the_ps_contact_and_a_failed_lift_is_retried():
+    b, r, w = ps_bridge_with_pipe()
+    b.ps_touch(0.5, 0.5)
+    read_events(r, 8)
+    b.ps_fd = r  # the read end: the lift cannot be written
+    b.ps_touch_up()
+    assert b.ps_touch_down, "a lift that was not written must not be forgotten"
+    b.ps_fd = w
+    b.release_all()
+    assert not b.ps_touch_down
+    assert read_events(r, 4)[1] == (E.EV_ABS, E.ABS_MT_TRACKING_ID, -1)
+    os.close(r)
+    os.close(w)
+
+
+def test_no_ps_device_means_no_ps_output():
+    b, r, w = ps_bridge_with_pipe()
+    b.ps_fd = -1
+    b.ps_touch(0.5, 0.5)
+    b.ps_touch_up()
+    assert not b.ps_touch_down and b.count_ps_touches == 0
+    os.close(r)
+    os.close(w)
+
+
+def test_abs_setup_struct_matches_the_kernel_layout():
+    # struct uinput_abs_setup: __u16 code, 2 bytes padding, struct input_absinfo (six __s32) = 28 bytes;
+    # UI_ABS_SETUP = _IOW('U', 4, 28)
+    assert E.ABS_SETUP_STRUCT.size == 28
+    assert E.UI_ABS_SETUP == (1 << 30) | (28 << 16) | (ord("U") << 8) | 4
+    assert E.UI_SET_ABSBIT == (1 << 30) | (4 << 16) | (ord("U") << 8) | 103
+    assert E.UI_SET_PROPBIT == (1 << 30) | (4 << 16) | (ord("U") << 8) | 110
+    assert b"bottom_touchscreen" not in E.PS_TOUCH_NAME and b"touchscreen" not in E.PS_TOUCH_NAME.lower()
 
 
 def test_a_new_glide_stops_the_old_one_for_good():

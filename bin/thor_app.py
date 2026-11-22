@@ -63,6 +63,7 @@ from touch_frames import TouchFrameParser
 from dim_mirror import DimMirror, IdleTracker
 from system_stats import HardwareStats
 import pen_mode as pm
+import ps_pad
 import atomic_json
 import ipc_util
 import session_cursor
@@ -80,12 +81,31 @@ BUTTON_TEXT_MAX_PX = 26.0
 RIBBON_TEXT_MAX_PX = 28.0
 HEADER_HEIGHT = HEADER_BUTTONS_H + STATUS_RIBBON_H
 SPLIT_Y = 500.0  # split mode: trackpad above, keyboard below
+MODES = ("trackpad", "split", "keyboard", "settings", "ps")  # ps: PS5 touchpad + buttons for Chiaki-NG (ps_pad.py)
 
-# Header buttons: (key, x, width). One table for drawing and for hit-testing.
-HEADER_BUTTONS = (
-    ("trackpad", 12, 138), ("split", 158, 100), ("keyboard", 266, 138), ("settings", 412, 176),
-    ("hud", 596, 78), ("left", 682, 130), ("right", 820, 130), ("pen", 958, 150), ("hide", 1116, 112),
+# Header buttons: (key, width, width while Chiaki-NG has focus), 0 = not shown. One table for drawing and for
+# hit-testing; header_layout() places the buttons 8 px apart from x = 12. While Chiaki-NG has focus a PS button joins the
+# mode buttons so PS mode is one tap away after leaving it; Pen gives up most of the room and Hide keeps its place.
+HEADER_TABLE = (
+    ("trackpad", 138, 131), ("split", 100, 92), ("keyboard", 138, 131), ("ps", 0, 72), ("settings", 176, 176),
+    ("hud", 78, 70), ("left", 130, 130), ("right", 130, 130), ("pen", 150, 100), ("hide", 112, 112),
 )
+HEADER_X0, HEADER_GAP = 12, 8
+
+
+def header_layout(ps_focused: bool = False) -> tuple:
+    """(key, x, width) of each header button shown."""
+    rows, x = [], HEADER_X0
+    for key, width, ps_width in HEADER_TABLE:
+        w = ps_width if ps_focused else width
+        if w:
+            rows.append((key, x, w))
+            x += w + HEADER_GAP
+    return tuple(rows)
+
+
+HEADER_BUTTONS = header_layout(False)
+HEADER_BUTTONS_PS = header_layout(True)
 HEADER_BUTTON_Y, HEADER_BUTTON_H = 8.0, 64.0
 # Hidden UI: only this button is drawn (where the Hide button was) and touches within OPEN_HIT_PAD of it open the UI again.
 OPEN_BUTTON = (1116.0, HEADER_BUTTON_Y, 112.0, HEADER_BUTTON_H)
@@ -116,7 +136,7 @@ class ThorApp:
         self.logger = DebugLogger("app")
         self.logger.log(DebugCode.DAEMON_STARTING)
 
-        self.mode = "trackpad"  # 'trackpad', 'split', 'keyboard', 'settings'
+        self.mode = "trackpad"  # one of MODES
         self.show_debug_hud = False
         self.ui_hidden = False  # Hide button: everything but the Open button is blanked; not saved, a restart shows the UI
         self.touch_dev_node = ""
@@ -153,6 +173,16 @@ class ThorApp:
         # Bridge & processors
         self.bridge = UInputBridge(self.logger)
         self.gesture = TouchGestureProcessor(self.bridge, self.logger)
+        # Touch frames (reader thread) and settings / mode changes (IPC thread, GTK) all change the gesture and keyboard
+        # state; one re-entrant lock keeps them from interleaving.
+        self.input_lock = threading.RLock()
+        # PS mode: on while Chiaki-NG has focus (ps_mode_auto), back to the previous mode when it loses focus
+        self.ps = ps_pad.PsPad(
+            self.bridge, ps_pad.PsLayout(HEADER_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT), lock=self.input_lock, settings=self.gesture
+        )
+        self.ps_cfg: dict = {"ps_mode_auto": True, "ps_touch_rotation": 0}
+        self._ps_return_mode = "trackpad"
+        self.ps_focus = ps_pad.FocusWatcher(self._on_chiaki_focus)
         self.kb_layout = KeyboardLayout(0, HEADER_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT - HEADER_HEIGHT)
         self.held_ui_button: str | None = None
         self.held_ui_button_tid: int | None = None
@@ -171,9 +201,6 @@ class ThorApp:
         self._repeat_thread: threading.Thread | None = None
         self.mods = ModifierState()  # Shift / Ctrl / Alt / Win: off, latched (one-shot) or locked
         self._touch_owner: dict[int, str] = {}  # touch id -> the area it landed in; a touch stays there until it lifts
-        # Touch frames (reader thread) and settings / mode changes (IPC thread, GTK) all change the gesture and keyboard
-        # state; one re-entrant lock keeps them from interleaving.
-        self.input_lock = threading.RLock()
 
         self.load_config()
 
@@ -211,7 +238,10 @@ class ThorApp:
             try:
                 with open(CONFIG_PATH, encoding="utf-8") as f:
                     cfg = json.load(f)
-                    self.mode = cfg.get("mode", self.mode)
+                    mode = cfg.get("mode", self.mode)
+                    # PS mode is never restored: the focus watcher turns it on again if Chiaki-NG has focus
+                    self.mode = mode if mode in MODES and mode != "ps" else "trackpad"
+                    self._apply_ps_settings(cfg)
                     self.show_debug_hud = cfg.get("debug_hud", self.show_debug_hud)
                     self.gesture.set_settings(**cfg)
                     self._apply_mirror_settings(cfg)
@@ -235,13 +265,14 @@ class ThorApp:
                 on_disk = {}
             cfg = {
                 **on_disk,
-                "mode": self.mode,
+                "mode": self._ps_return_mode if self.mode == "ps" else self.mode,
                 "debug_hud": self.show_debug_hud,
                 "pen_mode": self.pen_mode,
                 **self.gesture.get_settings(),
                 **self.mirror_cfg,
                 **self.keyboard_cfg,
                 **self.gleipnir_cfg,
+                **self.ps_cfg,
             }
             atomic_json.write_json_atomic(CONFIG_PATH, cfg)
         except Exception as err:
@@ -281,6 +312,30 @@ class ThorApp:
                 self.gleipnir_status = None
             self._gleipnir_wake.set()  # read it now instead of in up to 10 s
 
+    def _apply_ps_settings(self, msg: dict) -> None:
+        if "ps_mode_auto" in msg:
+            self.ps_cfg["ps_mode_auto"] = bool(msg["ps_mode_auto"])
+        if "ps_touch_rotation" in msg:
+            self.ps_cfg["ps_touch_rotation"] = ps_pad.normalize_rotation(msg["ps_touch_rotation"])
+            self.ps.rotation = self.ps_cfg["ps_touch_rotation"]
+
+    def _on_chiaki_focus(self, focused: bool) -> None:
+        """Focus watcher thread: Chiaki-NG gained or lost focus in Game Mode."""
+        with self.input_lock:
+            self.ps.set_active(focused)  # losing focus lifts the touch and every held PS key
+            if focused and self.mode != "ps":
+                self._ps_return_mode = self.mode  # also with auto off: the header's PS button may enter PS mode
+                if self.ps_cfg["ps_mode_auto"]:
+                    self.set_mode("ps")
+            elif not focused and self.mode == "ps":
+                self.set_mode(self._ps_return_mode)
+            mode = self.mode
+        self.logger.log(
+            DebugCode.PS_MODE,
+            f"Chiaki-NG {'has' if focused else 'lost'} focus (focused app {self.ps_focus.focused_app}); mode={mode}",
+        )
+        GLib.idle_add(self.drawing_area.queue_draw)
+
     def _gleipnir_loop(self) -> None:
         """Read Gleipnir's status every 10 s while the view is on (about 80 ms each, off the draw and touch threads)."""
         ticks = 0
@@ -298,10 +353,12 @@ class ThorApp:
             self._gleipnir_wake.clear()
 
     def set_mode(self, mode: str, restart_hint: bool = True) -> None:
-        if mode not in ("trackpad", "split", "keyboard", "settings"):
+        if mode not in MODES:
             return
         with self.input_lock:
             self._slider_drag = None
+            if mode != "ps":
+                self.ps.release_all()
             if mode not in ("keyboard", "split"):
                 # Without a keyboard on screen a latched or locked modifier would turn every click into Ctrl/Shift-click.
                 self._end_key_press()
@@ -321,6 +378,7 @@ class ThorApp:
             if hidden:
                 self._end_key_press()
                 self._send_keys(self.mods.release_all())
+                self.ps.release_all()
             self.ui_hidden = hidden
         GLib.idle_add(self.drawing_area.queue_draw)
 
@@ -430,6 +488,7 @@ class ThorApp:
         self.idle_tracker.start()
         self.dim_mirror.start()
         threading.Thread(target=self._gleipnir_loop, name="gleipnir-view", daemon=True).start()
+        self.ps_focus.start()
         self.window.show_all()
         # Periodic 1-second refresh for live system monitor ribbon
         GLib.timeout_add(1000, self._on_stats_tick)
@@ -491,6 +550,8 @@ class ThorApp:
         step("idle tracker", self.idle_tracker.stop)
         step("stats sampler", self.stats.stop_sampler)
         step("key repeat", self._stop_key_repeat)
+        step("chiaki focus watcher", self.ps_focus.stop)
+        step("ps pad", self.ps.release_all)
         self.touch_stop.set()
         self._gleipnir_wake.set()
         self.ipc_stop.set()
@@ -599,6 +660,7 @@ class ThorApp:
             self.gesture.reset_all()
             self._end_key_press()
             self._release_ui_button()
+            self.ps.release_all()
             self._touch_owner.clear()
             self._resync_contacts()
             return
@@ -682,6 +744,8 @@ class ThorApp:
             return "ribbon"
         if self.mode == "settings":
             return "settings"
+        if self.mode == "ps":
+            return "ps"
         if self.mode == "keyboard" or (self.mode == "split" and y >= SPLIT_Y):
             return "keyboard"
         return "trackpad"
@@ -729,9 +793,13 @@ class ThorApp:
         elif owner == "open":
             self.set_ui_hidden(False)
         elif owner == "ribbon":  # the status ribbon toggles Quick Controls
-            self.set_mode("trackpad" if self.mode == "settings" else "settings", restart_hint=False)
+            back = "ps" if self.ps.active else "trackpad"
+            self.set_mode(back if self.mode == "settings" else "settings", restart_hint=False)
         elif owner == "settings":
             self._handle_settings_touch(tid, x, y)
+        elif owner == "ps":
+            self.ps.touch_down(tid, x, y)
+            GLib.idle_add(self.drawing_area.queue_draw)
         elif owner == "keyboard":
             self._keyboard_down(tid, x, y)
         else:
@@ -770,6 +838,8 @@ class ThorApp:
                 self._end_key_press()  # slid off the key: stop repeating
         elif owner == "settings":
             self._handle_settings_drag(tid, x, y)
+        elif owner == "ps":
+            self.ps.touch_move(tid, x, y)
         elif owner == "trackpad" or (owner is None and self.mode != "settings"):
             # None: a contact from before a restart or a dropped frame; the engine ignores ids it does not hold
             self.gesture.touch_move(tid, x, y, now)
@@ -793,14 +863,20 @@ class ThorApp:
                 self.active_key_press = None
                 self.active_key_tid = None
             GLib.idle_add(self.drawing_area.queue_draw)
+        elif owner == "ps":
+            self.ps.touch_up(tid)
+            GLib.idle_add(self.drawing_area.queue_draw)
         elif owner == "trackpad" or (owner is None and self.mode != "settings"):
             self.gesture.touch_up(tid, now)
             if self.show_debug_hud:
                 GLib.idle_add(self.drawing_area.queue_draw)
 
+    def _header_buttons(self) -> tuple:
+        return HEADER_BUTTONS_PS if self.ps.active else HEADER_BUTTONS
+
     def _handle_header_touch(self, tid: int, x: float, y: float, down: bool) -> None:
-        key = next((k for k, bx, bw in HEADER_BUTTONS if bx <= x <= bx + bw), None)
-        if key in ("trackpad", "split", "keyboard", "settings"):
+        key = next((k for k, bx, bw in self._header_buttons() if bx <= x <= bx + bw), None)
+        if key in ("trackpad", "split", "keyboard", "settings", "ps"):  # "ps" is only shown while Chiaki-NG has focus
             self.set_mode(key, restart_hint=False)
         elif key == "hide":
             self.set_ui_hidden(True)
@@ -947,6 +1023,8 @@ class ThorApp:
                             res["bottom_dimmed"] = self.dim_mirror.dimmed
                             res.update(self._cursor_status)
                             res["pen_mode"] = self.pen_mode
+                            res.update(self.ps_cfg)
+                            res["ps_focused"] = self.ps.active
                         elif action == "get_debug":
                             res["telemetry"] = self.bridge.get_telemetry()
                             res["state"] = self.gesture.last_state_label
@@ -964,6 +1042,14 @@ class ThorApp:
                                 self._draws, self._draw_ms_sum, self._draw_ms_max, self._lag_ms_max = 0, 0.0, 0.0, 0.0
                             res["hardware_stats"] = self.stats.get_stats()
                             res.update(self.gesture.get_settings())
+                            res["ps"] = {
+                                "focused": self.ps.active,
+                                "focused_app": self.ps_focus.focused_app,
+                                "finger": self.ps.finger,
+                                "clicking": self.ps.clicking,
+                                "buttons": sorted(set(self.ps.button_tids.values())),
+                                **self.ps_cfg,
+                            }
                         elif action == "set_mode":
                             self.set_mode(msg.get("mode", "trackpad"))
                         elif action == "set_settings":
@@ -972,6 +1058,7 @@ class ThorApp:
                                 self._apply_mirror_settings(msg)
                                 keyboard_settings.apply(self.keyboard_cfg, msg)
                                 self._apply_gleipnir_settings(msg)
+                                self._apply_ps_settings(msg)
                                 if "debug_hud" in msg:
                                     self.show_debug_hud = bool(msg["debug_hud"])
                             self.save_config()
@@ -1096,6 +1183,8 @@ class ThorApp:
             self._draw_keyboard(cr)
         elif self.mode == "settings":
             self._draw_quick_settings(cr)
+        elif self.mode == "ps":
+            self._draw_ps(cr)
 
     def _draw_header(self, cr: cairo.Context) -> None:
         cr.set_source_rgb(*theme.DIVIDER)
@@ -1105,7 +1194,7 @@ class ThorApp:
         cr.stroke()
         cr.new_path()
 
-        for key, x, w in HEADER_BUTTONS:
+        for key, x, w in self._header_buttons():
             label, active, accent = self._header_button_look(key)
             self._draw_button(cr, x, HEADER_BUTTON_Y, w, HEADER_BUTTON_H, label, active, accent_color=accent)
 
@@ -1115,6 +1204,8 @@ class ThorApp:
             return key.capitalize(), self.mode == key, theme.BTN_FILL_ACTIVE
         if key == "settings":
             return "Quick Controls", self.mode == "settings", theme.BTN_FILL_ACTIVE
+        if key == "ps":
+            return "PS", self.mode == "ps", theme.BTN_FILL_ACTIVE
         if key == "hide":
             return "Hide", False, theme.BTN_ACCENT_DEFAULT
         if key == "hud":
@@ -1249,6 +1340,32 @@ class ThorApp:
 
         if self.gesture.stylus_mode:
             self._draw_scroll_strips(cr, pad_y, pad_h, show_bottom=(y + h) >= SCREEN_HEIGHT - 1)
+
+    def _draw_ps(self, cr: cairo.Context) -> None:
+        """PS mode: the touchpad outline and the PS button row; a note while Chiaki-NG does not have focus."""
+        lay = self.ps.layout
+        self._round_rect(cr, lay.pad_x, lay.pad_y, lay.pad_w, lay.pad_h, 24.0)
+        clicking = self.ps.clicking  # the outline lights up while the pad click is held
+        cr.set_source_rgb(*(theme.BTN_BORDER_ACTIVE if clicking else theme.BORDER_HAIRLINE))
+        cr.set_line_width(2.0 if clicking else 1.0)
+        cr.stroke()
+        cr.new_path()
+
+        if self.ps.active:
+            taps = "tap to click · " if self.gesture.tap_to_click else ""
+            hint, alpha = f"PS touchpad · one finger · {taps}hold to click", self.burn_in.get_hint_alpha()
+        else:
+            hint, alpha = "Waiting for Chiaki-NG to have focus", 1.0
+        if alpha > 0.01:
+            cr.set_source_rgba(theme.TEXT_SECONDARY[0], theme.TEXT_SECONDARY[1], theme.TEXT_SECONDARY[2], alpha)
+            cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+            cr.set_font_size(24.0)
+            ext = cr.text_extents(hint)
+            cr.move_to(lay.pad_x + (lay.pad_w - ext.width) / 2.0, lay.pad_y + (lay.pad_h + ext.height) / 2.0)
+            cr.show_text(hint)
+
+        for name, label, bx, bw in lay.buttons:
+            self._draw_button(cr, bx, lay.button_y, bw, lay.button_h, label, self.ps.pressed(name), accent_color=theme.BTN_FILL_ACTIVE)
 
     def _draw_scroll_strips(self, cr: cairo.Context, pad_y: float, pad_h: float, show_bottom: bool) -> None:
         """Pen mode's scroll strips: drag along the right edge to scroll up and down, along the bottom to scroll sideways."""

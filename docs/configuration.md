@@ -5,7 +5,7 @@ Settings live in one JSON file, `~/.config/thor-input/config.json` (`/var/home/a
 | Key | Default | Range | What it does |
 |---|---|---|---|
 | `enabled` | `true` | bool | whether the Decky plugin starts the service when Decky loads (written by the plugin and the manager, not by the driver) |
-| `mode` | `"trackpad"` | `trackpad`, `split`, `keyboard`, `settings` | the active bottom-screen mode |
+| `mode` | `"trackpad"` | `trackpad`, `split`, `keyboard`, `settings` | the active bottom-screen mode; while PS mode is on, the mode it will go back to (PS mode itself is never saved) |
 | `debug_hud` | `false` | bool | draw coordinates, FPS and counters on the bottom screen |
 | `sensitivity` | `1.5` | 0.2 to 5.0 (the Decky slider offers 0.5 to 3.5) | pointer speed multiplier |
 | `glide` | `true` | bool | momentum after a flick |
@@ -25,6 +25,8 @@ Settings live in one JSON file, `~/.config/thor-input/config.json` (`/var/home/a
 | `keyboard_repeat_interval_ms` | `60` | 20 to 200 | time between repeats of a held key (60 ms is about 16 per second) |
 | `keyboard_caps_window_ms` | `350` | 150 to 800 | a second Shift tap within this time turns on Caps Lock |
 | `gleipnir_ribbon` | `false` | bool | show [Gleipnir](https://github.com/venatrix-ritz/Gleipnir) (the 80 % charge cap) in the status ribbon's battery item and a Gleipnir line in Quick Controls; read-only, from `gleipnir --status --json` every 10 s. The Decky toggle appears only when Gleipnir is installed |
+| `ps_mode_auto` | `true` | bool | switch to [PS mode](usage.md#ps-mode-chiaki-ng) while Chiaki-NG has focus, and back when it loses focus |
+| `ps_touch_rotation` | `0` | `0`, `90`, `180`, `270` (anything else reads as `0`) | turns PS mode's touch axes if swipes come out rotated on the PS5; no Decky control |
 
 Values outside a range are clamped. The ranges and defaults come from `bin/engine.py` (`TouchGestureProcessor`), `bin/thor_app.py`, `bin/keyboard_settings.py` (the three keyboard timings) and `main.py`.
 

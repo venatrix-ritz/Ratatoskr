@@ -60,7 +60,7 @@ ABS_MT_FIRST = 0x2F  # ABS_MT_SLOT; the multitouch axes start here
 _EVENT = struct.Struct("llHHi")
 
 # Devices that are not the user: haptics, jack/lid switches, our own virtual devices.
-_IGNORED_NAMES = ("haptics", "Jack", "lid", "Thor Virtual", "pmic_")
+_IGNORED_NAMES = ("haptics", "Jack", "lid", "Thor Virtual", "Ratatoskr PS", "pmic_")
 # Sticks and triggers count as activity only past this deflection (drift stays idle).
 _STICK_THRESHOLD = 8000
 _TRIGGER_THRESHOLD = 100

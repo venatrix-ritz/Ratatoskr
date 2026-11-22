@@ -24,9 +24,12 @@ UINPUT = "/dev/uinput"
 UI_SET_EVBIT = 0x40045564
 UI_SET_KEYBIT = 0x40045565
 UI_SET_RELBIT = 0x40045566
+UI_SET_ABSBIT = 0x40045567
+UI_SET_PROPBIT = 0x4004556E
 UI_DEV_CREATE = 0x5501
 UI_DEV_DESTROY = 0x5502
 UI_DEV_SETUP = 0x405C5503
+UI_ABS_SETUP = 0x401C5504  # _IOW('U', 4, struct uinput_abs_setup): u16 code, 2 bytes padding, struct input_absinfo
 
 EV_SYN = 0x00
 EV_KEY = 0x01
@@ -44,6 +47,7 @@ REL_HWHEEL_HI_RES = 12
 BTN_LEFT = 0x110
 BTN_RIGHT = 0x111
 BTN_MIDDLE = 0x112
+BTN_TOUCH = 0x14A
 
 # Standard event keycodes
 KEY_ESC = 1
@@ -53,14 +57,26 @@ KEY_LEFTALT = 56
 KEY_LEFTMETA = 125  # Super / Windows key
 KEY_F24 = 194  # no default binding anywhere: used for the harmless 'wake' tap
 
+ABS_X = 0x00
+ABS_Y = 0x01
 ABS_MT_SLOT = 0x2F
 ABS_MT_POSITION_X = 0x35
 ABS_MT_POSITION_Y = 0x36
 ABS_MT_TRACKING_ID = 0x39
 
+INPUT_PROP_DIRECT = 0x01
+
 BUS_VIRTUAL = 0x06
 EVENT_STRUCT = struct.Struct("llHHi")
 SETUP_STRUCT = struct.Struct("HHHH80sI")
+ABS_SETUP_STRUCT = struct.Struct("=H2x6i")
+
+# PS mode's virtual touchscreen (see ps_pad.py). The name must not contain "bottom_touchscreen": the top screen's
+# gamescope ignores that device (--ignore-touch-device). The resolution gives the top panel's size (177 x 100 mm,
+# gamescope --fake-output-mm on the Thor).
+PS_TOUCH_NAME = b"Ratatoskr PS Touch"
+PS_TOUCH_MAX = 32767
+PS_TOUCH_RES = (185, 328)
 
 # Screen dimensions (bottom screen)
 SCREEN_WIDTH = 1240
@@ -120,6 +136,9 @@ class UInputBridge:
         self.lock = threading.RLock()  # release_all() holds it while calling mouse_button() and key(), which take it again
         self.mouse_fd = -1
         self.kb_fd = -1
+        self.ps_fd = -1  # PS mode's virtual touchscreen; -1 if it could not be made (the rest still works)
+        self.ps_touch_down = False
+        self._ps_tracking_id = 0
         self.held_buttons: set[int] = set()
         self.held_keys: set[int] = set()
 
@@ -130,6 +149,7 @@ class UInputBridge:
         self.count_scrolls = 0
         self.count_keystrokes = 0
         self.count_pointer_wakes = 0
+        self.count_ps_touches = 0
         self.moved_at = 0.0  # monotonic time of the last pointer motion we sent
         self.wake_pointer = True  # False once the running Game Mode no longer hides the pointer (Pen +)
 
@@ -183,6 +203,77 @@ class UInputBridge:
         except OSError as err:
             self.logger.log(DebugCode.ERR_UINPUT_SETUP, f"Keyboard setup failed: {err}")
             raise
+
+        self._init_ps_touch()
+
+    def _init_ps_touch(self) -> None:
+        """One-contact direct touchscreen for PS mode. A failure only costs PS mode's touchpad."""
+        fd = -1
+        try:
+            fd = os.open(UINPUT, os.O_WRONLY | os.O_NONBLOCK)
+            fcntl.ioctl(fd, UI_SET_EVBIT, EV_KEY)
+            fcntl.ioctl(fd, UI_SET_KEYBIT, BTN_TOUCH)
+            fcntl.ioctl(fd, UI_SET_EVBIT, EV_ABS)
+            axes = (
+                (ABS_X, PS_TOUCH_MAX, PS_TOUCH_RES[0]),
+                (ABS_Y, PS_TOUCH_MAX, PS_TOUCH_RES[1]),
+                (ABS_MT_SLOT, 0, 0),
+                (ABS_MT_TRACKING_ID, 65535, 0),
+                (ABS_MT_POSITION_X, PS_TOUCH_MAX, PS_TOUCH_RES[0]),
+                (ABS_MT_POSITION_Y, PS_TOUCH_MAX, PS_TOUCH_RES[1]),
+            )
+            for code, _maximum, _res in axes:
+                fcntl.ioctl(fd, UI_SET_ABSBIT, code)
+            fcntl.ioctl(fd, UI_SET_PROPBIT, INPUT_PROP_DIRECT)
+            fcntl.ioctl(fd, UI_DEV_SETUP, SETUP_STRUCT.pack(BUS_VIRTUAL, 0x1234, 0x567A, 1, PS_TOUCH_NAME, 0))
+            for code, maximum, res in axes:
+                fcntl.ioctl(fd, UI_ABS_SETUP, ABS_SETUP_STRUCT.pack(code, 0, 0, maximum, 0, 0, res))
+            fcntl.ioctl(fd, UI_DEV_CREATE)
+            self.ps_fd = fd
+            self.logger.log(DebugCode.UINPUT_OK, "PS touch device registered")
+        except OSError as err:
+            if fd >= 0:
+                os.close(fd)
+            self.logger.log(DebugCode.ERR_UINPUT_SETUP, f"PS touch setup failed (PS mode has no touchpad): {err}")
+
+    def ps_touch(self, nx: float, ny: float) -> None:
+        """Put the one PS contact at (nx, ny), each 0..1 across the device; the first call after a lift lands it."""
+        x = round(min(max(nx, 0.0), 1.0) * PS_TOUCH_MAX)
+        y = round(min(max(ny, 0.0), 1.0) * PS_TOUCH_MAX)
+        now = time.time()
+        sec, usec = int(now), int((now % 1) * 1e6)
+        with self.lock:
+            if self.ps_fd < 0:
+                return
+            landing = not self.ps_touch_down
+            evs = []
+            if landing:
+                self._ps_tracking_id = (self._ps_tracking_id + 1) % 65536
+                evs += [(EV_ABS, ABS_MT_SLOT, 0), (EV_ABS, ABS_MT_TRACKING_ID, self._ps_tracking_id)]
+            evs += [(EV_ABS, ABS_MT_POSITION_X, x), (EV_ABS, ABS_MT_POSITION_Y, y)]
+            if landing:
+                evs.append((EV_KEY, BTN_TOUCH, 1))
+            evs += [(EV_ABS, ABS_X, x), (EV_ABS, ABS_Y, y), (EV_SYN, SYN_REPORT, 0)]
+            try:
+                os.write(self.ps_fd, b"".join(EVENT_STRUCT.pack(sec, usec, t, c, v) for t, c, v in evs))
+                if landing:
+                    self.ps_touch_down = True
+                    self.count_ps_touches += 1
+            except OSError as err:
+                self.logger.log(DebugCode.ERR_UINPUT_WRITE, f"ps_touch: {err}")
+
+    def ps_touch_up(self) -> None:
+        now = time.time()
+        sec, usec = int(now), int((now % 1) * 1e6)
+        evs = [(EV_ABS, ABS_MT_SLOT, 0), (EV_ABS, ABS_MT_TRACKING_ID, -1), (EV_KEY, BTN_TOUCH, 0), (EV_SYN, SYN_REPORT, 0)]
+        with self.lock:
+            if self.ps_fd < 0 or not self.ps_touch_down:
+                return
+            try:
+                os.write(self.ps_fd, b"".join(EVENT_STRUCT.pack(sec, usec, t, c, v) for t, c, v in evs))
+                self.ps_touch_down = False  # only once the lift really went out, so release_all() retries it
+            except OSError as err:
+                self.logger.log(DebugCode.ERR_UINPUT_WRITE, f"ps_touch_up: {err}")
 
     def emit_mouse_rel(self, dx: int, dy: int) -> None:
         if not dx and not dy:
@@ -314,6 +405,7 @@ class UInputBridge:
                 self.mouse_button(b, False)
             for k in list(self.held_keys):
                 self.key(k, False)
+            self.ps_touch_up()
 
     def get_telemetry(self) -> dict[str, Any]:
         with self.lock:
@@ -324,6 +416,8 @@ class UInputBridge:
                 "scrolls": self.count_scrolls,
                 "pointer_wakes": self.count_pointer_wakes,
                 "keystrokes": self.count_keystrokes,
+                "ps_touches": self.count_ps_touches,
+                "ps_touch_down": self.ps_touch_down,
                 "held_buttons": list(self.held_buttons),
                 "held_keys": list(self.held_keys),
             }
@@ -345,6 +439,13 @@ class UInputBridge:
                     pass
                 os.close(self.kb_fd)
                 self.kb_fd = -1
+            if self.ps_fd >= 0:
+                try:
+                    fcntl.ioctl(self.ps_fd, UI_DEV_DESTROY)
+                except OSError:
+                    pass
+                os.close(self.ps_fd)
+                self.ps_fd = -1
 
 
 class TouchGestureProcessor:

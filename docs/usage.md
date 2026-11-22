@@ -12,6 +12,8 @@ Switch with the buttons along the top of the bottom screen, from the Decky panel
 | **Keyboard** | a thumb keyboard that sends real Linux key codes through `/dev/uinput`, with dual-symbol keys, a highlight on active modifiers and key repeat. Shift, Ctrl, Alt and Win: tap once for the next key only, tap twice quickly to lock (Caps Lock for Shift), tap a locked one to release it; or hold one with a finger while typing with another. Switching to Trackpad or Quick Controls releases them all |
 | **Quick Controls** | sliders for volume, top-screen brightness and bottom-screen brightness, plus a live ribbon: battery % and watts, CPU load and temperature, GPU clock and temperature, RAM, volume, both backlights |
 
+A fifth mode, **PS**, is for Chiaki-NG and turns itself on: see [PS mode](#ps-mode-chiaki-ng).
+
 ## Trackpad gestures
 | Gesture | Result | Setting |
 |---|---|---|
@@ -45,8 +47,32 @@ Two-finger scroll, right-click taps, three-finger swipes and glide are off while
 
 **Pen +** is Pen plus Game Mode's pointer-visible setting. Game Mode's gamescope hides the pointer 3 s after it last moved, and a scroll or a button press does not count as moving it (`refs/upstream/gamescope` `steamcompmgr.cpp` `checkSuspension`, `wlserver.cpp`). Plain Pen deals with that by nudging the pointer one pixel out and back before a scroll or press that follows 2 s of stillness. Pen + removes the cause instead: it writes `~/.config/environment.d/50-ratatoskr-cursor.conf` (`HIDE_CURSOR_DELAY_MS=3600000`), which the Thor's `gamescope-session-plus` passes to gamescope as `--hide-cursor-delay`. That is a launch argument with no run-time setter, so it takes effect the next time Game Mode starts (a reboot is the sure way). Until then the nudges stay on and the pen hint says so. Leaving Pen + deletes the file.
 
+## PS mode (Chiaki-NG)
+While [Chiaki-NG](https://github.com/streetpea/chiaki-ng) (PS5 Remote Play, the Flatpak `io.github.streetpea.Chiaki4deck`) has focus in Game Mode, the bottom screen becomes the PS5 touchpad with a row of PS buttons under it. When Chiaki-NG loses focus, the bottom screen goes back to the mode it was in. The switch is **PS touchpad while Chiaki-NG has focus** in the Decky panel's **Screens** section (`ps_mode_auto`, on by default); PS mode can also be picked from the panel's mode list.
+
+While Chiaki-NG has focus the header shows a **PS** button after Keyboard, lit while PS mode is on. The mode buttons (Trackpad, Split, Keyboard, Quick Controls) leave PS mode as usual, and one tap on **PS** brings it back; the mode to return to when Chiaki-NG loses focus stays the one from before the stream. To make room, Trackpad, Split, Keyboard, HUD and Pen are a little narrower while the PS button is there, so Left Click, Right Click and Pen sit about 50 px further left; Hide stays where it is.
+
+| Area | Sends | What Chiaki-NG does with it |
+|---|---|---|
+| the pad (16:9 outline) | a touch on **Ratatoskr PS Touch**, a virtual touchscreen that gamescope hands to the focused window | a touchpad touch at the same spot; swipes follow the finger |
+| a short still tap on the pad | the touch, then T for 50 ms before the touch lifts | a touchpad click where the finger is |
+| press and hold on the pad | T from the long-press delay until the finger lifts; the pad outline lights up | the touchpad click held; moving the finger drags with it held |
+| **Create** | holds F | Create (Share) |
+| **PS** | holds Esc | PS button |
+| **Options** | holds O | Options |
+| **Mic** | taps Ctrl+M | turns the controller microphone on or off |
+
+The tap and the hold use the trackpad's settings and limits: **Tap to click** (`tap_to_click`; off means a tap is only a touch), the long-press delay (`long_press_delay_ms`, 450 ms by default), a tap shorter than 0.25 s that moved under 12 px, and a hold that stays within 24 px.
+
+Things to know:
+- One finger only. gamescope turns a touch into a pointer move with the left button held, and Chiaki-NG reads that as one touchpad finger, so two-finger touchpad gestures cannot reach the PS5.
+- A touch that lands without moving would not count, so each landing is followed by a tiny move (0.4 % of the pad).
+- The outer 6 % of the PS touchpad cannot be reached: the pad is mapped inside that margin so a touch never lands on a screen edge, where gamescope may start an edge gesture.
+- Focus is checked once a second, so PS mode can take a second to come on or go off. Without focus the pad and buttons send nothing and the pad says "Waiting for Chiaki-NG to have focus".
+- If swipes come out turned on the PS5 (up moves right, for example), set `ps_touch_rotation` to 90, 180 or 270 in `config.json` ([configuration](configuration.md)).
+
 ## Settings
-In the Decky panel (Steam menu, Decky, Ratatoskr): sensitivity, glide and friction, scroll speed, tap to click, long-press right click and its delay, two- and three-finger taps, navigation swipes, the **Pen** section (Pen mode and Pen +), the on-glass HUD, and the **Screens** toggle that dims the bottom screen with Steam's idle dim ([details](dim-mirror.md)). All keys and ranges are in [configuration.md](configuration.md).
+In the Decky panel (Steam menu, Decky, Ratatoskr): sensitivity, glide and friction, scroll speed, tap to click, long-press right click and its delay, two- and three-finger taps, navigation swipes, the **Pen** section (Pen mode and Pen +), the on-glass HUD, and the **Screens** toggles: dim the bottom screen with Steam's idle dim ([details](dim-mirror.md)) and [PS mode](#ps-mode-chiaki-ng). All keys and ranges are in [configuration.md](configuration.md).
 
 The panel also shows service state, hardware stats, input telemetry (moves, scrolls, clicks, keys) and a **Run Diagnostics** button.
 
