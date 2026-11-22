@@ -79,6 +79,7 @@ def make(mode="keyboard"):
     app.held_ui_button = app.held_ui_button_tid = app._slider_drag = None
     app.last_key_label, app.last_event_time, app.ui_hidden = "", 0.0, False
     app._repeat_stop, app._repeat_thread = threading.Event(), None
+    app._gleipnir_wake = threading.Event()
     app._start_key_repeat = lambda key: None
     app.drawing_area = types.SimpleNamespace(queue_draw=lambda: None)
     app.save_config = lambda: None
