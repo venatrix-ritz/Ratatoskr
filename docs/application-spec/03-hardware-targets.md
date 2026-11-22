@@ -8,29 +8,29 @@ repo checks the Armada version at run time, so other builds are **unverified**.
 
 | Property | Value | Source |
 |---|---|---|
-| Panel | 3.92-inch AMOLED, drawn at 1240 by 1080 | `SCREEN_WIDTH = 1240`, `SCREEN_HEIGHT = 1080` `bin/engine.py:82-83`; size in `bin/thor_app.py:76-77` |
-| Pixel density | about 16.5 px per mm (comment) | `bin/thor_app.py:76-77`; derived from the 3.92-inch diagonal, not measured here |
+| Panel | 3.92-inch AMOLED, drawn at 1240 by 1080 | `SCREEN_WIDTH = 1240`, `SCREEN_HEIGHT = 1080` `bin/engine.py:82-83`; size in `bin/thor_app.py:77-78` |
+| Pixel density | about 16.5 px per mm (comment) | `bin/thor_app.py:77-78`; derived from the 3.92-inch diagonal, not measured here |
 | Mounting | rotated 90 degrees relative to the digitizer's raw axes | `raw_to_screen` `bin/engine.py:126-128`: `x = raw_y`, `y = 1079 - raw_x` |
-| Driver window | GTK window, fullscreen, undecorated, 1240 by 1080 | `bin/thor_app.py:221-226` |
+| Driver window | GTK window, fullscreen, undecorated, 1240 by 1080 | `bin/thor_app.py:226-231` |
 | Display | runs in the bottom-screen gamescope through `armada-run-bottom`; the code comments name the secondary display `:2` | `systemd/touch-master.service:10`, `debug_codes.py:20` (comment), `docs/architecture.md` ("DISPLAY :2") |
-| Pixel colour | pure black base; lit pixels are the only power draw | `bin/theme.py:1-10`, `bin/thor_app.py:1137-1139` |
+| Pixel colour | pure black base; lit pixels are the only power draw | `bin/theme.py:1-10`, `bin/thor_app.py:1178-1180` |
 
-The header is 80 px of buttons and an 88 px ribbon, so the drawing area starts at y = 168 (`bin/thor_app.py:78-82`).
-The split line is at y = 500 (`bin/thor_app.py:83`).
+The header is 80 px of buttons and an 88 px ribbon, so the drawing area starts at y = 168 (`bin/thor_app.py:79-83`).
+The split line is at y = 500 (`bin/thor_app.py:84`).
 
 ## Touch digitizer
 
 | Property | Value | Source |
 |---|---|---|
-| Node selection | first `/dev/input/event*` whose `/sys/class/input/<node>/device/name` contains both "bottom" and "touchscreen" (case-insensitive) | `_find_bottom_touchscreen` `bin/thor_app.py:718-727` |
-| Node name used by the diagnostic and the idle tracker | `bottom_touchscreen` | `debug_codes.py:160-165`, `bin/dim_mirror.py:119` |
-| Fallback node | **none in the code**. The docs say `/dev/input/event5` is a fallback (see [06](06-testing-limitations-glossary.md#documentation-and-code-mismatches-found-in-this-review)) | `bin/thor_app.py:718-727` |
-| Exclusive access | `EVIOCGRAB` (value 1) on the node; released on cleanup | `bin/thor_app.py:577-578`, `:524-527` |
+| Node selection | first `/dev/input/event*` whose `/sys/class/input/<node>/device/name` contains both "bottom" and "touchscreen" (case-insensitive) | `_find_bottom_touchscreen` `bin/thor_app.py:734-743` |
+| Node name used by the diagnostic and the idle tracker | `bottom_touchscreen` | `debug_codes.py:162-167`, `bin/dim_mirror.py:119` |
+| Fallback node | **none in the code**. The docs say `/dev/input/event5` is a fallback (see [06](06-testing-limitations-glossary.md#documentation-and-code-mismatches-found-in-this-review)) | `bin/thor_app.py:734-743` |
+| Exclusive access | `EVIOCGRAB` (value 1) on the node; released on cleanup | `bin/thor_app.py:593-594`, `:539-542` |
 | Slots | at most five, and "the controller reports at most five fingers" | `bin/engine.py:109-111`; the docs say it loses lifts when several fingers are down (`docs/troubleshooting.md`, author's observation 2026-10-08, **unverified** here) |
-| Retry | if the node is missing or the grab fails, the driver retries every 5 s | `bin/thor_app.py:570-592`, `:646-649` |
+| Retry | if the node is missing or the grab fails, the driver retries every 5 s | `bin/thor_app.py:586-608`, `:662-665` |
 
 The digitizer is grabbed, so no other process can read it. The idle tracker is therefore told about bottom touches by the
-app (`bin/thor_app.py:631`, `poke()`). The docs also say a physical controller `/dev/input/event7` is root-only on the
+app (`bin/thor_app.py:647`, `poke()`). The docs also say a physical controller `/dev/input/event7` is root-only on the
 Thor (`docs/dim-mirror.md`, observed 2026-10-08). That is not in the code and is **unverified** here.
 
 ## Backlights
@@ -66,11 +66,11 @@ Armada's root service `armada-control` re-applies the saved bottom level every 2
 
 | Device | Bus, vendor, product | Keys and axes | Source |
 |---|---|---|---|
-| Thor Virtual Trackpad | virtual (0x06), 0x1234, 0x5678 | buttons left, right, middle; relative X, Y, wheel, horizontal wheel, and high-resolution wheels | `bin/engine.py:23-45`, `:163-185` |
-| Thor Virtual Keyboard | virtual (0x06), 0x1234, 0x5679 | key codes 1 to 247 | `bin/engine.py:187-205` |
+| Thor Virtual Trackpad | virtual (0x06), 0x1234, 0x5678 | buttons left, right, middle; relative X, Y, wheel, horizontal wheel, and high-resolution wheels | `bin/engine.py:23-45`, `:164-186` |
+| Thor Virtual Keyboard | virtual (0x06), 0x1234, 0x5679 | key codes 1 to 247 | `bin/engine.py:188-206` |
 
 Both are created through `/dev/uinput` and need write access to it (`scripts/deploy.sh`, `docs/installation.md`,
-`run_self_diagnostics` `debug_codes.py:149-154`).
+`run_self_diagnostics` `debug_codes.py:151-156`).
 
 ## Armada and Decky components the code depends on
 
@@ -78,8 +78,8 @@ Both are created through `/dev/uinput` and need write access to it (`scripts/dep
 |---|---|---|
 | `armada-run-bottom` | wraps the driver's launch so it gets the bottom session environment | `systemd/touch-master.service:10` |
 | `armada-bottom-gamescope.service` | the unit is `PartOf` and ordered after it | `systemd/touch-master.service:3-4` |
-| `armada-bottom-screen.service` | Ratatoskr conflicts with it and the stop path starts it again | `systemd/touch-master.service:5`, `main.py` `_stop_service`, `bin/touch_master_manager.py:99-116` |
-| `/run/user/<uid>/armada-bottom-env` | existence checked by self-test as the bottom display environment | `debug_codes.py:191-193` |
+| `armada-bottom-screen.service` | Ratatoskr conflicts with it and the stop path starts it again | `systemd/touch-master.service:5`, `main.py` `_stop_service`, `bin/touch_master_manager.py:100-117` |
+| `/run/user/<uid>/armada-bottom-env` | existence checked by self-test as the bottom display environment | `debug_codes.py:193-195` |
 | `gamescope-session-plus` | reads `~/.config/environment.d/*.conf` and passes `--hide-cursor-delay` | `bin/session_cursor.py:1-10` (author's read on 2026-10-08, **unverified** here) |
 | `plugin_loader.service` | restarted by the install scripts to reload Decky | `scripts/deploy.sh:67`, `scripts/deploy-decky-panel.sh:30` |
 | Decky plugin folder | `/home/armada/homebrew/plugins/thor-input` (root-owned) | `scripts/deploy.sh:15`, `scripts/deploy-decky-panel.sh:16` |
@@ -94,4 +94,4 @@ Both are created through `/dev/uinput` and need write access to it (`scripts/dep
 | Pointer auto-hide | 3000 ms by default in Game Mode | gamescope hides the pointer after this many ms without motion | `bin/session_cursor.py:1-10`, `bin/engine.py:93-100` |
 | Pen + override | 3600000 ms (one hour) | "effectively never" | `bin/session_cursor.py:200` |
 | Digitizer lift loss | a contact silent for 1.5 s is dropped | the controller sometimes does not report a lift | `bin/engine.py:101-105` |
-| Dim floor | 3 percent by default | the brightness the bottom dims to | `bin/thor_app.py:160`, `main.py` `_default_config` |
+| Dim floor | 3 percent by default | the brightness the bottom dims to | `bin/thor_app.py:161`, `main.py` `_default_config` |

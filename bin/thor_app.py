@@ -64,6 +64,7 @@ from dim_mirror import DimMirror, IdleTracker
 from system_stats import HardwareStats
 import pen_mode as pm
 import ps_pad
+import haptics
 import atomic_json
 import ipc_util
 import session_cursor
@@ -172,6 +173,9 @@ class ThorApp:
 
         # Bridge & processors
         self.bridge = UInputBridge(self.logger)
+        # A short buzz for every tap click, key, on-screen button and PS button (`haptics` setting)
+        self.haptics = haptics.Haptics(self.logger)
+        self.bridge.on_click = self._haptic
         self.gesture = TouchGestureProcessor(self.bridge, self.logger)
         # Touch frames (reader thread) and settings / mode changes (IPC thread, GTK) all change the gesture and keyboard
         # state; one re-entrant lock keeps them from interleaving.
@@ -180,6 +184,7 @@ class ThorApp:
         self.ps = ps_pad.PsPad(
             self.bridge, ps_pad.PsLayout(HEADER_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT), lock=self.input_lock, settings=self.gesture
         )
+        self.ps.on_press = self._haptic
         self.ps_cfg: dict = {"ps_mode_auto": True, "ps_touch_rotation": 0}
         self._ps_return_mode = "trackpad"
         self.ps_focus = ps_pad.FocusWatcher(self._on_chiaki_focus)
@@ -242,6 +247,7 @@ class ThorApp:
                     # PS mode is never restored: the focus watcher turns it on again if Chiaki-NG has focus
                     self.mode = mode if mode in MODES and mode != "ps" else "trackpad"
                     self._apply_ps_settings(cfg)
+                    self._apply_haptics_settings(cfg)
                     self.show_debug_hud = cfg.get("debug_hud", self.show_debug_hud)
                     self.gesture.set_settings(**cfg)
                     self._apply_mirror_settings(cfg)
@@ -273,6 +279,7 @@ class ThorApp:
                 **self.keyboard_cfg,
                 **self.gleipnir_cfg,
                 **self.ps_cfg,
+                "haptics": self.haptics.enabled,
             }
             atomic_json.write_json_atomic(CONFIG_PATH, cfg)
         except Exception as err:
@@ -311,6 +318,13 @@ class ThorApp:
             if not self.gleipnir_cfg["gleipnir_ribbon"]:
                 self.gleipnir_status = None
             self._gleipnir_wake.set()  # read it now instead of in up to 10 s
+
+    def _haptic(self) -> None:
+        self.haptics.pulse()
+
+    def _apply_haptics_settings(self, msg: dict) -> None:
+        if "haptics" in msg:
+            self.haptics.enabled = bool(msg["haptics"])
 
     def _apply_ps_settings(self, msg: dict) -> None:
         if "ps_mode_auto" in msg:
@@ -489,6 +503,7 @@ class ThorApp:
         self.dim_mirror.start()
         threading.Thread(target=self._gleipnir_loop, name="gleipnir-view", daemon=True).start()
         self.ps_focus.start()
+        self.haptics.start()
         self.window.show_all()
         # Periodic 1-second refresh for live system monitor ribbon
         GLib.timeout_add(1000, self._on_stats_tick)
@@ -552,6 +567,7 @@ class ThorApp:
         step("key repeat", self._stop_key_repeat)
         step("chiaki focus watcher", self.ps_focus.stop)
         step("ps pad", self.ps.release_all)
+        step("haptics", self.haptics.stop)
         self.touch_stop.set()
         self._gleipnir_wake.set()
         self.ipc_stop.set()
@@ -791,8 +807,10 @@ class ThorApp:
         if owner == "header":
             self._handle_header_touch(tid, x, y, True)
         elif owner == "open":
+            self._haptic()
             self.set_ui_hidden(False)
         elif owner == "ribbon":  # the status ribbon toggles Quick Controls
+            self._haptic()
             back = "ps" if self.ps.active else "trackpad"
             self.set_mode(back if self.mode == "settings" else "settings", restart_hint=False)
         elif owner == "settings":
@@ -811,6 +829,7 @@ class ThorApp:
         key = self.kb_layout.hit_test(x, y)
         if not key:
             return
+        self._haptic()
         if key.special in ("shift", "ctrl", "alt", "super"):
             window_s = self.keyboard_cfg["keyboard_caps_window_ms"] / 1000.0
             self._send_keys(self.mods.press(key.special, tid, time.monotonic(), window_s))
@@ -876,6 +895,8 @@ class ThorApp:
 
     def _handle_header_touch(self, tid: int, x: float, y: float, down: bool) -> None:
         key = next((k for k, bx, bw in self._header_buttons() if bx <= x <= bx + bw), None)
+        if key:
+            self._haptic()
         if key in ("trackpad", "split", "keyboard", "settings", "ps"):  # "ps" is only shown while Chiaki-NG has focus
             self.set_mode(key, restart_hint=False)
         elif key == "hide":
@@ -900,14 +921,17 @@ class ThorApp:
         # Card 1: Volume
         if in_ctrl_row(0):
             if 30 <= x <= 120:
+                self._haptic()
                 self.stats.adjust_volume(-5)
             elif 130 <= x <= 950:
                 pct = round((x - 130) / (950 - 130) * 100)
                 self.stats.request_volume(pct)
                 self._slider_drag = (tid, "vol")
             elif 960 <= x <= 1050:
+                self._haptic()
                 self.stats.adjust_volume(5)
             elif 1060 <= x <= 1210:
+                self._haptic()
                 self.stats.toggle_mute()
             GLib.idle_add(self.drawing_area.queue_draw)
             return
@@ -915,12 +939,14 @@ class ThorApp:
         # Card 2: Top Brightness
         if in_ctrl_row(1):
             if 30 <= x <= 120:
+                self._haptic()
                 self.stats.adjust_top_brightness(-10)
             elif 130 <= x <= 1090:
                 pct = round((x - 130) / (1090 - 130) * 100)
                 self.stats.request_top_brightness(pct)
                 self._slider_drag = (tid, "top")
             elif 1100 <= x <= 1210:
+                self._haptic()
                 self.stats.adjust_top_brightness(10)
             GLib.idle_add(self.drawing_area.queue_draw)
             return
@@ -928,18 +954,22 @@ class ThorApp:
         # Card 3: Bottom Brightness
         if in_ctrl_row(2):
             if 30 <= x <= 120:
+                self._haptic()
                 self.stats.adjust_bottom_brightness(-10)
             elif 130 <= x <= 1090:
                 pct = round((x - 130) / (1090 - 130) * 100)
                 self.stats.request_bottom_brightness(pct)
                 self._slider_drag = (tid, "bot")
             elif 1100 <= x <= 1210:
+                self._haptic()
                 self.stats.adjust_bottom_brightness(10)
             GLib.idle_add(self.drawing_area.queue_draw)
             return
 
         # Bottom Action Buttons
         if QC_BUTTONS_Y - 6 <= y <= QC_BUTTONS_Y + QC_BUTTONS_H + 6:
+            if any(lo <= x <= hi for lo, hi in ((30, 310), (330, 610), (630, 910), (930, 1210))):
+                self._haptic()
             if 30 <= x <= 310:
                 self.gesture.tap_to_click = not self.gesture.tap_to_click
                 self.save_config()
@@ -1025,6 +1055,8 @@ class ThorApp:
                             res["pen_mode"] = self.pen_mode
                             res.update(self.ps_cfg)
                             res["ps_focused"] = self.ps.active
+                            res["haptics"] = self.haptics.enabled
+                            res["haptics_available"] = self.haptics.available
                         elif action == "get_debug":
                             res["telemetry"] = self.bridge.get_telemetry()
                             res["state"] = self.gesture.last_state_label
@@ -1050,6 +1082,14 @@ class ThorApp:
                                 "buttons": sorted(set(self.ps.button_tids.values())),
                                 **self.ps_cfg,
                             }
+                            res["haptics"] = {
+                                "enabled": self.haptics.enabled,
+                                "device": self.haptics.path,
+                                "available": self.haptics.available,
+                                "pulses": self.haptics.pulses,
+                                "failures": self.haptics.failures,
+                                "last_error": self.haptics.last_error,
+                            }
                         elif action == "set_mode":
                             self.set_mode(msg.get("mode", "trackpad"))
                         elif action == "set_settings":
@@ -1059,6 +1099,7 @@ class ThorApp:
                                 keyboard_settings.apply(self.keyboard_cfg, msg)
                                 self._apply_gleipnir_settings(msg)
                                 self._apply_ps_settings(msg)
+                                self._apply_haptics_settings(msg)
                                 if "debug_hud" in msg:
                                     self.show_debug_hud = bool(msg["debug_hud"])
                             self.save_config()

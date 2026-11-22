@@ -133,6 +133,7 @@ class PsPad:
         self._long_press = None  # timer that turns a still finger into a held click
         self._tap_release = None  # timer that ends a tap's click and lifts the touch
         self._touch_down = False  # the virtual touch is down (it outlives the finger during a tap's click)
+        self.on_press = None  # called for each button press and pad click: the driver buzzes the haptics motor
 
     def set_active(self, active: bool) -> None:
         with self.lock:
@@ -158,10 +159,16 @@ class PsPad:
             t.cancel()
             setattr(self, attr, None)
 
+    def _buzz(self) -> None:
+        if self.on_press is not None:
+            self.on_press()
+
     def _click(self, down: bool) -> None:
         if down != self.clicking:
             self.bridge.key(PAD_CLICK_KEY, down)
             self.clicking = down
+            if down:
+                self._buzz()
 
     def _lift(self) -> None:
         """Click up first (a lift clears Chiaki's touchpad click anyway), then the touch."""
@@ -211,6 +218,7 @@ class PsPad:
                 self._long_press = t
                 t.start()
             return hit
+        self._buzz()
         if hit == "mic":
             for code in MIC_CHORD:
                 self.bridge.key(code, True)

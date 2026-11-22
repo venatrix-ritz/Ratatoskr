@@ -16,6 +16,7 @@ A [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin and v
 - **Trackpad gestures:** acceleration, tap to click, two-finger scroll and right-click tap, optional long-press right click, three-finger middle click, three-finger navigation swipes, and momentum glide with adjustable friction. Middle click, swipes and long-press are off by default.
 - **Pen mode:** one pointer for a stylus (double-tap clicks, hold right-clicks, edge strips scroll), and **Pen +**, which also keeps Game Mode's pointer visible. See [Usage](docs/usage.md#pen-mode).
 - **PS mode for Chiaki-NG:** while [Chiaki-NG](https://github.com/streetpea/chiaki-ng) streams a PS5 on the top screen, the bottom screen is the PS5 touchpad (one finger: swipe, tap to click, press and hold to hold the click) with Create, PS, Options and Mic buttons, and a PS button in the header to come back to it; when Chiaki-NG loses focus it goes back to the previous mode. See [Usage](docs/usage.md#ps-mode-chiaki-ng).
+- **Haptic feedback:** a short buzz from the Thor's vibration motor for every tap click, key, on-screen button and PS button, with an on/off switch in the Decky panel. See [Usage](docs/usage.md#haptic-feedback).
 - **AMOLED friendly:** pure black UI; unlit pixels draw no power.
 - **Opt-in: bottom screen follows Steam's idle dim.** Steam only dims the top panel. Ratatoskr can read Steam's dim delay and dim the bottom panel the same way ([docs/dim-mirror.md](docs/dim-mirror.md)).
 - **Diagnostics:** numbered `DBG-nnn` codes, a log at `/tmp/thor-input-debug.log`, an on-glass HUD, and a **Run Diagnostics** button.
@@ -48,7 +49,7 @@ Then open the Steam menu, Decky, **Ratatoskr**. Full steps, requirements and uni
 | `DBG-3xx` | IPC socket | `300` ready, `302` cannot connect, `303` bad request |
 | `DBG-4xx` | display | `400` display OK, `401` cannot reach the bottom display |
 | `DBG-5xx` | gesture telemetry | clicks, scroll, swipe, glide, key presses (`521` is reserved: edge scrolling was removed) |
-| `DBG-6xx` | settings and controls | `600` settings updated, `601` backlight, `602` volume, `610` dim mirror, `620` PS mode |
+| `DBG-6xx` | settings and controls | `600` settings updated, `601` backlight, `602` volume, `610` dim mirror, `620` PS mode, `630` haptics |
 | `DBG-7xx` | hardware errors | `701` backlight write failed, `702` `wpctl` failed |
 
 The full registry is `debug_codes.py`.

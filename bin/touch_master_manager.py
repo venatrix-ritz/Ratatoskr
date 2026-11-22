@@ -51,6 +51,7 @@ DEFAULT_CONFIG = {
     "gleipnir_ribbon": False,
     "ps_mode_auto": True,
     "ps_touch_rotation": 0,
+    "haptics": True,
     "debug_hud": False,
 }
 
