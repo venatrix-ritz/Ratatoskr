@@ -3,19 +3,19 @@
 ## Message formats
 
 The socket carries one JSON object per connection from the client, and one JSON object back. The driver writes the
-reply and closes (`bin/thor_app.py:1143`). Clients read until end of file (`bin/ipc_util.py:46-64`, `main.py:35-57`).
+reply and closes (`bin/thor_app.py:1120`). Clients read until end of file (`bin/ipc_util.py:46-64`, `main.py:35-57`).
 
 ### Request framing
 
 - A request is at most 64 KiB (`bin/ipc_util.py:14`), may arrive in any number of pieces, and must complete within 2 s
   (`:18-43`). The parser tries `json.loads` after each piece, so the first complete JSON value ends the request.
-- A connection that closes with no bytes gets no reply (`bin/ipc_util.py:37-38`, `bin/thor_app.py:1037-1038`).
+- A connection that closes with no bytes gets no reply (`bin/ipc_util.py:37-38`, `bin/thor_app.py:1022-1023`).
 - A connection that closes with partial bytes is parsed as is, and fails with `303` if it is not JSON
   (`bin/ipc_util.py:33-34`).
 
 ### Reply framing
 
-- The driver sends the whole reply with one `sendall` (`bin/thor_app.py:1143`). The size of a status reply is described
+- The driver sends the whole reply with one `sendall` (`bin/thor_app.py:1120`). The size of a status reply is described
   two ways: the CHANGELOG says it was under 1 KB on 2026-10-08, and the comment in `main.py` `_send_ipc` says several KB.
   The clients read to end of file, so either size is read whole.
 - Clients accept up to 1 MiB (`bin/ipc_util.py:15`, `main.py:35-57`) and time out after 2 s.
@@ -26,34 +26,33 @@ Request and reply pairs as the code produces them (key order follows the code's 
 
 | Request | Reply | Source |
 |---|---|---|
-| `{"action": "set_top_brightness", "brightness": 40}` | `{"ok": true, "code": 0, "top_bright_pct": 40}` | `bin/thor_app.py:1115-1118` |
-| `{"action": "wake"}` | `{"ok": true, "code": 0}` | `bin/thor_app.py:1126-1131` |
-| `{"action": "nope"}` | `{"ok": false, "code": 303, "error": "unknown action: 'nope'"}` | `bin/thor_app.py:1141-1142` |
-| `{"action": ` (cut off, then closed) | `{"ok": false, "code": 303, "error": "JSONDecodeError: ..."}` | `bin/thor_app.py:1144-1149`, `bin/ipc_util.py:37-43` |
-| `[1, 2]` (a JSON array) | `{"ok": false, "code": 303, "error": "ValueError: a request must be a JSON object"}` | `bin/thor_app.py:1039-1040` |
-| `{"action": "set_settings", "sensitivity": 2.0}` | `{"ok": true, "code": 0}` | `bin/thor_app.py:1095-1106` |
+| `{"action": "set_top_brightness", "brightness": 40}` | `{"ok": true, "code": 0, "top_bright_pct": 40}` | `bin/thor_app.py:1097-1100` |
+| `{"action": "wake"}` | `{"ok": true, "code": 0}` | `bin/thor_app.py:1108-1113` |
+| `{"action": "nope"}` | `{"ok": false, "code": 303, "error": "unknown action: 'nope'"}` | `bin/thor_app.py:1118-1119` |
+| `{"action": ` (cut off, then closed) | `{"ok": false, "code": 303, "error": "JSONDecodeError: ..."}` | `bin/thor_app.py:1121-1126`, `bin/ipc_util.py:37-43` |
+| `[1, 2]` (a JSON array) | `{"ok": false, "code": 303, "error": "ValueError: a request must be a JSON object"}` | `bin/thor_app.py:1024-1025` |
+| `{"action": "set_settings", "sensitivity": 2.0}` | `{"ok": true, "code": 0}` | `bin/thor_app.py:1079-1088` |
 
-The `error` text for an exception is `"<ExceptionName>: <message>"` (`bin/thor_app.py:1145`).
+The `error` text for an exception is `"<ExceptionName>: <message>"` (`bin/thor_app.py:1122`).
 
 ### Shape of the status reply
 
-`get_status` (`bin/thor_app.py:1044-1055`) returns the fields below. Values are examples of the types only.
+`get_status` (`bin/thor_app.py:1029-1039`) returns the fields below. Values are examples of the types only.
 
 | Field | Type | Source of the value |
 |---|---|---|
 | `ok`, `code` | bool, int | fixed |
 | `mode` | string | `self.mode` |
-| `debug_hud` | bool | `self.show_debug_hud` |
 | `hardware_stats` | object | `HardwareStats.get_stats()`: `cpu_load`, `cpu_ghz`, `cpu_temp`, `gpu_mhz`, `gpu_temp`, `ram_used_gb`, `ram_total_gb`, `ram_pct`, `bat_cap`, `bat_status`, `bat_watts`, `vol_pct`, `vol_muted`, `top_bright_pct`, `bot_bright_pct` (`bin/system_stats.py:343-359`) |
 | gesture settings | bool, int, float | `TouchGestureProcessor.get_settings()` (`bin/engine.py:564-577`) |
 | `mirror_dim`, `mirror_dim_floor_percent` | bool, int | `mirror_cfg` |
 | `keyboard_repeat_delay_ms`, `keyboard_repeat_interval_ms`, `keyboard_caps_window_ms` | int | `keyboard_cfg` |
 | `gleipnir_ribbon`, `gleipnir_available` | bool | `gleipnir_cfg` and `gleipnir_view.find_script()` |
 | `bottom_dimmed` | bool | `DimMirror.dimmed` |
-| `cursor_stay_visible`, `cursor_hide_delay_ms`, `cursor_stay_visible_active` | bool, int or null, bool | `session_cursor.status` (`bin/thor_app.py:512-515`) |
+| `cursor_stay_visible`, `cursor_hide_delay_ms`, `cursor_stay_visible_active` | bool, int or null, bool | `session_cursor.status` (`bin/thor_app.py:509-512`) |
 | `pen_mode` | string | `self.pen_mode` |
 
-`get_debug` (`bin/thor_app.py:1060-1076`) adds `telemetry` (`bin/engine.py:413-426`), `state`, `coords`, `touch_device`,
+`get_debug` (`bin/thor_app.py:1044-1060`) adds `telemetry` (`bin/engine.py:413-426`), `state`, `coords`, `touch_device`,
 `active_fingers`, `digitizer_contacts`, `engine_contacts` (a map from contact id to `[x, y, age]`), `last_key`, `draws`,
 `draw_ms_avg`, `draw_ms_max`, `frame_lag_ms_max`, and the hardware block and gesture settings.
 
@@ -61,7 +60,7 @@ The `error` text for an exception is `"<ExceptionName>: <message>"` (`bin/thor_a
 
 `main.py` `get_status` builds its own dictionary from the driver's reply and the config file, and fills `enabled` (true
 when the socket answers), `code` (0 running, 4 stopped), and the settings with their defaults
-(`main.py:248-310` area; `_default_config` at `main.py:113-137`). When the driver is not running it returns the file's
+(`main.py:247-308` area; `_default_config` at `main.py:113-136`). When the driver is not running it returns the file's
 settings, empty telemetry, `state: "STOPPED"`, and an empty hardware block (`main.py` `get_status`).
 
 ## Driver IPC server loop
@@ -137,7 +136,7 @@ sequenceDiagram
 
 Source: `main.py` `set_enabled` (line 302), `_start_service` (line 240), `_is_running` (line 108). The polling loop is in
 `set_enabled` after the `_set` helper runs. Each `systemctl` attempt tries the `--machine=armada@.host` form first, then
-the plain form (`main.py:217-241`).
+the plain form (`main.py:216-240`).
 
 ## Configuration write path
 
@@ -152,20 +151,20 @@ flowchart LR
 ```
 
 The driver's `save_config` starts from the file on disk, so keys the driver does not own, such as `enabled`, survive
-(`bin/thor_app.py:264-283`). The Decky backend's `_read_config` starts from `_default_config` and updates from the file,
-so a save writes every default key into the file (`main.py:113-149`). The manager starts from its `DEFAULT_CONFIG` the
-same way (`bin/touch_master_manager.py:59-67`). Writes are atomic in all three (`bin/atomic_json.py`, `main.py:152-183`).
+(`bin/thor_app.py:261-280`). The Decky backend's `_read_config` starts from `_default_config` and updates from the file,
+so a save writes every default key into the file (`main.py:113-148`). The manager starts from its `DEFAULT_CONFIG` the
+same way (`bin/touch_master_manager.py:58-66`). Writes are atomic in all three (`bin/atomic_json.py`, `main.py:151-182`).
 
 ## Settings change in the driver
 
 A setting changed in the panel has three effects in the driver, in this order: the engine's attributes change under
 `input_lock`, the mirror and keyboard and Gleipnir values change, and then the file is saved and the screen redrawn
-(`bin/thor_app.py:1095-1106`). The panel's values are not read back from the file. The driver writes its full set of keys
-on each save (`:272-283`).
+(`bin/thor_app.py:1079-1088`). The panel's values are not read back from the file. The driver writes its full set of keys
+on each save (`:270-280`).
 
 Two settings exclude each other in the engine: turning on `long_press_right_click` turns off `two_finger_right_click`,
 and the reverse (`bin/engine.py:540-548`). The panel refreshes 700 ms after a setting so that the other one is shown
-(`dist/index.js:185`).
+(`dist/index.js:183`).
 
 ## Data flow end to end
 

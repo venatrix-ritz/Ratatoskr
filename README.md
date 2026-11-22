@@ -19,7 +19,7 @@ A [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin and v
 - **Haptic feedback:** a short buzz from the Thor's vibration motor for every tap click, key, on-screen button and PS button, with an on/off switch in the Decky panel. See [Usage](docs/usage.md#haptic-feedback).
 - **AMOLED friendly:** pure black UI; unlit pixels draw no power.
 - **Opt-in: bottom screen follows Steam's idle dim.** Steam only dims the top panel. Ratatoskr can read Steam's dim delay and dim the bottom panel the same way ([docs/dim-mirror.md](docs/dim-mirror.md)).
-- **Diagnostics:** numbered `DBG-nnn` codes, a log at `/tmp/thor-input-debug.log`, an on-glass HUD, and a **Run Diagnostics** button.
+- **Diagnostics:** numbered `DBG-nnn` codes, a log at `/tmp/thor-input-debug.log` and a **Run Diagnostics** button.
 
 ## Quick start
 ```bash
@@ -32,7 +32,7 @@ Then open the Steam menu, Decky, **Ratatoskr**. Full steps, requirements and uni
 | Page | What is in it |
 |---|---|
 | [Installation](docs/installation.md) | requirements, deploy script, manual install, the optional sudo rule, uninstall |
-| [Usage](docs/usage.md) | the four modes, PS mode for Chiaki-NG, every gesture, the Decky panel, the HUD, the manager |
+| [Usage](docs/usage.md) | the four modes, PS mode for Chiaki-NG, every gesture, the Decky panel, the manager |
 | [Configuration](docs/configuration.md) | every `config.json` key with default and range |
 | [Architecture](docs/architecture.md) | processes, touch path, virtual devices, the IPC protocol |
 | [Dim mirror](docs/dim-mirror.md) | why only the top screen dims, how the mirror works, limits |

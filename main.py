@@ -132,7 +132,6 @@ def _default_config() -> dict:
         "ps_mode_auto": True,
         "ps_touch_rotation": 0,
         "haptics": True,
-        "debug_hud": False,
     }
 
 
@@ -288,7 +287,6 @@ class Plugin:
                     "pen_mode": res.get("pen_mode", "off"),
                     "cursor_stay_visible": res.get("cursor_stay_visible", False),
                     "cursor_stay_visible_active": res.get("cursor_stay_visible_active", False),
-                    "debug_hud": cfg.get("debug_hud", False),
                     "telemetry": debug_info.get("telemetry", {}),
                     "touch_device": debug_info.get("touch_device", ""),
                     "state": debug_info.get("state", "IDLE"),
@@ -386,17 +384,6 @@ class Plugin:
             return {"ok": False}
 
         return await asyncio.to_thread(_set)
-
-    async def toggle_hud(self) -> dict:
-        def _toggle():
-            if _is_running():
-                return _send_ipc({"action": "toggle_hud"})
-            cfg = _read_config()
-            cfg["debug_hud"] = not cfg.get("debug_hud", False)
-            _save_config(cfg)
-            return {"ok": True, "debug_hud": cfg["debug_hud"]}
-
-        return await asyncio.to_thread(_toggle)
 
     async def set_pen_mode(self, mode: str) -> dict:
         """off, pen or pen_plus. Pen + also keeps Game Mode's pointer visible, which applies when Game Mode next starts."""

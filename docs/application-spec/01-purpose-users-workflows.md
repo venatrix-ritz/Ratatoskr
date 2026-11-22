@@ -16,7 +16,7 @@ The output is a pair of virtual uinput devices: "Thor Virtual Trackpad" (`bin/en
 ## Scope
 
 ### In scope
-- Grabbing the bottom touchscreen exclusively (`EVIOCGRAB`, `bin/thor_app.py:593`) and reading its multitouch frames.
+- Grabbing the bottom touchscreen exclusively (`EVIOCGRAB`, `bin/thor_app.py:590`) and reading its multitouch frames.
 - Gesture interpretation: pointer motion, taps, long press, two- and three-finger gestures, momentum glide, Pen mode
   (`bin/engine.py`).
 - Drawing the bottom-screen UI with GTK and cairo (`bin/thor_app.py`, `bin/key_render.py`, `bin/theme.py`).
@@ -76,23 +76,23 @@ Each workflow lists the steps as the code performs them. Device-level steps are 
 ### W-02 Install from the release zip
 `python scripts/build-release.py` writes `release/Ratatoskr.zip` with one top-level `thor-input/` folder
 (`scripts/build-release.py:2-9`). On first load Decky runs `main.py` `Plugin._main`, which calls `_sync_driver`
-(`main.py:76`; `_main` starts at `main.py:197` and calls it at `main.py:200`). That copies the shipped driver files into the home folder when they are missing or differ,
+(`main.py:76`; `_main` starts at `main.py:196` and calls it at `main.py:199`). That copies the shipped driver files into the home folder when they are missing or differ,
 reloads user systemd if the unit changed, and starts or restarts the service.
 
 ### W-03 Turn the bottom screen on or off
-- **Decky**: "Enable Bottom Screen" calls `set_enabled` (`dist/index.js:319-335`). Enabling runs
+- **Decky**: "Enable Bottom Screen" calls `set_enabled` (`dist/index.js:304-320`). Enabling runs
   `_start_service` (disable `armada-bottom-screen.service`, enable and start `touch-master.service`,
-  `main.py:243-246`). Disabling runs `_stop_service` (stop and disable Ratatoskr, re-enable and start Armada's session,
-  `main.py:248-252`).
-- **Manager**: `touch_master_manager.py --start`, `--stop`, `--toggle` (`bin/touch_master_manager.py:434-445`).
+  `main.py:242-245`). Disabling runs `_stop_service` (stop and disable Ratatoskr, re-enable and start Armada's session,
+  `main.py:247-251`).
+- **Manager**: `touch_master_manager.py --start`, `--stop`, `--toggle` (`bin/touch_master_manager.py:418-429`).
 - **Tray menu**: "Stop Ratatoskr" starts the manager's `--stop` in a transient `systemd-run --user` unit
-  (`bin/thor_app.py:462-473`, `bin/tray_actions.py`), so the hand-back still runs after the service stops.
+  (`bin/thor_app.py:459-470`, `bin/tray_actions.py`), so the hand-back still runs after the service stops.
 
 ### W-04 Choose an input mode
-Modes are `trackpad`, `split`, `keyboard` and `settings` (`bin/thor_app.py:370`, which also accepts no others).
+Modes are `trackpad`, `split`, `keyboard` and `settings` (`bin/thor_app.py:367`, which also accepts no others).
 They can be chosen from the header buttons (Trackpad, Split, Keyboard, Quick Controls, and PS while Chiaki-NG has focus), the status ribbon (a tap toggles
-Quick Controls, `bin/thor_app.py:812-814`), the Decky dropdown (`dist/index.js:302-308`), the tray menu, or
-`touch_master_manager.py --mode trackpad|keyboard|settings` (the CLI has no `split` choice, `bin/touch_master_manager.py:431`).
+Quick Controls, `bin/thor_app.py:809-811`), the Decky dropdown (`dist/index.js:287-293`), the tray menu, or
+`touch_master_manager.py --mode trackpad|keyboard|settings` (the CLI has no `split` choice, `bin/touch_master_manager.py:415`).
 
 ### W-05 Use the trackpad
 One finger moves the pointer. A short tap clicks. Two fingers scroll. Two-finger tap right-clicks. Holding one finger
@@ -101,7 +101,7 @@ default. A flick glides. The full table is in [02-features.md](02-features.md#tr
 
 ### W-06 Type on the keyboard
 Keys send a key-down and key-up pair at once on a tap (`bin/thor_app.py` `_keyboard_down` calls `tap_key`). A held key
-repeats after `keyboard_repeat_delay_ms` at `keyboard_repeat_interval_ms` (`bin/thor_app.py:475-491`). Shift, Ctrl, Alt
+repeats after `keyboard_repeat_delay_ms` at `keyboard_repeat_interval_ms` (`bin/thor_app.py:472-488`). Shift, Ctrl, Alt
 and Win are one-shot on a tap, lock on a quick second tap, and act while held with another finger
 (`bin/modifiers.py:1-16`).
 
@@ -112,14 +112,14 @@ and drags along the right and bottom edges scroll. Pen + also asks Game Mode to 
 
 ### W-08 Adjust settings and Quick Controls
 Quick Controls shows three sliders (volume with mute, top brightness, bottom brightness), the ribbon (battery, CPU, GPU,
-RAM, volume, brightness), and four buttons: Tap Click on/off, Right-click mode (2-finger or press-hold), Glass HUD,
-and Back to Trackpad (`bin/thor_app.py` `_draw_quick_settings`, `_handle_settings_touch`). The Decky panel exposes the
+RAM, volume, brightness), and three buttons: Tap Click on/off, Right-click mode (2-finger or press-hold) and Back to
+Trackpad (`bin/thor_app.py` `_draw_quick_settings`, `_handle_settings_touch`). The Decky panel exposes the
 same settings plus pointer tuning, keyboard timings and Pen controls (`dist/index.js`).
 
 ### W-09 Hide the UI and bring it back
 The **Hide** header button blanks everything except an **Open** button in the same corner. While hidden, the whole
 screen is a trackpad (`bin/thor_app.py` `_owner_at`, lines 671-687). A touch within `OPEN_HIT_PAD = 24` px of the Open
-button restores the UI (`bin/thor_app.py:112-113`, `:809-811`). Hidden state is not saved (`bin/thor_app.py:142`).
+button restores the UI (`bin/thor_app.py:113-114`, `:806-808`). Hidden state is not saved (`bin/thor_app.py:143`).
 
 ### W-10 Dim the bottom screen with the top (opt-in)
 Turn on "Dim bottom screen with the top" in the Decky panel, or set `mirror_dim: true`. The driver then watches the top
@@ -129,7 +129,7 @@ input arrives (`bin/dim_mirror.py`, `bin/top_follower.py`). Needs write access t
 
 ### W-11 Wake the screens
 `touch_master_manager.py --wake` or the IPC `wake` action taps F24 on the virtual keyboard
-(`bin/thor_app.py:1126-1131`). The docs say Steam treats it as input and restores a dimmed top screen (`docs/usage.md`,
+(`bin/thor_app.py:1108-1113`). The docs say Steam treats it as input and restores a dimmed top screen (`docs/usage.md`,
 "Waking the screens"). That is the author's device observation, **unverified** in this review.
 
 ### W-12 Keep the pointer visible in Game Mode (Pen +)
@@ -152,7 +152,7 @@ does not allow.
 
 ### W-15 Read the status ribbon and Gleipnir card (optional)
 With `gleipnir_ribbon` on, the battery cell shows Gleipnir's state (held, charging toward its cap, off or unverified) and
-Quick Controls shows a Battery and Gleipnir card (`bin/gleipnir_view.py`, `bin/thor_app.py:1293-1296`, `:1645`).
+Quick Controls shows a Battery and Gleipnir card (`bin/gleipnir_view.py`, `bin/thor_app.py:1257-1260`, `:1603`).
 The view runs `gleipnir --status --json`, reads `systemctl is-active gleipnir` and the Gleipnir journal, and never writes
 (`bin/gleipnir_view.py:4-6`).
 
@@ -168,5 +168,5 @@ Each component writes `[time] [DBG-nnn] [context] description - details` to stdo
 | Header, ribbon and Quick Controls on the glass | the user's fingers | evdev touch frames | [02-features.md](02-features.md) |
 | Decky panel | Decky Loader, through `main.py` | `systemctl --user`, and the IPC socket | [04-interfaces.md](04-interfaces.md#decky-backend-methods) |
 | Standalone manager window and CLI | the user, a script, a desktop entry | `systemctl --user`, the IPC socket | [04-interfaces.md](04-interfaces.md#cli-reference) |
-| Tray menu (AppIndicator, if available) | the user | GTK menu in the driver (`bin/thor_app.py:405-448`) | W-03, W-04 |
+| Tray menu (AppIndicator, if available) | the user | GTK menu in the driver (`bin/thor_app.py:402-445`) | W-03, W-04 |
 | Desktop entries | the user | `touch_master_manager.py` actions | `touch-master.desktop`, `touch-master-stop.desktop` |

@@ -52,7 +52,6 @@ DEFAULT_CONFIG = {
     "ps_mode_auto": True,
     "ps_touch_rotation": 0,
     "haptics": True,
-    "debug_hud": False,
 }
 
 
@@ -233,13 +232,6 @@ def launch_gui() -> None:
             mirror_row = self._make_switch_row("Dim bottom screen with Steam's idle dim", self.mirror_switch)
             dyn_box.pack_start(mirror_row, False, False, 0)
 
-            # Debug HUD
-            self.hud_switch = Gtk.Switch()
-            self.hud_switch.set_active(self.cfg.get("debug_hud", False))
-            self.hud_switch.connect("notify::active", self.on_hud_toggled)
-            hud_row = self._make_switch_row("Bottom Screen HUD Coordinates Overlay", self.hud_switch)
-            dyn_box.pack_start(hud_row, False, False, 0)
-
             # Brightness Controls Frame
             bright_frame = Gtk.Frame(label=" Display Brightness ")
             bright_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -396,14 +388,6 @@ def launch_gui() -> None:
             self.cfg[key] = active
             save_config(self.cfg)
             send_ipc(ipc_util.settings_request(**{key: active}))
-
-        def on_hud_toggled(self, switch, _param):
-            if self.updating_ui:
-                return
-            active = switch.get_active()
-            self.cfg["debug_hud"] = active
-            save_config(self.cfg)
-            send_ipc(ipc_util.hud_request(active))
 
         def on_brightness_changed(self, target: str, scale):
             if self.updating_ui:
