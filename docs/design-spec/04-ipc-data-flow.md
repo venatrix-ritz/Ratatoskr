@@ -3,19 +3,19 @@
 ## Message formats
 
 The socket carries one JSON object per connection from the client, and one JSON object back. The driver writes the
-reply and closes (`bin/thor_app.py:1121`). Clients read until end of file (`bin/ipc_util.py:46-64`, `main.py:35-57`).
+reply and closes (`bin/thor_app.py:1223`). Clients read until end of file (`bin/ipc_util.py:46-64`, `main.py:35-57`).
 
 ### Request framing
 
 - A request is at most 64 KiB (`bin/ipc_util.py:14`), may arrive in any number of pieces, and must complete within 2 s
   (`:18-43`). The parser tries `json.loads` after each piece, so the first complete JSON value ends the request.
-- A connection that closes with no bytes gets no reply (`bin/ipc_util.py:37-38`, `bin/thor_app.py:1023-1024`).
+- A connection that closes with no bytes gets no reply (`bin/ipc_util.py:37-38`, `bin/thor_app.py:1115-1116`).
 - A connection that closes with partial bytes is parsed as is, and fails with `303` if it is not JSON
   (`bin/ipc_util.py:33-34`).
 
 ### Reply framing
 
-- The driver sends the whole reply with one `sendall` (`bin/thor_app.py:1121`). The size of a status reply is described
+- The driver sends the whole reply with one `sendall` (`bin/thor_app.py:1223`). The size of a status reply is described
   two ways: the CHANGELOG says it was under 1 KB on 2026-10-08, and the comment in `main.py` `_send_ipc` says several KB.
   The clients read to end of file, so either size is read whole.
 - Clients accept up to 1 MiB (`bin/ipc_util.py:15`, `main.py:35-57`) and time out after 2 s.
@@ -26,33 +26,33 @@ Request and reply pairs as the code produces them (key order follows the code's 
 
 | Request | Reply | Source |
 |---|---|---|
-| `{"action": "set_top_brightness", "brightness": 40}` | `{"ok": true, "code": 0, "top_bright_pct": 40}` | `bin/thor_app.py:1098-1101` |
-| `{"action": "wake"}` | `{"ok": true, "code": 0}` | `bin/thor_app.py:1109-1114` |
-| `{"action": "nope"}` | `{"ok": false, "code": 303, "error": "unknown action: 'nope'"}` | `bin/thor_app.py:1119-1120` |
-| `{"action": ` (cut off, then closed) | `{"ok": false, "code": 303, "error": "JSONDecodeError: ..."}` | `bin/thor_app.py:1122-1127`, `bin/ipc_util.py:37-43` |
-| `[1, 2]` (a JSON array) | `{"ok": false, "code": 303, "error": "ValueError: a request must be a JSON object"}` | `bin/thor_app.py:1025-1026` |
-| `{"action": "set_settings", "sensitivity": 2.0}` | `{"ok": true, "code": 0}` | `bin/thor_app.py:1080-1089` |
+| `{"action": "set_top_brightness", "brightness": 40}` | `{"ok": true, "code": 0, "top_bright_pct": 40}` | `bin/thor_app.py:1200-1203` |
+| `{"action": "wake"}` | `{"ok": true, "code": 0}` | `bin/thor_app.py:1211-1216` |
+| `{"action": "nope"}` | `{"ok": false, "code": 303, "error": "unknown action: 'nope'"}` | `bin/thor_app.py:1221-1222` |
+| `{"action": ` (cut off, then closed) | `{"ok": false, "code": 303, "error": "JSONDecodeError: ..."}` | `bin/thor_app.py:1224-1229`, `bin/ipc_util.py:37-43` |
+| `[1, 2]` (a JSON array) | `{"ok": false, "code": 303, "error": "ValueError: a request must be a JSON object"}` | `bin/thor_app.py:1117-1118` |
+| `{"action": "set_settings", "sensitivity": 2.0}` | `{"ok": true, "code": 0}` | `bin/thor_app.py:1182-1191` |
 
-The `error` text for an exception is `"<ExceptionName>: <message>"` (`bin/thor_app.py:1123`).
+The `error` text for an exception is `"<ExceptionName>: <message>"` (`bin/thor_app.py:1225`).
 
 ### Shape of the status reply
 
-`get_status` (`bin/thor_app.py:1030-1040`) returns the fields below. Values are examples of the types only.
+`get_status` (`bin/thor_app.py:1122-1132`) returns the fields below. Values are examples of the types only.
 
 | Field | Type | Source of the value |
 |---|---|---|
 | `ok`, `code` | bool, int | fixed |
 | `mode` | string | `self.mode` |
-| `hardware_stats` | object | `HardwareStats.get_stats()`: `cpu_load`, `cpu_ghz`, `cpu_temp`, `gpu_mhz`, `gpu_temp`, `ram_used_gb`, `ram_total_gb`, `ram_pct`, `bat_cap`, `bat_status`, `bat_watts`, `vol_pct`, `vol_muted`, `top_bright_pct`, `bot_bright_pct` (`bin/system_stats.py:343-359`) |
+| `hardware_stats` | object | `HardwareStats.get_stats()`: `cpu_load`, `cpu_ghz`, `cpu_temp`, `gpu_mhz`, `gpu_temp`, `ram_used_gb`, `ram_total_gb`, `ram_pct`, `bat_cap`, `bat_status`, `bat_watts`, `vol_pct`, `vol_muted`, `top_bright_pct`, `bot_bright_pct` (`bin/system_stats.py:425-441`) |
 | gesture settings | bool, int, float | `TouchGestureProcessor.get_settings()` (`bin/engine.py:564-577`) |
 | `mirror_dim`, `mirror_dim_floor_percent` | bool, int | `mirror_cfg` |
 | `keyboard_repeat_delay_ms`, `keyboard_repeat_interval_ms`, `keyboard_caps_window_ms` | int | `keyboard_cfg` |
 | `gleipnir_ribbon`, `gleipnir_available` | bool | `gleipnir_cfg` and `gleipnir_view.find_script()` |
 | `bottom_dimmed` | bool | `DimMirror.dimmed` |
-| `cursor_stay_visible`, `cursor_hide_delay_ms`, `cursor_stay_visible_active` | bool, int or null, bool | `session_cursor.status` (`bin/thor_app.py:509-512`) |
+| `cursor_stay_visible`, `cursor_hide_delay_ms`, `cursor_stay_visible_active` | bool, int or null, bool | `session_cursor.status` (`bin/thor_app.py:547-550`) |
 | `pen_mode` | string | `self.pen_mode` |
 
-`get_debug` (`bin/thor_app.py:1045-1061`) adds `telemetry` (`bin/engine.py:413-426`), `state`, `coords`, `touch_device`,
+`get_debug` (`bin/thor_app.py:1137-1160`) adds `telemetry` (`bin/engine.py:413-426`), `state`, `coords`, `touch_device`,
 `active_fingers`, `digitizer_contacts`, `engine_contacts` (a map from contact id to `[x, y, age]`), `last_key`, `draws`,
 `draw_ms_avg`, `draw_ms_max`, `frame_lag_ms_max`, and the hardware block and gesture settings.
 
@@ -151,7 +151,7 @@ flowchart LR
 ```
 
 The driver's `save_config` starts from the file on disk, so keys the driver does not own, such as `enabled`, survive
-(`bin/thor_app.py:261-280`). The Decky backend's `_read_config` starts from `_default_config` and updates from the file,
+(`bin/thor_app.py:274-293`). The Decky backend's `_read_config` starts from `_default_config` and updates from the file,
 so a save writes every default key into the file (`main.py:113-148`). The manager starts from its `DEFAULT_CONFIG` the
 same way (`bin/touch_master_manager.py:58-66`). Writes are atomic in all three (`bin/atomic_json.py`, `main.py:151-182`).
 
@@ -159,8 +159,8 @@ same way (`bin/touch_master_manager.py:58-66`). Writes are atomic in all three (
 
 A setting changed in the panel has three effects in the driver, in this order: the engine's attributes change under
 `input_lock`, the mirror and keyboard and Gleipnir values change, and then the file is saved and the screen redrawn
-(`bin/thor_app.py:1080-1089`). The panel's values are not read back from the file. The driver writes its full set of keys
-on each save (`:270-280`).
+(`bin/thor_app.py:1182-1191`). The panel's values are not read back from the file. The driver writes its full set of keys
+on each save (`:283-293`).
 
 Two settings exclude each other in the engine: turning on `long_press_right_click` turns off `two_finger_right_click`,
 and the reverse (`bin/engine.py:540-548`). The panel refreshes 700 ms after a setting so that the other one is shown

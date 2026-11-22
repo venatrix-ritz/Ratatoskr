@@ -70,7 +70,7 @@ import ipc_util
 import session_cursor
 import tray_actions
 import theme
-from burn_in import BurnInProtector
+from burn_in import IDLE_TICK_S, BurnInProtector, plan_redraw
 
 SOCKET_PATH = f"/run/user/{os.getuid()}/thor-input.sock"
 CONFIG_PATH = os.path.expanduser("~/.config/thor-input/config.json")
@@ -81,6 +81,11 @@ STATUS_RIBBON_H = 88.0  # two rows of three status items
 BUTTON_TEXT_MAX_PX = 26.0
 RIBBON_TEXT_MAX_PX = 28.0
 HEADER_HEIGHT = HEADER_BUTTONS_H + STATUS_RIBBON_H
+# What a ribbon-only repaint covers (x, y, w, h): below the header buttons (they end at y 72, +1.5 px orbit) down to the
+# ribbon's divider (y 168, +1.5 px orbit); nothing else is drawn in it unless a key preview is up or Quick Controls shows.
+RIBBON_BAND = (0, int(HEADER_BUTTONS_H) - 4, SCREEN_WIDTH, int(STATUS_RIBBON_H) + 7)
+FAKE_SUSPEND_FLAG = "/run/armada/fake-suspend.active"  # Armada's fake-suspend: both screens off (fake-suspend:269,299)
+GLEIPNIR_BATTERY_S, GLEIPNIR_STATUS_S, GLEIPNIR_EVENTS_S = 10.0, 60.0, 60.0
 SPLIT_Y = 500.0  # split mode: trackpad above, keyboard below
 MODES = ("trackpad", "split", "keyboard", "settings", "ps")  # ps: PS5 touchpad + buttons for Chiaki-NG (ps_pad.py)
 
@@ -153,6 +158,9 @@ class ThorApp:
         self._draw_ms_sum = 0.0
         self._draw_ms_max = 0.0
         self._draws = 0
+        self._ribbon_draws = 0  # of those, ribbon-only repaints
+        self._frame_plans = {"full": 0, "ribbon": 0, "none": 0}  # what each planner tick asked for
+        self._drawn: dict | None = None  # what is on screen, for plan_redraw
         self._lag_ms_max = 0.0  # worst age of a touch frame when it was handled
 
         # Hardware stats & control sampler
@@ -168,8 +176,13 @@ class ThorApp:
         self.gleipnir_batt: dict = {}       # battery and charger sysfs values for the ribbon and the card
         self.gleipnir_events: list = []     # last clamp / release decisions from Gleipnir's journal
         self._gleipnir_wake = threading.Event()
+        self._gleipnir_events_due = False  # Quick Controls opened: read the journal now
+        self._gl_status_at = self._gl_events_at = float("-inf")  # when Gleipnir's status / journal were last read
+        self._gl_status_key = None  # status_key() at that status read
         self.idle_tracker = IdleTracker(self.logger)
         self.dim_mirror = DimMirror(self.stats, self.idle_tracker, self.logger, lambda: self.mirror_cfg)
+        if self.stats.volume_watch is not None:
+            self.stats.volume_watch.active = self._ui_lit  # its fallback poll (no pactl) only while the UI shows
         self.burn_in = BurnInProtector(shift_radius=1.5, cycle_seconds=90.0, idle_timeout=30.0, idle_floor=0.4, hint_duration=5.0)
 
         # Bridge & processors
@@ -188,7 +201,7 @@ class ThorApp:
         self.ps.on_press = self._haptic
         self.ps_cfg: dict = {"ps_mode_auto": True, "ps_touch_rotation": 0}
         self._ps_return_mode = "trackpad"
-        self.ps_focus = ps_pad.FocusWatcher(self._on_chiaki_focus)
+        self.ps_focus = ps_pad.FocusWatcher(self._on_chiaki_focus, log=lambda msg: self.logger.log(DebugCode.PS_MODE, msg))
         self.kb_layout = KeyboardLayout(0, HEADER_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT - HEADER_HEIGHT)
         self.held_ui_button: str | None = None
         self.held_ui_button_tid: int | None = None
@@ -348,20 +361,41 @@ class ThorApp:
         GLib.idle_add(self.drawing_area.queue_draw)
 
     def _gleipnir_loop(self) -> None:
-        """Read Gleipnir's status every 10 s while the view is on (about 80 ms each, off the draw and touch threads)."""
-        ticks = 0
         while not self.touch_stop.is_set():
-            if self.gleipnir_cfg["gleipnir_ribbon"]:
-                self.gleipnir_status = gleipnir_view.read_status()
-                self.gleipnir_batt = gleipnir_view.read_battery()
-                if ticks % 6 == 0:  # the journal changes rarely: once a minute
-                    self.gleipnir_events = gleipnir_view.read_events()
-                ticks += 1
-                GLib.idle_add(self.drawing_area.queue_draw)
-            else:
-                ticks = 0
-            self._gleipnir_wake.wait(10.0)
+            self._gleipnir_step(time.monotonic())
+            self._gleipnir_wake.wait(GLEIPNIR_BATTERY_S)
             self._gleipnir_wake.clear()
+
+    def _gleipnir_step(self, now: float) -> None:
+        """Gleipnir's ribbon cell and card, read only while the UI is lit (not hidden, dimmed or fake-suspended).
+        Every 10 s the battery and charger sysfs values (cheap) also refresh the live fields of the last status; the
+        `gleipnir --status` spawn (about 80 ms) runs when the charger or charge state changes and at least once a
+        minute; the journal once a minute while Quick Controls is open. The frame planner draws what changed."""
+        if not self.gleipnir_cfg["gleipnir_ribbon"]:
+            self._gl_status_at = self._gl_events_at = float("-inf")
+            self._gl_status_key = None
+            return
+        if not self._ui_lit():
+            return
+        batt = gleipnir_view.read_battery()
+        key = gleipnir_view.status_key(batt)
+        if key != self._gl_status_key or now - self._gl_status_at >= GLEIPNIR_STATUS_S:
+            self.gleipnir_status = gleipnir_view.read_status()
+            self._gl_status_at, self._gl_status_key = now, key
+        else:
+            self.gleipnir_status = gleipnir_view.with_live_battery(self.gleipnir_status, batt)
+        self.gleipnir_batt = batt
+        if self.mode == "settings" and (self._gleipnir_events_due or now - self._gl_events_at >= GLEIPNIR_EVENTS_S):
+            self.gleipnir_events = gleipnir_view.read_events()
+            self._gl_events_at, self._gleipnir_events_due = now, False
+
+    def _screen_off(self) -> bool:
+        """Armada's fake-suspend has switched the panels off: nothing is lit, so nothing needs drawing."""
+        return os.path.exists(FAKE_SUSPEND_FLAG)
+
+    def _ui_lit(self) -> bool:
+        """The ribbon and the mode's content are on screen and lit: not hidden, not dimmed, not fake-suspended."""
+        return not self.ui_hidden and not self.dim_mirror.dimmed and not self._screen_off()
 
     def set_mode(self, mode: str, restart_hint: bool = True) -> None:
         if mode not in MODES:
@@ -375,6 +409,9 @@ class ThorApp:
                 self._end_key_press()
                 self._send_keys(self.mods.release_all())
             self.mode = mode
+            if mode == "settings":
+                self._gleipnir_events_due = True
+                self._gleipnir_wake.set()
             if restart_hint:  # header and ribbon taps pass False: they must not bring the hint back
                 self.burn_in.notify_mode_change()
             self.update_mode_bounds()
@@ -391,6 +428,8 @@ class ThorApp:
                 self._send_keys(self.mods.release_all())
                 self.ps.release_all()
             self.ui_hidden = hidden
+        if not hidden:
+            self._gleipnir_wake.set()  # it was not read while hidden
         GLib.idle_add(self.drawing_area.queue_draw)
 
     def update_mode_bounds(self) -> None:
@@ -502,8 +541,7 @@ class ThorApp:
         self.ps_focus.start()
         self.haptics.start()
         self.window.show_all()
-        # Periodic 1-second refresh for live system monitor ribbon
-        GLib.timeout_add(1000, self._on_stats_tick)
+        GLib.timeout_add(int(IDLE_TICK_S * 1000), self._on_tick)
         self.logger.log(DebugCode.DAEMON_READY, f"Mode={self.mode}, Device={self.touch_dev_node}")
 
     def _refresh_cursor_status(self, fresh: bool = False) -> None:
@@ -511,12 +549,68 @@ class ThorApp:
         self._cursor_status = session_cursor.status(ttl=0 if fresh else 10.0)
         self.bridge.wake_pointer = not self._cursor_status["cursor_stay_visible_active"]
 
-    def _on_stats_tick(self) -> bool:
-        if not self.touch_stop.is_set():
+    def _on_tick(self) -> bool:
+        """The frame planner: repaint only what changed on screen (plan_redraw), then look again in 1 s, or in 0.25 s
+        while the hint fades or the luminance eases. The orbit steps every ~3 s, so a lit screen is never left with a
+        static frame; only a fake-suspended (dark) screen gets none."""
+        if self.touch_stop.is_set():
+            return False
+        now = time.monotonic()
+        plan = None
+        try:
             self._refresh_cursor_status()
-            self.drawing_area.queue_draw()
-            return True
+            if not self._screen_off():
+                plan = plan_redraw(self._drawn, self._frame_state(now), ribbon_ok=self._ribbon_repaint_ok())
+                if plan == "full":
+                    self.drawing_area.queue_draw()
+                elif plan == "ribbon":
+                    self.drawing_area.queue_draw_area(*RIBBON_BAND)
+        finally:  # an error here must not end the ticks: the orbit depends on them
+            self._frame_plans[plan or "none"] += 1
+            GLib.timeout_add(int(self.burn_in.next_tick_s(now) * 1000), self._on_tick)
         return False
+
+    def _ribbon_repaint_ok(self) -> bool:
+        """A ribbon-only repaint is right: the ribbon shows and nothing else is drawn over its band."""
+        return not self.ui_hidden and self.mode != "settings" and self.held_key is None
+
+    def _visible_state(self) -> tuple:
+        """What touches, timers and other threads change on screen besides the stats. It is in the planner's key, so
+        any of it is drawn within a tick even where nothing queued a draw (the PS pad's long-press timer lights the
+        pad outline)."""
+        ps, key = self.ps, self.held_key
+        return (self.mode, ps.active, ps.clicking, tuple(sorted(set(ps.button_tids.values()))), self.pen_mode,
+                self.held_ui_button, key.label if key is not None else None, self.active_key_press,
+                tuple(sorted(self.mods.state.items())), self.gesture.tap_to_click, self.gesture.stylus_mode)
+
+    def _frame_state(self, now: float, stats: dict | None = None, freeze: bool = True) -> dict:
+        """What a frame drawn now would show, in the terms plan_redraw compares. With freeze, a dimmed screen keeps
+        the status texts that are on it (they change at the next orbit step instead)."""
+        hidden = self.ui_hidden
+        lum = self.burn_in.get_luminance_scale(now)
+        hint = 0.0
+        if not hidden and self.mode in ("trackpad", "split", "ps"):
+            hint = self.burn_in.get_hint_alpha(now)
+        state = {
+            "orbit": self.burn_in.orbit_step(now),
+            "lum": round(lum, 2),
+            "hint": round(hint, 2) if hint > 0.01 else 0.0,
+            "page": (hidden, self._cursor_status["cursor_stay_visible_active"]) + self._visible_state(),
+            "ribbon": None,
+        }
+        if hidden:
+            return state
+        if freeze and self._drawn is not None and self.dim_mirror.dimmed:
+            state["ribbon"] = self._drawn.get("ribbon")  # dimmed: the status texts wait for the next orbit step
+            if self.mode == "settings":
+                state["page"] = self._drawn.get("page")
+            return state
+        st = self.stats.get_stats() if stats is None else stats
+        state["ribbon"] = tuple(self._ribbon_pills(st))
+        if self.mode == "settings":  # Quick Controls shows the stats and Gleipnir's card
+            state["page"] = state["page"] + (repr(sorted(st.items())), repr(self.gleipnir_status),
+                                             repr(sorted(self.gleipnir_batt.items())), repr(self.gleipnir_events))
+        return state
 
     def on_destroy(self, *_) -> None:
         self.cleanup()
@@ -1052,16 +1146,26 @@ class ThorApp:
                             res["engine_contacts"] = {str(t): [round(c["last_x"]), round(c["last_y"]), round(self._last_frame_ts - c["start_t"], 1)] for t, c in self.gesture.active_contacts.items()}
                             res["last_key"] = self.last_key_label
                             res["draws"] = self._draws
+                            res["ribbon_draws"] = self._ribbon_draws
+                            res["frame_plans"] = dict(self._frame_plans)
                             res["draw_ms_avg"] = round(self._draw_ms_sum / self._draws, 1) if self._draws else 0.0
                             res["draw_ms_max"] = round(self._draw_ms_max, 1)
                             res["frame_lag_ms_max"] = round(self._lag_ms_max, 1)
                             if msg.get("reset"):  # the Decky panel polls every 2 s; it must not wipe the window
                                 self._draws, self._draw_ms_sum, self._draw_ms_max, self._lag_ms_max = 0, 0.0, 0.0, 0.0
+                                self._ribbon_draws, self._frame_plans = 0, {"full": 0, "ribbon": 0, "none": 0}
+                            vw = self.stats.volume_watch
+                            if vw is not None:
+                                res["volume_watch"] = {"subscribed": vw.subscribed, "events": vw.events,
+                                                       "reads": vw.reads, "restarts": vw.restarts}
                             res["hardware_stats"] = self.stats.get_stats()
                             res.update(self.gesture.get_settings())
                             res["ps"] = {
                                 "focused": self.ps.active,
                                 "focused_app": self.ps_focus.focused_app,
+                                "focus_watch": self.ps_focus.source,
+                                "focus_writes_heard": self.ps_focus.writes_heard,
+                                "app_id_scans": self.ps_focus.id_scans,
                                 "finger": self.ps.finger,
                                 "clicking": self.ps.clicking,
                                 "buttons": sorted(set(self.ps.button_tids.values())),
@@ -1146,13 +1250,21 @@ class ThorApp:
             self._draws += 1
 
     def _paint(self, cr: cairo.Context) -> bool:
+        now_mono = time.monotonic()
+        _, y1, _, y2 = cr.clip_extents()
+        band_y, band_h = RIBBON_BAND[1], RIBBON_BAND[3]
+        if self._drawn is not None and band_y <= y1 and y2 <= band_y + band_h and self._ribbon_repaint_ok():
+            self._paint_ribbon_band(cr)
+            return True
+
         # Pure OLED Black Background
         cr.set_source_rgb(0, 0, 0)
         cr.paint()
 
-        # Orbital micro-shift for burn-in protection on static UI
-        now_mono = time.monotonic()
-        dx, dy = self.burn_in.get_orbital_offset(now_mono)
+        # Orbital micro-shift for burn-in protection on static UI, in ORBIT_QUANTUM_PX steps
+        st = self.stats.get_stats()
+        state = self._frame_state(now_mono, st, freeze=False)
+        dx, dy = state["orbit"]
         cr.save()
         cr.translate(dx, dy)
 
@@ -1160,7 +1272,7 @@ class ThorApp:
             # Only the Open button: outline only, shifted with the rest and dimmed by the idle veil below, never faded out
             self._draw_open_button(cr)
         else:
-            self._draw_ui(cr)
+            self._draw_ui(cr, st)
 
         cr.restore()
 
@@ -1170,16 +1282,39 @@ class ThorApp:
             cr.set_source_rgba(0, 0, 0, 1.0 - lum_scale)
             cr.paint()
 
+        self._drawn = dict(state, veil=lum_scale)
         return True
+
+    def _paint_ribbon_band(self, cr: cairo.Context) -> None:
+        """Repaint only the ribbon band (the clip): same orbit and veil as the rest of the screen, new status texts."""
+        drawn = self._drawn
+        cr.set_source_rgb(0, 0, 0)
+        cr.paint()
+        cr.save()
+        cr.translate(*drawn["orbit"])
+        cr.set_source_rgb(*theme.DIVIDER)
+        cr.set_line_width(1.0)
+        cr.move_to(0, HEADER_BUTTONS_H)
+        cr.line_to(SCREEN_WIDTH, HEADER_BUTTONS_H)
+        cr.stroke()
+        cr.new_path()
+        st = self.stats.get_stats()
+        self._draw_status_ribbon(cr, st)
+        cr.restore()
+        if drawn["veil"] < 1.0:
+            cr.set_source_rgba(0, 0, 0, 1.0 - drawn["veil"])
+            cr.paint()
+        self._drawn = dict(drawn, ribbon=tuple(self._ribbon_pills(st)))
+        self._ribbon_draws += 1
 
     def _draw_open_button(self, cr: cairo.Context) -> None:
         x, y, w, h = OPEN_BUTTON
         self._draw_button(cr, x, y, w, h, "Open", False)
 
-    def _draw_ui(self, cr: cairo.Context) -> None:
+    def _draw_ui(self, cr: cairo.Context, st: dict | None = None) -> None:
         # Header Bar & Live Status Ribbon
         self._draw_header(cr)
-        self._draw_status_ribbon(cr)
+        self._draw_status_ribbon(cr, st)
 
         # Mode Contents
         if self.mode == "trackpad":
@@ -1222,9 +1357,34 @@ class ThorApp:
             return "Right Click", self.held_ui_button == "right", (0.35, 0.22, 0.24)
         return pm.label(self.pen_mode), self.pen_mode != "off", (0.35, 0.30, 0.20)
 
-    def _draw_status_ribbon(self, cr: cairo.Context) -> None:
+    def _ribbon_pills(self, st: dict) -> list[tuple[str, tuple[float, float, float]]]:
+        """The ribbon's six (text, colour) cells for these stats."""
+        # Plain-text labels: the Thor's fonts have no emoji, which drew as empty boxes (seen in tests/render_screens.py)
+        bat_icon = "CHG" if "charg" in st.get("bat_status", "").lower() else "BAT"
+        bat_txt = f"{bat_icon} {st.get('bat_cap', 0)}% ({st.get('bat_watts', 0)}W)"
+        cpu_txt = f"CPU {st.get('cpu_load', 0)}% · {st.get('cpu_temp', 0)}°C"
+        gpu_txt = f"GPU {st.get('gpu_mhz', 0)}M · {st.get('gpu_temp', 0)}°C"
+        ram_txt = f"RAM {st.get('ram_used_gb', 0)}/{st.get('ram_total_gb', 0)}G"
+        vol_txt = "Muted" if st.get("vol_muted") else f"Vol {st.get('vol_pct', 0)}%"
+        brt_txt = f"Top {st.get('top_bright_pct', 100)}% · Bot {st.get('bot_bright_pct', 100)}%"
+
+        bat_col = theme.PILL_BAT
+        if self.gleipnir_cfg["gleipnir_ribbon"]:
+            view = gleipnir_view.summary(self.gleipnir_status, self.gleipnir_batt)
+            if view:
+                bat_txt, bat_col = view
+        return [
+            (bat_txt, bat_col),
+            (cpu_txt, theme.PILL_CPU),
+            (gpu_txt, theme.PILL_GPU),
+            (ram_txt, theme.PILL_RAM),
+            (vol_txt, theme.PILL_VOL_MUTED if st.get("vol_muted") else theme.PILL_VOL),
+            (brt_txt, theme.PILL_BRT),
+        ]
+
+    def _draw_status_ribbon(self, cr: cairo.Context, st: dict | None = None) -> None:
         """Render live system monitoring ribbon across top of AMOLED display."""
-        st = self.stats.get_stats()
+        st = self.stats.get_stats() if st is None else st
         ry = HEADER_BUTTONS_H
         rh = STATUS_RIBBON_H
 
@@ -1238,35 +1398,7 @@ class ThorApp:
 
         # Telemetry pills text: one size for all, as large as fits across the screen
         cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-
-        # Battery
-        # Plain-text labels: the Thor's fonts have no emoji, which drew as empty boxes (seen in tests/render_screens.py)
-        bat_icon = "CHG" if "charg" in st.get("bat_status", "").lower() else "BAT"
-        bat_txt = f"{bat_icon} {st.get('bat_cap', 0)}% ({st.get('bat_watts', 0)}W)"
-        # CPU
-        cpu_txt = f"CPU {st.get('cpu_load', 0)}% · {st.get('cpu_temp', 0)}°C"
-        # GPU
-        gpu_txt = f"GPU {st.get('gpu_mhz', 0)}M · {st.get('gpu_temp', 0)}°C"
-        # RAM
-        ram_txt = f"RAM {st.get('ram_used_gb', 0)}/{st.get('ram_total_gb', 0)}G"
-        # Volume
-        vol_txt = "Muted" if st.get("vol_muted") else f"Vol {st.get('vol_pct', 0)}%"
-        # Brightness
-        brt_txt = f"Top {st.get('top_bright_pct', 100)}% · Bot {st.get('bot_bright_pct', 100)}%"
-
-        bat_col = theme.PILL_BAT
-        if self.gleipnir_cfg["gleipnir_ribbon"]:
-            view = gleipnir_view.summary(self.gleipnir_status, self.gleipnir_batt)
-            if view:
-                bat_txt, bat_col = view
-        pills = [
-            (bat_txt, bat_col),
-            (cpu_txt, theme.PILL_CPU),
-            (gpu_txt, theme.PILL_GPU),
-            (ram_txt, theme.PILL_RAM),
-            (vol_txt, theme.PILL_VOL_MUTED if st.get("vol_muted") else theme.PILL_VOL),
-            (brt_txt, theme.PILL_BRT),
-        ]
+        pills = self._ribbon_pills(st)
 
         # Two rows of three cells; one font size for all, as large as the widest text allows
         cols, pad = 3, 20.0

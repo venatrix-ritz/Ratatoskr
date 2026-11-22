@@ -13,6 +13,7 @@ The runtime names (`touch-master`, `thor-input`) are the project's old names. Th
 ## Requirements
 - AYN Thor on **Armada OS** with **Decky Loader** (Armada ships it). Written and tested against Armada `20261006.9c7dd3e`, kernel 7.2.6.
 - Python 3 with GTK 3 (PyGObject) and cairo on the Thor. They are already present on the surveyed Thor (the driver runs there); Ratatoskr installs no packages.
+- Optional: **python-xlib** in armada's user site-packages, for the event-driven Chiaki-NG focus watch (without it Ratatoskr polls `xprop` once a second). How to install it: [README](../README.md#optional-dependency-python-xlib).
 - SSH key access to the Thor and `sudo` there, for the one-time Decky plugin copy.
 - `/dev/uinput` writable by the `armada` user (for the virtual mouse and keyboard). The diagnostics (below) check this.
 

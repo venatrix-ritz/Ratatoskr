@@ -68,7 +68,7 @@ Things to know:
 - One finger only. gamescope turns a touch into a pointer move with the left button held, and Chiaki-NG reads that as one touchpad finger, so two-finger touchpad gestures cannot reach the PS5.
 - A touch that lands without moving would not count, so each landing is followed by a tiny move (0.4 % of the pad).
 - The outer 6 % of the PS touchpad cannot be reached: the pad is mapped inside that margin so a touch never lands on a screen edge, where gamescope may start an edge gesture.
-- Focus is checked once a second, so PS mode can take a second to come on or go off. Without focus the pad and buttons send nothing and the pad says "Waiting for Chiaki-NG to have focus".
+- PS mode follows focus within about 0.2 s: Ratatoskr hears gamescope change the focused app. Without python-xlib (see the README) it checks once a second instead. Without focus the pad and buttons send nothing and the pad says "Waiting for Chiaki-NG to have focus".
 - If swipes come out turned on the PS5 (up moves right, for example), set `ps_touch_rotation` to 90, 180 or 270 in `config.json` ([configuration](configuration.md)).
 
 ## Haptic feedback

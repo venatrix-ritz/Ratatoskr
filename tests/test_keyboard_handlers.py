@@ -79,6 +79,7 @@ def make(mode="keyboard"):
     app.held_ui_button = app.held_ui_button_tid = app._slider_drag = None
     app.last_key_label, app.last_event_time, app.ui_hidden = "", 0.0, False
     app._repeat_stop, app._repeat_thread = threading.Event(), None
+    app._gleipnir_wake = threading.Event()
     app._start_key_repeat = lambda key: None
     app.drawing_area = types.SimpleNamespace(queue_draw=lambda: None)
     app.save_config = lambda: None
@@ -456,6 +457,200 @@ def test_with_auto_off_the_ps_button_returns_to_the_mode_held_at_focus():
     check("the PS button enters PS mode", app.mode == "ps", app.mode)
     app._on_chiaki_focus(False)
     check("losing focus goes back to the keyboard", app.mode == "keyboard", app.mode)
+
+
+class FixedClock:
+    """thor_app's `time` with monotonic() pinned, so the orbit, hint and luminance are the same in every paint."""
+
+    def __init__(self, t):
+        self.t = t
+
+    def monotonic(self):
+        return self.t
+
+    def perf_counter(self):
+        return time.perf_counter()
+
+    def time(self):
+        return time.time()
+
+
+def paint_app(mode, t, idle=False):
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import render_screens as rs
+    app = rs.make_app(mode)
+    app.burn_in.start_time = app.burn_in.mode_change_time = t - 1000.0  # hint long faded
+    app.burn_in.last_touch_time = t - 100.0 if idle else t              # idle veil at its floor, or full luminance
+    app.stats = types.SimpleNamespace(get_stats=lambda: dict(app.st))
+    app.st = dict(rs.STATS)
+    app._frame_plans = {"full": 0, "ribbon": 0, "none": 0}
+    return app
+
+
+def test_a_ribbon_only_repaint_matches_a_full_paint_in_every_mode():
+    import cairo
+    real_time, t = thor_app.time, 5000.0
+    thor_app.time = FixedClock(t)
+    try:
+        for mode, idle in [(m, False) for m in ("trackpad", "keyboard", "split", "ps")] + [("keyboard", True)]:
+            name = mode + (" (idle veil)" if idle else "")
+            app = paint_app(mode, t, idle)
+            w, h = int(thor_app.SCREEN_WIDTH), int(thor_app.SCREEN_HEIGHT)
+            band = cairo.ImageSurface(cairo.FORMAT_RGB24, w, h)
+            thor_app.ThorApp._paint(app, cairo.Context(band))       # full paint, stats A
+            app.st = dict(app.st, cpu_load=97, cpu_temp=88, vol_pct=12)
+            plan = thor_app.plan_redraw(app._drawn, app._frame_state(t), ribbon_ok=app._ribbon_repaint_ok())
+            cr = cairo.Context(band)
+            cr.rectangle(*thor_app.RIBBON_BAND)
+            cr.clip()
+            thor_app.ThorApp._paint(app, cr)                        # what GTK does after queue_draw_area(RIBBON_BAND)
+            full = cairo.ImageSurface(cairo.FORMAT_RGB24, w, h)
+            fresh = paint_app(mode, t, idle)
+            fresh.st = dict(app.st)
+            thor_app.ThorApp._paint(fresh, cairo.Context(full))     # full paint, stats B
+            band.flush()
+            full.flush()
+            same = bytes(band.get_data()) == bytes(full.get_data())
+            check(f"{name}: new stats are a ribbon-only repaint", plan == "ribbon" and app._ribbon_draws == 1, (plan, app._ribbon_draws))
+            check(f"{name}: and it leaves the screen as a full paint would", same)
+    finally:
+        thor_app.time = real_time
+
+
+def test_the_frame_planner_repaints_only_what_changed():
+    real_time, real_glib, t = thor_app.time, thor_app.GLib, 5000.0
+    clock = FixedClock(t)
+    delays, queued = [], []
+    thor_app.time = clock
+    thor_app.GLib = types.SimpleNamespace(timeout_add=lambda ms, fn: delays.append(ms), idle_add=lambda fn: fn())
+    try:
+        app = paint_app("trackpad", t)
+        app.touch_stop = threading.Event()
+        app._refresh_cursor_status = lambda fresh=False: None
+        off = [False]
+        app._screen_off = lambda: off[0]
+        app.drawing_area = types.SimpleNamespace(queue_draw=lambda: queued.append("full"),
+                                                 queue_draw_area=lambda *r: queued.append(("ribbon", r)))
+
+        def tick():
+            queued.clear()
+            thor_app.ThorApp._on_tick(app)
+            return queued[0] if queued else None
+
+        def painted():  # what a paint of the planned frame records
+            app._drawn = dict(app._frame_state(clock.t, freeze=False), veil=app.burn_in.get_luminance_scale(clock.t))
+
+        check("the first tick paints everything", tick() == "full")
+        painted()
+        check("nothing changed: no frame", tick() is None)
+        app.ps.clicking = True  # what the PS pad's long-press timer does, with no touch frame and no draw queued
+        check("a timer lit the PS pad outline: a full frame at the next tick", tick() == "full", queued)
+        app.ps.clicking = False
+        painted()
+        app.st["cpu_load"] += 1
+        check("a stats text changed: only the ribbon band", tick() == ("ribbon", thor_app.RIBBON_BAND), queued)
+        painted()
+        app.ui_hidden = True
+        painted()
+        app.st["cpu_load"] += 1
+        check("hidden: stats changes draw nothing", tick() is None, queued)
+        app.ui_hidden = False
+        painted()
+        app.dim_mirror.dimmed = True
+        app.st["cpu_load"] += 1
+        check("dimmed: stats changes draw nothing", tick() is None, queued)
+        app.dim_mirror.dimmed = False
+        painted()
+        here = app.burn_in.orbit_step(clock.t)
+        while app.burn_in.orbit_step(clock.t) == here:
+            clock.t += 0.25
+        app.burn_in.last_touch_time = clock.t
+        check("the orbit stepped: a full frame though nothing else changed", tick() == "full", queued)
+        painted()
+        app.mode = "settings"
+        painted()
+        app.st["vol_pct"] = 3
+        check("Quick Controls: a stats change repaints everything", tick() == "full", queued)
+        app.mode = "keyboard"
+        painted()
+        app.held_key = app.kb_layout.rows[1][2]
+        app.st["cpu_load"] += 1
+        check("a key preview up: a stats change repaints everything", tick() == "full", queued)
+        app.held_key = None
+        painted()
+        off[0] = True
+        clock.t += 30.0
+        app.st["cpu_load"] += 1
+        check("fake-suspended: nothing is drawn", tick() is None, queued)
+        off[0] = False
+        delays.clear()
+        app.burn_in.last_touch_time = clock.t
+        tick()
+        app.burn_in.mode_change_time = clock.t - 5.5  # mid hint fade
+        tick()
+        check("ticks 1 s apart, 0.25 s during a fade", delays == [1000, 250], delays)
+    finally:
+        thor_app.time, thor_app.GLib = real_time, real_glib
+
+
+def test_gleipnir_is_read_only_while_the_ui_is_lit():
+    gv = thor_app.gleipnir_view
+    saved = {n: getattr(gv, n) for n in ("read_status", "read_battery", "read_events")}
+    calls = {"status": 0, "battery": 0, "events": 0}
+    batt = {"capacity": "79", "status": "Charging", "usb_online": "1", "current_now": "4600000"}
+
+    def count(name, value):
+        def fn(*a, **k):
+            calls[name] += 1
+            return value() if callable(value) else value
+        return fn
+
+    gv.read_status = count("status", lambda: {"node": "/sys/class/power_supply/battery/constant_charge_current",
+                                              "capacity": 70, "verified": True, "service_active": True, "limit": 9000000})
+    gv.read_battery = count("battery", lambda: dict(batt))
+    gv.read_events = count("events", [])
+    try:
+        app = paint_app("trackpad", 0.0)
+        app.gleipnir_cfg = {"gleipnir_ribbon": True}
+        app._gl_status_at = app._gl_events_at = float("-inf")
+        app._gl_status_key, app._gleipnir_events_due = None, False
+        app._screen_off = lambda: False
+        step = lambda t: thor_app.ThorApp._gleipnir_step(app, t)  # noqa: E731
+        step(0.0)
+        check("lit: battery and status read", (calls["battery"], calls["status"]) == (1, 1), calls)
+        step(10.0)
+        step(20.0)
+        check("then the status spawn waits while nothing changed", (calls["battery"], calls["status"]) == (3, 1), calls)
+        check("but its live fields follow sysfs", app.gleipnir_status["capacity"] == 79, app.gleipnir_status)
+        step(61.0)
+        check("once a minute anyway", calls["status"] == 2, calls)
+        batt["usb_online"] = "0"
+        step(71.0)
+        check("and at once when the charger goes", calls["status"] == 3, calls)
+        app.ui_hidden = True
+        step(200.0)
+        app.ui_hidden = False
+        app.dim_mirror.dimmed = True
+        step(210.0)
+        app.dim_mirror.dimmed = False
+        app._screen_off = lambda: True
+        step(220.0)
+        app._screen_off = lambda: False
+        check("hidden, dimmed or off: nothing read", (calls["battery"], calls["status"]) == (5, 3), calls)
+        check("the journal only with Quick Controls open", calls["events"] == 0, calls)
+        app.mode, app._gleipnir_events_due = "settings", True
+        step(230.0)
+        step(240.0)
+        check("on opening it, then not again within the minute", calls["events"] == 1, calls)
+        step(291.0)
+        check("then once a minute", calls["events"] == 2, calls)
+        app.gleipnir_cfg["gleipnir_ribbon"] = False
+        before = dict(calls)
+        step(400.0)
+        check("Gleipnir view off: nothing read", calls == before, calls)
+    finally:
+        for n, fn in saved.items():
+            setattr(gv, n, fn)
 
 
 if __name__ == "__main__":
