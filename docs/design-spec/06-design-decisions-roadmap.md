@@ -25,7 +25,7 @@ reproduced here.
 | D-15 | One writer thread per hardware control, keeping only the newest value | each `sudo tee` write took about 25 ms and the bottom slider needed two per touch (observed) | writing on the touch thread (the earlier code) | `bin/system_stats.py:87-136`, `CHANGELOG.md` ("the Quick Controls sliders lagged") |
 | D-16 | Sample the hardware on a thread once a second; drawing reads a cache | a sample took about 29 ms (observed); drawing must not wait | sampling on demand | `bin/system_stats.py:204-219`, `docs/architecture.md` |
 | D-17 | Config writes are atomic and merge the disk copy | a crash mid-write reset every setting to defaults; the driver's rewrite dropped `enabled` (observed) | in-place writes; writing only the driver's keys | `bin/atomic_json.py`, `bin/thor_app.py:258-283`, `CHANGELOG.md` |
-| D-18 | One IPC request per connection, JSON, flat settings keys | the manager's nested settings were ignored by the driver, and unknown actions returned `ok` (observed and fixed) | nested `{"settings": {...}}`; silent `ok` for unknown actions | `bin/ipc_util.py:87-100`, `bin/thor_app.py:1118-1119`, `CHANGELOG.md` |
+| D-18 | One IPC request per connection, JSON, flat settings keys | the manager's nested settings were ignored by the driver, and unknown actions returned `ok` (observed and fixed) | nested `{"settings": {...}}`; silent `ok` for unknown actions | `bin/ipc_util.py:87-100`, `bin/thor_app.py:1119-1120`, `CHANGELOG.md` |
 | D-19 | Replies are read to end of file, with a 2 s limit | a single `recv(4096)` could cut a reply | a fixed-size read | `bin/ipc_util.py:46-64`, `CHANGELOG.md` |
 | D-20 | The driver exits on device loss and systemd restarts it | spinning on a dead descriptor would use a core | in-process re-open | `bin/thor_app.py:629-637` (comment) |
 | D-21 | Tray Stop runs the manager's stop in a transient unit | stopping the service kills its children, including the hand-back steps | running them in-process | `bin/tray_actions.py:3-8`, `CHANGELOG.md` |
@@ -37,7 +37,7 @@ reproduced here.
 | D-27 | Pinch zoom and drag lock removed | never implemented; the switches did nothing and had been causing stuck keys | finish them | `CHANGELOG.md` ("Removed") |
 | D-28 | Hide is not saved | a restart shows the UI, so the screen cannot be left blank by accident | saving the state | `bin/thor_app.py:143`, `CHANGELOG.md` |
 | D-29 | MIT licence, with Barry credited as inspiration | a licence check of both code bases on 2026-10-07 found one identical line and no matching momentum code | GPL-2.0 | `CREDITS.md` |
-| D-30 | Keyboard tap sends press, waits 20 ms, sends release, on the reader thread | a key tap is a short fixed hold | a non-blocking tap | `bin/engine.py:388-392`, `bin/thor_app.py:842`. **Design observation, not a recorded decision** |
+| D-30 | Keyboard tap sends press, waits 20 ms, sends release, on the reader thread | a key tap is a short fixed hold | a non-blocking tap | `bin/engine.py:388-392`, `bin/thor_app.py:843`. **Design observation, not a recorded decision** |
 
 ## Open work
 
@@ -50,7 +50,7 @@ is a commitment.
 | R-02 | Decide the sudoers rule for the saved-level file: add it to the rule, or write it another way; then test the rule on the Thor | `systemd/touch-master-backlight.sudoers:7-8`, `bin/system_stats.py:422`; `docs/troubleshooting.md` (known issue 1) | application spec, K-02 |
 | R-03 | Log slider backlight failures under `DBG-701`, and record top-panel write failures | `bin/system_stats.py` imports no logger; the docs say `DBG-701` shows for sliders | application spec, K-03 and mismatch 13 |
 | R-04 | Log `DBG-702` on `wpctl` failure, or remove the doc claim | `ERR_PIPEWIRE_WPCTL` is defined and not emitted; `docs/troubleshooting.md` cites it | mismatch 13 |
-| R-05 | Socket bind errors: catch and log `DBG-301` | `bin/thor_app.py:1006-1008`; `DBG-301` defined and never emitted | 05, error table |
+| R-05 | Socket bind errors: catch and log `DBG-301` | `bin/thor_app.py:1007-1009`; `DBG-301` defined and never emitted | 05, error table |
 | R-06 | Choose: a fallback to `/dev/input/event5`, or remove the doc sentence | `docs/architecture.md:35`; no fallback in code | mismatch 1 |
 | R-07 | Make the deploy run the tests, or correct `docs/development.md` | `scripts/deploy.sh` has no test step | mismatch 2 |
 | R-08 | Correct the dim wording in the panel, the manager and `docs/dim-mirror.md` step 3 (the restore on any input) | `dist/index.js:490-491`, `bin/touch_master_manager.py:232`, `bin/dim_mirror.py:402-403` | mismatches 5 and 6 |
@@ -67,5 +67,5 @@ is a commitment.
 | R-19 | The manager lacks Split, Pen, Hide and the keyboard timings | `bin/touch_master_manager.py:129-405` | application spec, F-110 |
 | R-20 | Check the Armada version at run time, or document that other builds are untested | `README.md` | application spec, limitation 1 |
 | R-21 | Decide whether the lost-update race in the config files matters | `bin/atomic_json.py` header | application spec, 05 |
-| R-22 | Keyboard tap blocks the touch reader for 20 ms | `bin/engine.py:388-392`, `bin/thor_app.py:842` | 02, keyboard path |
+| R-22 | Keyboard tap blocks the touch reader for 20 ms | `bin/engine.py:388-392`, `bin/thor_app.py:843` | 02, keyboard path |
 | R-23 | Scroll events truncate sub-unit movement on each step | `bin/engine.py:799-800` | 02, two and three fingers |

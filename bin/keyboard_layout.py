@@ -66,6 +66,10 @@ KEY_DOWN = 108
 KEY_LEFTMETA = 125
 KEY_DELETE = 111
 
+# Key preview bubble: shows the character a held key typed, above the finger
+PREVIEW_MIN_W, PREVIEW_W_RATIO, PREVIEW_H = 104.0, 1.5, 116.0
+PREVIEW_GAP, PREVIEW_MARGIN = 10.0, 8.0
+
 
 class Key:
     def __init__(
@@ -89,6 +93,27 @@ class Key:
         self.y = 0.0
         self.w = 0.0
         self.h = 0.0
+
+    @property
+    def is_character(self) -> bool:
+        """Types one character (letters, digits, symbols): only these get a preview bubble, as on Gboard and iOS."""
+        return len(self.label) == 1
+
+
+def preview_rect(key: Key, screen_w: float, screen_h: float) -> tuple[float, float, float, float]:
+    """(x, y, w, h) of the preview bubble: centred above the key and kept on screen. Without room above, it goes
+    beside the key (right, else left); with no room there either, over the key's top."""
+    m, gap = PREVIEW_MARGIN, PREVIEW_GAP
+    w, h = min(max(key.w * PREVIEW_W_RATIO, PREVIEW_MIN_W), screen_w - 2 * m), PREVIEW_H
+    x = min(max(key.x + key.w / 2.0 - w / 2.0, m), screen_w - m - w)
+    if key.y - gap - h >= m:
+        return x, key.y - gap - h, w, h
+    y = min(max(key.y, m), screen_h - m - h)
+    if key.x + key.w + gap + w <= screen_w - m:
+        return key.x + key.w + gap, y, w, h
+    if key.x - gap - w >= m:
+        return key.x - gap - w, y, w, h
+    return x, y, w, h
 
 
 def create_qwerty_rows() -> list[list[Key]]:

@@ -2,8 +2,9 @@
 """Render every bottom-screen mode of the real drawing code (ThorApp._paint) to PNG, without a window or devices.
 
 Usage (on the Thor, which has gi and pycairo): python3 tests/render_screens.py OUT_DIR
-Writes screen-trackpad.png, screen-split.png, screen-keyboard.png, screen-keyboard-shift.png, screen-settings.png
-and screen-hidden.png (the UI hidden but for the Open button), among others. Not a unit test (the name keeps it out of the test runs).
+Writes screen-trackpad.png, screen-split.png, screen-keyboard.png, screen-keyboard-shift.png, screen-settings.png,
+screen-keyboard-preview*.png (a held key's preview bubble) and screen-hidden.png (the UI hidden but for the Open button),
+among others. Not a unit test (the name keeps it out of the test runs).
 """
 import os
 import sys
@@ -50,7 +51,7 @@ class Bridge:
         return lambda *a, **k: None
 
 
-def make_app(mode, shift=False, gleipnir=None, hidden=False, ps_focused=None, ps_held=(), ps_clicking=False):
+def make_app(mode, shift=False, press=None, gleipnir=None, hidden=False, ps_focused=None, ps_held=(), ps_clicking=False):
     ps_focused = mode == "ps" if ps_focused is None else ps_focused
     app = thor_app.ThorApp.__new__(thor_app.ThorApp)
     app.mode, app.ui_hidden = mode, hidden
@@ -60,6 +61,7 @@ def make_app(mode, shift=False, gleipnir=None, hidden=False, ps_focused=None, ps
     app.held_ui_button, app.pen_mode = None, "off"
     app.kb_layout = KeyboardLayout(0, thor_app.HEADER_HEIGHT, thor_app.SCREEN_WIDTH, thor_app.SCREEN_HEIGHT - thor_app.HEADER_HEIGHT)
     app.active_key_press, app.mods = None, ModifierState()
+    app.held_key, app.last_key_label = None, ""
     app.gleipnir_cfg = {"gleipnir_ribbon": gleipnir is not None}
     app.gleipnir_status = gleipnir
     app.gleipnir_batt = dict(BATT_CHARGING if gleipnir and gleipnir.get("current_ua", 0) > 0 else BATT)
@@ -74,6 +76,10 @@ def make_app(mode, shift=False, gleipnir=None, hidden=False, ps_focused=None, ps
         app.mods.release(1)
         app._sync_modifier_flags = thor_app.ThorApp._sync_modifier_flags.__get__(app)
         app._sync_modifier_flags()
+    if press:  # a finger holding this key: highlighted, with its preview bubble
+        key = next(k for row in app.kb_layout.rows for k in row if k.label == press)
+        app.active_key_press, app.held_key = key.code, key
+        app.last_key_label = key.shift_label if app.mods.active("shift") else key.label
     return app
 
 
@@ -89,6 +95,8 @@ if __name__ == "__main__":
     shots = {
         "trackpad": make_app("trackpad"), "split": make_app("split"), "keyboard": make_app("keyboard"),
         "keyboard-shift": make_app("keyboard", shift=True), "settings": make_app("settings"),
+        "keyboard-preview": make_app("keyboard", press="g"), "keyboard-preview-edge": make_app("keyboard", press="`"),
+        "keyboard-preview-shift": make_app("keyboard", shift=True, press="q"), "split-preview": make_app("split", press="p"),
         "hidden": make_app("trackpad", hidden=True),
         "settings-gleipnir-charging": make_app("settings", gleipnir={**GLEIPNIR, "current_ua": 2400000, "usb_online": 1, "capacity": 74}),
         "ps": make_app("ps"), "ps-held": make_app("ps", ps_held=("ps", "options"), ps_clicking=True), "ps-waiting": make_app("ps", ps_focused=False),

@@ -382,6 +382,45 @@ def test_the_quick_controls_buttons_act_and_buzz():
     check("each button buzzed once", app.buzzes == [1, 1, 1], app.buzzes)
 
 
+def test_the_key_preview_follows_the_held_character_key():
+    app = make("keyboard")
+    tap(app, "g", 1, hold=True)
+    check("pressing g previews g", app.held_key is keys(app)["g"] and app.last_key_label == "g", (app.held_key, app.last_key_label))
+    thor_app.ThorApp._handle_touch_up(app, 1, 0.1)
+    check("the bubble goes on release", app.held_key is None)
+    tap(app, "Shift", 2)
+    tap(app, "q", 3, hold=True)
+    check("with Shift latched it previews Q", app.last_key_label == "Q", app.last_key_label)
+    k = keys(app)["q"]
+    thor_app.ThorApp._handle_touch_move(app, 3, k.x + k.w + 30, k.y + k.h / 2, 0.1)
+    check("sliding off the key ends it and the bubble", app.held_key is None)
+    thor_app.ThorApp._handle_touch_up(app, 3, 0.2)
+    for label in ("Space", "Bksp", "Enter", "Shift"):
+        tap(app, label, 4, hold=True)
+        check(f"{label} has no bubble", app.held_key is None or not app.held_key.is_character, (label, app.held_key))
+        thor_app.ThorApp._handle_touch_up(app, 4, 0.3)
+
+
+def test_the_preview_bubble_is_drawn_where_preview_rect_puts_it():
+    import cairo
+    app = make("keyboard")
+
+    def lit(label):
+        surf = cairo.ImageSurface(cairo.FORMAT_RGB24, int(thor_app.SCREEN_WIDTH), int(thor_app.SCREEN_HEIGHT))
+        cr = cairo.Context(surf)
+        tap(app, label, 9, hold=True)
+        thor_app.ThorApp._draw_key_preview(app, cr)
+        thor_app.ThorApp._handle_touch_up(app, 9, 0.1)
+        x, y, w, h = thor_app.preview_rect(keys(app)["g"], thor_app.SCREEN_WIDTH, thor_app.SCREEN_HEIGHT)
+        surf.flush()
+        data, stride = surf.get_data(), surf.get_stride()
+        at = int(y + h - 20) * stride + int(x + 20) * 4  # inside the fill, away from the corner and the text
+        return sum(data[at:at + 3]) > 0
+
+    check("g draws its bubble there", lit("g"))
+    check("Space draws nothing", not lit("Space"))
+
+
 def test_the_ps_header_button_shows_only_while_chiaki_has_focus():
     app = make("trackpad")
     check("no PS button without focus", "ps" not in [b[0] for b in app._header_buttons()])

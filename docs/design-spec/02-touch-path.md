@@ -102,9 +102,9 @@ CHANGELOG says. **Unverified** in this review (the header was not read).
 | mode `keyboard`, or mode `split` and y >= 500 | `keyboard` |
 | otherwise | `trackpad` |
 
-The owner is stored per touch id in `_touch_owner` and kept until the touch lifts (`:206`, `:803`, `:863`). A drag that
+The owner is stored per touch id in `_touch_owner` and kept until the touch lifts (`:206`, `:803`, `:864`). A drag that
 crosses the split line stays a trackpad drag. A move or up for an id with no owner goes to the engine unless the mode is
-`settings` (`:857`, `:881`). Those touches come from before a restart or from a dropped frame.
+`settings` (`:858`, `:882`). Those touches come from before a restart or from a dropped frame.
 
 Frame handling order in `_dispatch_frame` (`:665-695`): `ups` first, then `downs`, then `moves`. If the frame has no
 contacts and no downs, the engine is reset (`:686-687`). A log line records when the digitizer's count and the
@@ -187,12 +187,12 @@ timer is `moved_at`, set by every pointer move the bridge sends (`:293-295`).
 
 ## Keyboard path
 
-The keyboard's handlers are in `bin/thor_app.py` (`_keyboard_down` `:823-844`, `_handle_touch_move` `:846-860`,
-`_handle_touch_up` `:861-883`).
+The keyboard's handlers are in `bin/thor_app.py` (`_keyboard_down` `:823-845`, `_handle_touch_move` `:847-861`,
+`_handle_touch_up` `:862-884`).
 
 - A modifier key goes to `ModifierState.press`, which returns key events to send (`bin/modifiers.py:119-133`).
 - A normal key first ends any key already held, calls `mods.key_typed()`, sends a tap, and starts the key repeat
-  (`bin/thor_app.py:834-843`).
+  (`bin/thor_app.py:834-844`).
 - `UInputBridge.tap_key` sends the press, **sleeps 20 ms**, then sends the release (`bin/engine.py:388-392`). The keyboard
   calls it from the touch reader while `input_lock` is held, so each key tap delays the reader by about 20 ms.
   **Design observation from the code**; not measured here.
@@ -201,8 +201,8 @@ The keyboard's handlers are in `bin/thor_app.py` (`_keyboard_down` `:823-844`, `
 
 ## Header and Quick Controls
 
-- Header touches act on press only (`_handle_header_touch`, `:887-901`). The Left and Right header buttons send a button
-  press when touched and a release when the touch ends (`:896-899`, `:791-794`).
+- Header touches act on press only (`_handle_header_touch`, `:888-902`). The Left and Right header buttons send a button
+  press when touched and a release when the touch ends (`:897-900`, `:791-794`).
 - Quick Controls sliders take their value from the x coordinate, clamped to the slider span, and keep following the
-  finger that grabbed them (`_handle_settings_touch` `:903-954`, `_handle_settings_drag` `:980-993`).
-- The Quick Controls buttons act on press (`:956-975`).
+  finger that grabbed them (`_handle_settings_touch` `:904-955`, `_handle_settings_drag` `:981-994`).
+- The Quick Controls buttons act on press (`:957-976`).

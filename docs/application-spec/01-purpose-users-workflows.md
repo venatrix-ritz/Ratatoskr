@@ -129,7 +129,7 @@ input arrives (`bin/dim_mirror.py`, `bin/top_follower.py`). Needs write access t
 
 ### W-11 Wake the screens
 `touch_master_manager.py --wake` or the IPC `wake` action taps F24 on the virtual keyboard
-(`bin/thor_app.py:1108-1113`). The docs say Steam treats it as input and restores a dimmed top screen (`docs/usage.md`,
+(`bin/thor_app.py:1109-1114`). The docs say Steam treats it as input and restores a dimmed top screen (`docs/usage.md`,
 "Waking the screens"). That is the author's device observation, **unverified** in this review.
 
 ### W-12 Keep the pointer visible in Game Mode (Pen +)
@@ -152,7 +152,7 @@ does not allow.
 
 ### W-15 Read the status ribbon and Gleipnir card (optional)
 With `gleipnir_ribbon` on, the battery cell shows Gleipnir's state (held, charging toward its cap, off or unverified) and
-Quick Controls shows a Battery and Gleipnir card (`bin/gleipnir_view.py`, `bin/thor_app.py:1257-1260`, `:1603`).
+Quick Controls shows a Battery and Gleipnir card (`bin/gleipnir_view.py`, `bin/thor_app.py:1258-1261`, `:1626`).
 The view runs `gleipnir --status --json`, reads `systemctl is-active gleipnir` and the Gleipnir journal, and never writes
 (`bin/gleipnir_view.py:4-6`).
 
