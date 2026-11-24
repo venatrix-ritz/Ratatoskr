@@ -46,8 +46,11 @@ bash -n scripts/deploy.sh
 ## Conventions
 - Linux-bound files are pinned to LF by `.gitattributes` (Windows checkouts use `autocrlf`). Never let CRLF reach the Thor.
 - Keep device addresses, MAC addresses and credentials out of tracked files. `local/` is git-ignored.
-- Branch for every change and open a pull request; commit author is Ven; commit messages end with the Co-Authored-By line when an assistant helped.
+- Branch for every change and open a pull request; commit author is Ven, with no Co-Authored-By or other attribution lines.
 - Never rewrite published history without a backup bundle (`git bundle create ../backup.bundle --all`).
 
 ## Releasing
-There are no versioned releases yet. When there are: update `CHANGELOG.md` and `package.json`, tag, and attach nothing (the plugin is installed from the repo with `deploy.sh`).
+1. In a pull request, turn the changes into a `## X.Y.Z (date)` section of `CHANGELOG.md` and set `version` in `package.json`. Merge it.
+2. Tag the merge commit on `main` as `vX.Y.Z` and push the tag.
+3. Check the tag out (a detached worktree is fine) and run `python scripts/build-release.py`. It builds `release/Ratatoskr.zip` from `HEAD`'s committed files, with one top-level `thor-input/` folder.
+4. Create the GitHub release from the tag and attach the zip as `Ratatoskr.zip`, the name the Armada Store matches (`^Ratatoskr\.zip$`). Mark it a pre-release while parts are untested on hardware, and say in the notes what was and wasn't tested.
