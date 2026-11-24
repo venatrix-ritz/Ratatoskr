@@ -57,5 +57,5 @@ Run `pnpm install` once, then `pnpm run build`, or `pnpm run watch` to rebuild o
 ## Releasing
 1. In a pull request, turn the changes into a `## X.Y.Z (date)` section of `CHANGELOG.md` and set `version` in `package.json`. Merge it.
 2. Tag the merge commit on `main` as `vX.Y.Z` and push the tag.
-3. Check the tag out (a detached worktree is fine) and run `python scripts/build-release.py`. It builds `release/Ratatoskr.zip` from `HEAD`'s committed files, with one top-level `thor-input/` folder.
+3. Check the tag out (a detached worktree is fine) and run `python scripts/build-release.py`. It builds `release/Ratatoskr.zip` from `HEAD`'s committed files plus the panel, which it builds with pnpm (on `PATH`, or set `PNPM`), with one top-level `thor-input/` folder.
 4. Create the GitHub release from the tag and attach the zip as `Ratatoskr.zip`, the name the Armada Store matches (`^Ratatoskr\.zip$`). Mark it a pre-release while parts are untested on hardware, and say in the notes what was and wasn't tested.
