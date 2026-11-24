@@ -68,19 +68,19 @@ Each workflow lists the steps as the code performs them. Device-level steps are 
 ### W-01 Install onto a Thor from a PC
 1. Clone the repo and run `./scripts/deploy.sh <host>`, or set `THOR_HOST` or `local/thor.env` (`scripts/deploy.sh:5-14`).
 2. The script copies `debug_codes.py`, `bin/*.py`, the desktop entries, the icon, the user unit and the Decky files
-   (`scripts/deploy.sh:21-68`).
+   (`scripts/deploy.sh:22-69`).
 3. It reloads the user systemd, restarts `plugin_loader.service` and restarts `touch-master.service`
-   (`scripts/deploy.sh:70-71`).
+   (`scripts/deploy.sh:71-72`).
 4. In Steam, open Decky, then Ratatoskr, and check that "Enable Bottom Screen" is on (`docs/installation.md`, "Verify").
 
 ### W-02 Install from the release zip
 `python scripts/build-release.py` writes `release/Ratatoskr.zip` with one top-level `thor-input/` folder
-(`scripts/build-release.py:2-9`). On first load Decky runs `main.py` `Plugin._main`, which calls `_sync_driver`
+(`scripts/build-release.py:2-12`). On first load Decky runs `main.py` `Plugin._main`, which calls `_sync_driver`
 (`main.py:76`; `_main` starts at `main.py:196` and calls it at `main.py:199`). That copies the shipped driver files into the home folder when they are missing or differ,
 reloads user systemd if the unit changed, and starts or restarts the service.
 
 ### W-03 Turn the bottom screen on or off
-- **Decky**: "Enable Bottom Screen" calls `set_enabled` (`dist/index.js:304-320`). Enabling runs
+- **Decky**: "Enable Bottom Screen" calls `set_enabled` (`src/index.tsx:292-298`). Enabling runs
   `_start_service` (disable `armada-bottom-screen.service`, enable and start `touch-master.service`,
   `main.py:242-245`). Disabling runs `_stop_service` (stop and disable Ratatoskr, re-enable and start Armada's session,
   `main.py:247-251`).
@@ -91,7 +91,7 @@ reloads user systemd if the unit changed, and starts or restarts the service.
 ### W-04 Choose an input mode
 Modes are `trackpad`, `split`, `keyboard` and `settings` (`bin/thor_app.py:367`, which also accepts no others).
 They can be chosen from the header buttons (Trackpad, Split, Keyboard, Quick Controls, and PS while Chiaki-NG has focus), the status ribbon (a tap toggles
-Quick Controls, `bin/thor_app.py:809-811`), the Decky dropdown (`dist/index.js:287-293`), the tray menu, or
+Quick Controls, `bin/thor_app.py:809-811`), the Decky dropdown (`src/index.tsx:276-282`), the tray menu, or
 `touch_master_manager.py --mode trackpad|keyboard|settings` (the CLI has no `split` choice, `bin/touch_master_manager.py:415`).
 
 ### W-05 Use the trackpad
@@ -114,7 +114,7 @@ and drags along the right and bottom edges scroll. Pen + also asks Game Mode to 
 Quick Controls shows three sliders (volume with mute, top brightness, bottom brightness), the ribbon (battery, CPU, GPU,
 RAM, volume, brightness), and three buttons: Tap Click on/off, Right-click mode (2-finger or press-hold) and Back to
 Trackpad (`bin/thor_app.py` `_draw_quick_settings`, `_handle_settings_touch`). The Decky panel exposes the
-same settings plus pointer tuning, keyboard timings and Pen controls (`dist/index.js`).
+same settings plus pointer tuning, keyboard timings and Pen controls (`src/index.tsx`).
 
 ### W-09 Hide the UI and bring it back
 The **Hide** header button blanks everything except an **Open** button in the same corner. While hidden, the whole

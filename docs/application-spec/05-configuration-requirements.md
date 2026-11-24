@@ -53,7 +53,7 @@ of driver keys every time (`bin/thor_app.py:270-280`).
 ### Notes on the defaults and ranges
 
 - The panel's slider limits are narrower than the driver's clamp: sensitivity 0.5 to 3.5, long-press delay 250 to 900,
-  keyboard timings within the same ranges as the driver (`dist/index.js:386-392`, `:452-455`, `:521-549`).
+  keyboard timings within the same ranges as the driver (`src/index.tsx:370-376`, `:441-444`, `:511-539`).
 - The manager's sensitivity slider is 0.2 to 3.0 (`bin/touch_master_manager.py:208`). Three different ranges exist.
 - `keyboard_settings.LIMITS` and `_apply_mirror_settings` clamp the values on every change, so a value outside a range
   is accepted and then changed (`bin/keyboard_settings.py:23-24`, `bin/thor_app.py:308`).
@@ -69,9 +69,9 @@ of driver keys every time (`bin/thor_app.py:270-280`).
 | `~/.local/state/thor-input/dim-restore.json` | pre-dim bottom level `{"pct", "ts"}` | driver while the bottom is dimmed | `bin/dim_mirror.py:52-53`, `:262-278` |
 | `/etc/armada/bottom-screen-brightness` | Armada's saved bottom level (written by the driver on a brightness change and a dim) | driver through `sudo -n tee` when needed | `bin/system_stats.py:18`, `bin/dim_mirror.py:51` |
 | `~/.local/share/thor-input/` | driver app: `bin/*.py`, `debug_codes.py` | `scripts/deploy.sh`, release zip | `docs/installation.md`, `main.py:27` |
-| `~/.config/systemd/user/touch-master.service` | user unit | `scripts/deploy.sh`, release zip | `scripts/deploy.sh:45-49`, `main.py:76-106` |
-| `~/.local/share/applications/touch-master.desktop`, `touch-master-stop.desktop` | launcher entries | `scripts/deploy.sh`, release zip | `scripts/deploy.sh:32-43` |
-| `~/.local/share/icons/hicolor/scalable/apps/touch-master.svg` | icon | `scripts/deploy.sh`, release zip | `scripts/deploy.sh:37` |
+| `~/.config/systemd/user/touch-master.service` | user unit | `scripts/deploy.sh`, release zip | `scripts/deploy.sh:46-50`, `main.py:76-106` |
+| `~/.local/share/applications/touch-master.desktop`, `touch-master-stop.desktop` | launcher entries | `scripts/deploy.sh`, release zip | `scripts/deploy.sh:33-44` |
+| `~/.local/share/icons/hicolor/scalable/apps/touch-master.svg` | icon | `scripts/deploy.sh`, release zip | `scripts/deploy.sh:38` |
 | `/home/armada/homebrew/plugins/thor-input/` | Decky plugin folder (root-owned) | `scripts/deploy.sh`, `scripts/deploy-decky-panel.sh` | `scripts/deploy.sh:15`, `scripts/deploy-decky-panel.sh:16` |
 | `/etc/sudoers.d/92-ratatoskr-backlight` (or as named in the file's comment) | optional narrow sudo rule | the user, by hand | `docs/installation.md:43-46`, `systemd/touch-master-backlight.sudoers:5-6` |
 | `/usr/bin/armada-run-bottom` | wrapper the service runs the driver through | Armada | `systemd/touch-master.service:10` |
@@ -111,7 +111,7 @@ reading of the code against the rule file. The docs call the narrow rule "untest
 | `systemctl --user` with a running user session | used by the Decky backend and the manager | `main.py:216-240`, `bin/touch_master_manager.py:80-119` |
 | Gleipnir (optional) | only for the status view | `bin/gleipnir_view.py` |
 | AppIndicator3 (optional) | only for the tray menu | `bin/thor_app.py:27-32` |
-| Git on the developer PC | for `build-release.py` (reads `HEAD`) and `deploy.sh` | `scripts/build-release.py:28-29` |
+| Git on the developer PC | for `build-release.py` (reads `HEAD`) and `deploy.sh` | `scripts/build-release.py:33-34` |
 
 ## Requirements
 
@@ -129,7 +129,7 @@ exercises it. The tests that need a device are marked (device). "Status" is what
 | R-04 | Four or more fingers produce no output until they all lift or go quiet | `bin/engine.py:693-701`; `tests/test_engine.py` | implemented |
 | R-05 | The keyboard sends Linux key codes; Shift, Ctrl, Alt, Win behave as in [02](02-features.md#keyboard) | `bin/modifiers.py`; `tests/test_modifiers.py`; `tests/test_keyboard_handlers.py` (device) | implemented |
 | R-06 | Leaving Keyboard or Split releases latched and locked modifiers | `bin/thor_app.py:373-376`; `tests/test_keyboard_handlers.py` (device) | implemented |
-| R-07 | Each mode can be chosen from the header, the panel, the manager, the tray and the CLI | `bin/thor_app.py:366-368`, `dist/index.js:287-293`, `bin/touch_master_manager.py:415` | implemented; the manager and CLI cannot select Split |
+| R-07 | Each mode can be chosen from the header, the panel, the manager, the tray and the CLI | `bin/thor_app.py:366-368`, `src/index.tsx:276-282`, `bin/touch_master_manager.py:415` | implemented; the manager and CLI cannot select Split |
 | R-08 | Hide blanks the UI and Open restores it; the state is not saved | `bin/thor_app.py:384-394`, `:746-764`; `tests/test_keyboard_handlers.py` (device) | implemented |
 | R-09 | Quick Controls writes are clamped and asynchronous; a slider keeps the finger that grabbed it | `bin/system_stats.py:87-136`, `bin/thor_app.py:981-994` | implemented |
 | R-10 | The dim feature is off by default; it dims only on a steady fall of the top backlight and restores on a rise, on input, or when the fall stops | `bin/top_follower.py`, `bin/dim_mirror.py`; `tests/test_top_follower.py`, `tests/test_dim_mirror.py` | implemented; on-device timing unconfirmed (author's docs) |
@@ -154,7 +154,7 @@ exercises it. The tests that need a device are marked (device). "Status" is what
 | N-05 | No device address or credential in tracked files; the deploy host comes from an argument or a git-ignored file | `scripts/deploy.sh:5-14`, `.gitignore` (`local/`) | implemented |
 | N-06 | Linux-bound files are checked out with LF endings | `.gitattributes` | implemented |
 | N-07 | The gesture engine, touch frame parser, modifiers, IPC helpers and dim logic import without GTK or a device | `bin/engine.py:15-18` (imports `fcntl` optionally), `bin/touch_frames.py`, `bin/modifiers.py`, `bin/ipc_util.py`, `bin/top_follower.py` | implemented |
-| N-08 | The driver and the panel need no build step | `dist/index.js` header, `docs/development.md` | implemented |
+| N-08 | The driver needs no build step; the panel is built with the Decky plugin template (`pnpm run build`). Until 2026-11-24 the panel had no build step either | `package.json`, `rollup.config.js`, `docs/development.md` | implemented |
 
 ## Requirements that are not met or not shown
 

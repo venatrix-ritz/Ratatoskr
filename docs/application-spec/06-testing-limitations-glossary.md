@@ -26,7 +26,7 @@ header. The tests were **not run** for this spec (the task was documentation onl
 | `tests/test_gleipnir_view.py` | Gleipnir status and sysfs parsing, journal, card rows | no (fake runner and sysfs) | header |
 | `tests/test_theme.py` | palette values and names | no | header |
 | `tests/test_tray_actions.py` | the tray Stop command runs the manager in its own unit | no | header |
-| `tests/test_panel_logic.cjs` | `mergeStatus` and `makeThrottle` from `dist/index.js` | no (Node) | header |
+| `tests/test_panel_logic.mjs` | `mergeStatus` and `makeThrottle` from `src/panelLogic.ts` | no (Node 23.6 or newer) | header |
 | `tests/render_screens.py` | renders every mode to PNG via `ThorApp._paint` | yes (gi and pycairo, run on the Thor) | header; not a unit test |
 | `tests/render_keyboard.py` | renders the key labels to PNG | yes (pycairo) | header; not a unit test |
 
@@ -36,10 +36,10 @@ From `docs/development.md` (not run here):
 
 ```bash
 for t in tests/test_*.py; do python "$t" || break; done
-node tests/test_panel_logic.cjs
+node tests/test_panel_logic.mjs
 python -m py_compile main.py debug_codes.py bin/*.py
-node --check dist/index.js
 bash -n scripts/deploy.sh
+pnpm exec tsc --noEmit
 ```
 
 `docs/development.md` also says the deploy routine runs the Python tests on the Thor. `scripts/deploy.sh` does not
@@ -102,7 +102,7 @@ Each item states what the existing `docs/` page says, what the code does, and wh
    `_find_bottom_touchscreen` returns the first match on name and `None` otherwise (`bin/thor_app.py:731-740`); there is no
    fallback to `event5`, and the driver retries every 5 s instead (`bin/thor_app.py:583-584`).
 2. **Tests on deploy.** `docs/development.md` says the deploy routine runs the tests on the Thor. `scripts/deploy.sh` copies
-   and restarts; it has no test step (`scripts/deploy.sh:18-73`).
+   and restarts; it has no test step (`scripts/deploy.sh:19-74`).
 3. **Steam config as a dim input.** `docs/configuration.md:34` says the dim mirror reads `IdleBacklightDimBatterySeconds`
    and `IdleBacklightDimACSeconds` from Steam's `config.vdf`. No code reads that file or those keys (grep of the repo).
    `docs/dim-mirror.md` says the first version did that and the current one does not.
@@ -110,7 +110,7 @@ Each item states what the existing `docs/` page says, what the code does, and wh
    The code uses `OPEN_HIT_PAD = 24` px (`bin/thor_app.py:114`). The driver's own scale is about 16.5 px per mm
    (`bin/thor_app.py:77-78`), so 24 px is about 1.5 mm. The "2 cm" figure is not supported by the code.
 5. **Dim description in the panel and manager.** The Decky panel says the dim "dims the bottom screen after Steam's idle-dim
-   delay ... and restores it on any input" (`dist/index.js:490-491`). The manager labels the switch "Dim bottom screen with
+   delay ... and restores it on any input" (`src/index.tsx:478-479`). The manager labels the switch "Dim bottom screen with
    Steam's idle dim" (`bin/touch_master_manager.py:232`). The code follows the top backlight, not Steam's delay
    (`bin/dim_mirror.py:1-12`), as `docs/dim-mirror.md` also says.
 6. **What restores the dim.** `docs/dim-mirror.md` (step 3) says the bottom is restored "when the bottom screen is touched".
@@ -130,7 +130,7 @@ Each item states what the existing `docs/` page says, what the code does, and wh
 10. **Keyboard layout wording.** `README.md` calls the keyboard a "5-row thumb layout". The code lays out five rows of a
     full QWERTY-style keyboard, not a thumb layout (`bin/keyboard_layout.py:119-217`).
 11. **Decky button label.** `docs/installation.md` and the other pages say "Run Diagnostics". The panel's button reads
-    "Run Self-Test Diagnostics" (`dist/index.js:599`). Cosmetic.
+    "Run Self-Test Diagnostics" (`src/index.tsx:589`). Cosmetic.
 13. **Slider failure codes.** `docs/troubleshooting.md` says a brightness slider that does nothing logs `DBG-701`, and a
     volume slider that does nothing logs `DBG-702`. Only the dim path imports the code registry and logs `DBG-701`
     (`bin/dim_mirror.py`); `bin/system_stats.py` does not log at all, and nothing emits `DBG-702` (K-11).
@@ -175,6 +175,6 @@ Each item states what the existing `docs/` page says, what the code does, and wh
 | Gleipnir | a separate charge-limiting project; Ratatoskr shows its status only | `bin/gleipnir_view.py` |
 | IPC socket | the UNIX socket the Decky backend and the manager talk to | `bin/thor_app.py:1000-1018` |
 | `DBG-nnn` | a numbered diagnostic code | `debug_codes.py` |
-| Decky panel | the Quick Access Menu plugin UI, `dist/index.js` | `dist/index.js` |
+| Decky panel | the Quick Access Menu plugin UI, `src/index.tsx` (built into `dist/index.js`) | `src/index.tsx` |
 | Manager | `bin/touch_master_manager.py`, the standalone window and CLI | `bin/touch_master_manager.py` |
 | Release zip | the Armada Store archive with the driver under `driver/` | `scripts/build-release.py` |

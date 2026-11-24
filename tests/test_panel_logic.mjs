@@ -1,17 +1,7 @@
-// Tests for the Decky panel's pure helpers (run: node tests/test_panel_logic.cjs). Loads only the block between the
-// "panel logic" markers of dist/index.js; the rest of that file needs Decky's runtime.
-const fs = require("fs");
-const path = require("path");
-const vm = require("vm");
-const assert = require("assert");
-
-const src = fs.readFileSync(path.join(__dirname, "..", "dist", "index.js"), "utf8");
-const start = src.indexOf("// --- panel logic");
-const end = src.indexOf("// --- end panel logic ---");
-assert(start >= 0 && end > start, "panel logic markers not found");
-const ctx = vm.createContext({});
-vm.runInContext(src.slice(start, end) + "\nthis.mergeStatus = mergeStatus; this.makeThrottle = makeThrottle; this.HOLD_MS = HOLD_MS;", ctx);
-const { mergeStatus, makeThrottle, HOLD_MS } = ctx;
+// Tests for the Decky panel's pure helpers (run: node tests/test_panel_logic.mjs). Imports src/panelLogic.ts directly
+// through Node's type stripping (Node 23.6 or newer); the rest of the panel needs Decky's runtime.
+import assert from "node:assert";
+import { HOLD_MS, makeThrottle, mergeStatus } from "../src/panelLogic.ts";
 
 let passed = 0;
 function test(name, fn) {

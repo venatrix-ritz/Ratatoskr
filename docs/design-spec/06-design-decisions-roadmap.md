@@ -32,7 +32,7 @@ reproduced here.
 | D-22 | Release zip: the driver ships inside the plugin and `main.py` copies it | the Armada Store installs only the plugin folder | a separate installer | `scripts/build-release.py`, `main.py:60-106`, `CHANGELOG.md` |
 | D-23 | Pure black, no fills, a 1.5 px orbit, a fading hint, and an idle veil | AMOLED pixels draw power when lit and can burn in | a lit surface | `bin/theme.py`, `bin/burn_in.py`, `CHANGELOG.md` (AMOLED entry) |
 | D-24 | Gleipnir is read-only in Ratatoskr | Gleipnir is a separate project with its own control; Ratatoskr shows status only | a control | `bin/gleipnir_view.py:4-6` |
-| D-25 | The Decky panel is plain JavaScript with no build step | Decky provides its globals; the file is shipped as is | a bundled build | `dist/index.js:1-16`, `docs/development.md` |
+| D-25 | The Decky panel is built with the Decky plugin template (TypeScript, `@decky/ui`, rollup); until 2026-11-24 it was plain JavaScript with no build step | to follow Decky's plugin guidelines | plain JavaScript against Decky's globals, shipped as is (the earlier choice) | `package.json`, `rollup.config.js`, `docs/development.md` |
 | D-26 | Runtime names kept after the rename | existing installs keep working | renaming the service and socket | `docs/installation.md`, `README.md` |
 | D-27 | Pinch zoom and drag lock removed | never implemented; the switches did nothing and had been causing stuck keys | finish them | `CHANGELOG.md` ("Removed") |
 | D-28 | Hide is not saved | a restart shows the UI, so the screen cannot be left blank by accident | saving the state | `bin/thor_app.py:143`, `CHANGELOG.md` |
@@ -53,7 +53,7 @@ is a commitment.
 | R-05 | Socket bind errors: catch and log `DBG-301` | `bin/thor_app.py:1007-1009`; `DBG-301` defined and never emitted | 05, error table |
 | R-06 | Choose: a fallback to `/dev/input/event5`, or remove the doc sentence | `docs/architecture.md:35`; no fallback in code | mismatch 1 |
 | R-07 | Make the deploy run the tests, or correct `docs/development.md` | `scripts/deploy.sh` has no test step | mismatch 2 |
-| R-08 | Correct the dim wording in the panel, the manager and `docs/dim-mirror.md` step 3 (the restore on any input) | `dist/index.js:490-491`, `bin/touch_master_manager.py:232`, `bin/dim_mirror.py:402-403` | mismatches 5 and 6 |
+| R-08 | Correct the dim wording in the panel, the manager and `docs/dim-mirror.md` step 3 (the restore on any input) | `src/index.tsx:478-479`, `bin/touch_master_manager.py:232`, `bin/dim_mirror.py:402-403` | mismatches 5 and 6 |
 | R-09 | Remove the claim that the dim reads Steam's `config.vdf` | `docs/configuration.md:34`; no code reads it | mismatch 3 |
 | R-10 | Correct the Open-button distance (24 px is about 1.5 mm, not 2 cm) | `docs/usage.md:54`, `bin/thor_app.py:77-78`, `:114` | mismatch 4 |
 | R-11 | Reconcile the sudoers file names | `docs/installation.md:45` and `systemd/touch-master-backlight.sudoers:6` | mismatch 7 |

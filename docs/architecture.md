@@ -4,7 +4,7 @@
  Steam UI (top screen)                  Bottom screen (separate gamescope, DRM-leased panel)
  ┌──────────────────────┐               ┌────────────────────────────────────────────┐
  │ Decky panel          │  Decky call   │ thor_app.py  (GTK 3 + cairo, DISPLAY :2)   │
- │ dist/index.js        │──────────────▶│  • touch reader thread (grabs the digitizer)│
+ │ src/index.tsx        │──────────────▶│  • touch reader thread (grabs the digitizer)│
  └──────────┬───────────┘               │  • gesture engine → UInputBridge            │
             │                           │  • IPC server  /run/user/<uid>/thor-input.sock
  ┌──────────▼───────────┐  JSON / UNIX  │  • stats sampler, idle tracker, dim mirror │
@@ -30,7 +30,7 @@
 - **`bin/system_stats.py`** reads battery, CPU, GPU, RAM, backlights and volume (PipeWire through `wpctl`), and writes volume and brightness. A background thread samples once a second, so drawing and IPC never wait on a sample (a sample took about 29 ms on the Thor, 2026-10-08). Slider writes go through `request_*`: the requested value is drawn at once and a writer thread per control writes only the newest value (each `sudo tee` write took about 25 ms, and the bottom slider needs two).
 - **`bin/dim_mirror.py`** is the optional idle-dim follower ([dim-mirror.md](dim-mirror.md)).
 - **`bin/touch_master_manager.py`** is the standalone GTK window and CLI.
-- **`main.py`** is the Decky backend; **`dist/index.js`** is the panel (plain JavaScript written for Decky's `DFL` and `SP_REACT` globals, no build step).
+- **`main.py`** is the Decky backend; **`src/index.tsx`** is the panel (TypeScript and React on Decky's `@decky/ui` components, built into `dist/index.js` with the Decky plugin template's rollup setup). Its pure helpers (`mergeStatus`, `makeThrottle`) are in **`src/panelLogic.ts`**.
 - **`debug_codes.py`** is the diagnostic code registry and logger shared by all of them.
 
 ## Touch path

@@ -13,6 +13,7 @@ fi
 THOR_HOST="${1:-${THOR_HOST:-}}"
 [ -n "$THOR_HOST" ] || { echo "ERROR: no Thor host. Pass it as arg 1, set THOR_HOST, or fill local/thor.env." >&2; exit 2; }
 PLUGIN_DIR="/home/armada/homebrew/plugins/thor-input"
+[ -f dist/index.js ] || { echo "ERROR: dist/index.js is missing. Build the panel first: pnpm install && pnpm run build" >&2; exit 2; }
 APP_DIR="/var/home/armada/.local/share/thor-input"
 
 echo "==> Deploying Ratatoskr to ${THOR_HOST}..."

@@ -8,6 +8,7 @@ Ratatoskr exists because other people did the hard parts first.
 - **[chiaki-ng](https://github.com/streetpea/chiaki-ng)** by streetpea and the Chiaki contributors (AGPL-3.0): PS mode relies on how its stream window turns touches and keys into DualSense input. No code is copied; `bin/ps_pad.py` names the files read.
 - **[gamescope](https://github.com/ValveSoftware/gamescope)** by Valve (BSD-2-Clause): PS mode relies on how it routes a touchscreen to the focused window and on its `GAMESCOPE_FOCUSED_APP` property. No code is copied.
 - **[Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader)** by the SteamDeckHomebrew community: the plugin framework and Quick Access Menu components.
+- **[Decky plugin template](https://github.com/SteamDeckHomebrew/decky-plugin-template)** by the SteamDeckHomebrew community (BSD 3-Clause): the panel's build setup (`rollup.config.js`, `tsconfig.json`, the `package.json` scripts and dependencies). Its licence notice is kept in `LICENSE`.
 - Research on the Thor and Armada that this was built from: [venatrix-ritz/AynThor](https://github.com/venatrix-ritz/AynThor).
 
 ## Licence note: Barry Launcher is GPL-2.0, Ratatoskr is MIT

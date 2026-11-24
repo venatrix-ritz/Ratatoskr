@@ -2,5 +2,15 @@
   "name": "Ratatoskr",
   "author": "Ven",
   "flags": [],
-  "api_version": 1
+  "api_version": 1,
+  "publish": {
+    "tags": [
+      "ayn-thor",
+      "armada-os",
+      "dual-screen",
+      "trackpad",
+      "keyboard"
+    ],
+    "description": "Turns the AYN Thor's bottom screen into a trackpad, keyboard and quick-settings panel. Armada OS only."
+  }
 }

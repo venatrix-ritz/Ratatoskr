@@ -14,24 +14,26 @@ The runtime names (`touch-master`, `thor-input`) are the project's old names. Th
 - AYN Thor on **Armada OS** with **Decky Loader** (Armada ships it). Written and tested against Armada `20261006.9c7dd3e`, kernel 7.2.6.
 - Python 3 with GTK 3 (PyGObject) and cairo on the Thor. They are already present on the surveyed Thor (the driver runs there); Ratatoskr installs no packages.
 - SSH key access to the Thor and `sudo` there, for the one-time Decky plugin copy.
+- On your PC: Node.js and pnpm 9 or newer, to build the Decky panel. The Thor needs neither.
 - `/dev/uinput` writable by the `armada` user (for the virtual mouse and keyboard). The diagnostics (below) check this.
 
 ## Install from your PC
 ```bash
 git clone https://github.com/venatrix-ritz/Ratatoskr && cd Ratatoskr
+pnpm install && pnpm run build
 ./scripts/deploy.sh armada@<thor-ip>
 ```
 The host can also come from `THOR_HOST`, `THOR_ENV_FILE` or a git-ignored `local/thor.env` (template: `scripts/thor.env.example`). The Thor's address is shown in Armada Tools, Remote Access.
 
-`deploy.sh` copies the driver, the desktop entries and icon, the user unit and the Decky plugin files, restarts `plugin_loader.service` (Decky) and restarts `touch-master.service` so the new code loads. It uses `sudo` only for the Decky plugin directory.
+`deploy.sh` copies the driver, the desktop entries and icon, the user unit and the Decky plugin files, restarts `plugin_loader.service` (Decky) and restarts `touch-master.service` so the new code loads. It uses `sudo` only for the Decky plugin directory, and stops with an error if the panel has not been built (`dist/index.js` missing).
 
 ## Install from a release zip (Armada Store)
-Build the zip with `python scripts/build-release.py` (or take `Ratatoskr.zip` from a release). It has one top-level `thor-input/` folder: the plugin, plus the driver under `driver/`. Unpacked into `~/homebrew/plugins/` (what the Armada Store does), Decky loads the plugin and `main.py` then copies the driver, the user unit and the launcher entries into the home directory and starts the service. A later zip with newer files updates them the same way. The optional narrow sudo rule below is not part of the zip.
+Build the zip with `python scripts/build-release.py` in a clean checkout (or take `Ratatoskr.zip` from a release); it runs `pnpm install --frozen-lockfile` and `pnpm run build` itself, the way Decky's builder does. It has one top-level `thor-input/` folder: the plugin, plus the driver under `driver/`. Unpacked into `~/homebrew/plugins/` (what the Armada Store does), Decky loads the plugin and `main.py` then copies the driver, the user unit and the launcher entries into the home directory and starts the service. A later zip with newer files updates them the same way. The optional narrow sudo rule below is not part of the zip.
 
 ## Manual install
 1. Copy `bin/*.py` and `debug_codes.py` to `~/.local/share/thor-input/` (keep `bin/` as a subfolder).
 2. Copy `systemd/touch-master.service` to `~/.config/systemd/user/`, then `systemctl --user daemon-reload && systemctl --user enable --now touch-master.service`.
-3. Copy `plugin.json`, `package.json`, `main.py`, `debug_codes.py` and `dist/index.js` to `/home/armada/homebrew/plugins/thor-input/` (root-owned, mode 755), then `sudo systemctl restart plugin_loader.service`.
+3. Build the panel on your PC (`pnpm install && pnpm run build`). Copy `plugin.json`, `package.json`, `main.py` and `debug_codes.py` to `/home/armada/homebrew/plugins/thor-input/` and `dist/index.js` to its `dist/` subfolder (root-owned, mode 755), then `sudo systemctl restart plugin_loader.service`.
 
 ## Verify
 - Steam menu, Decky, **Ratatoskr**: the toggle "Enable Bottom Screen" should be on and the bottom screen should show the trackpad.
