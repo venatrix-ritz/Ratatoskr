@@ -17,7 +17,9 @@
 | `bin/dim_mirror.py` | idle tracker and the bottom-screen dim follower |
 | `bin/touch_master_manager.py` | standalone GTK window and CLI |
 | `debug_codes.py` | diagnostic codes and logger |
-| `main.py`, `plugin.json`, `package.json`, `dist/index.js` | the Decky plugin (backend and panel) |
+| `main.py`, `plugin.json`, `package.json` | the Decky plugin: backend, manifest and store metadata, build scripts |
+| `src/index.tsx`, `src/panelLogic.ts` | the Decky panel (TypeScript and React), built into `dist/index.js`, which git ignores |
+| `rollup.config.js`, `tsconfig.json`, `pnpm-lock.yaml` | the panel build, from the Decky plugin template |
 | `systemd/` | the user unit and the optional sudoers fragment |
 | `scripts/deploy.sh` | install onto a Thor over SSH |
 | `scripts/artemis-wrapper.sh`, `scripts/update-artemis-config.py` | helpers for running the Artemis streaming client in Game Mode; not part of Ratatoskr's function |
@@ -26,17 +28,20 @@
 ## Running the tests
 ```bash
 for t in tests/test_*.py; do python "$t" || break; done
-node tests/test_panel_logic.cjs
+node tests/test_panel_logic.mjs
 ```
-The Python tests use fake hardware, pipes and socket pairs and run on any OS (except `tests/test_driver_sync.py`, which needs `os.chown` and skips itself on Windows); they are also run on the Thor by the deploy routine, so none of them may touch the real volume, backlight or sudo (`tests/test_system_stats.py` blocks real commands and fails if anything slips through). `tests/test_panel_logic.cjs` runs the Decky panel's pure helpers (`mergeStatus`, `makeThrottle`) under Node. The driver itself needs GTK, cairo, `/dev/uinput` and the Thor's bottom-screen session, so it can only be exercised on the device. Syntax checks that work anywhere:
+The Python tests use fake hardware, pipes and socket pairs and run on any OS (except `tests/test_driver_sync.py`, which needs `os.chown` and skips itself on Windows); they are also run on the Thor by the deploy routine, so none of them may touch the real volume, backlight or sudo (`tests/test_system_stats.py` blocks real commands and fails if anything slips through). `tests/test_panel_logic.mjs` runs the Decky panel's pure helpers (`mergeStatus`, `makeThrottle` in `src/panelLogic.ts`) under Node 23.6 or newer, which imports the TypeScript file directly (type stripping), so it needs no `pnpm install`. The driver itself needs GTK, cairo, `/dev/uinput` and the Thor's bottom-screen session, so it can only be exercised on the device. Syntax checks that work anywhere:
 ```bash
 python -m py_compile main.py debug_codes.py bin/*.py
-node --check dist/index.js
 bash -n scripts/deploy.sh
+pnpm exec tsc --noEmit --skipLibCheck
 ```
+The type check needs `pnpm install` first. `--skipLibCheck` is there because the types shipped with `@decky/api` 1.1.3 import `react-router`, which the template does not install; the panel's own files are still checked in full.
 
-## The panel has no build step
-`dist/index.js` is plain JavaScript written against the globals Decky injects (`DFL`, `SP_JSX`, `SP_REACT`), kept in the repo as shipped. Its manifest name must equal the `name` in `plugin.json` (`Ratatoskr`).
+## Building the panel
+The panel follows the [Decky plugin template](https://github.com/SteamDeckHomebrew/decky-plugin-template): `src/index.tsx` uses `@decky/ui` components and `@decky/api` calls, and `pnpm run build` (rollup with `@decky/rollup`) writes `dist/index.js`. Decky supplies React and `@decky/ui` at runtime, so the bundle refers to them instead of including them. `dist/` is git-ignored: `deploy.sh` and `deploy-decky-panel.sh` stop if it is missing, and `build-release.py` builds it with `pnpm install --frozen-lockfile`. Keep `pnpm-lock.yaml` on `lockfileVersion: '9.0'` (Decky's review checks it) and the `name` in `plugin.json` as `Ratatoskr` (the bundle's manifest name is taken from it). Logic that needs neither Decky nor React goes in `src/panelLogic.ts`, so the Node test can import it.
+
+Run `pnpm install` once, then `pnpm run build`, or `pnpm run watch` to rebuild on every save.
 
 ## Changing things
 - **A new setting:** add the key to the gesture processor (`engine.py`) or the app (`_apply_mirror_settings` is the pattern), to `get_status`, to the defaults in `main.py` and `touch_master_manager.py`, to the panel, and to [configuration.md](configuration.md).
@@ -52,5 +57,5 @@ bash -n scripts/deploy.sh
 ## Releasing
 1. In a pull request, turn the changes into a `## X.Y.Z (date)` section of `CHANGELOG.md` and set `version` in `package.json`. Merge it.
 2. Tag the merge commit on `main` as `vX.Y.Z` and push the tag.
-3. Check the tag out (a detached worktree is fine) and run `python scripts/build-release.py`. It builds `release/Ratatoskr.zip` from `HEAD`'s committed files, with one top-level `thor-input/` folder.
+3. Check the tag out (a detached worktree is fine) and run `python scripts/build-release.py`. It builds `release/Ratatoskr.zip` from `HEAD`'s committed files plus the panel, which it builds with pnpm (on `PATH`, or set `PNPM`), with one top-level `thor-input/` folder.
 4. Create the GitHub release from the tag and attach the zip as `Ratatoskr.zip`, the name the Armada Store matches (`^Ratatoskr\.zip$`). Mark it a pre-release while parts are untested on hardware, and say in the notes what was and wasn't tested.

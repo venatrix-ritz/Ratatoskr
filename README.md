@@ -24,9 +24,10 @@ A [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin and v
 ## Quick start
 ```bash
 git clone https://github.com/venatrix-ritz/Ratatoskr && cd Ratatoskr
+pnpm install && pnpm run build            # builds the Decky panel into dist/index.js
 ./scripts/deploy.sh armada@<thor-ip>      # or set THOR_HOST / local/thor.env
 ```
-Then open the Steam menu, Decky, **Ratatoskr**. Full steps, requirements and uninstall: [docs/installation.md](docs/installation.md).
+The build needs Node.js and pnpm 9 or newer on your PC; the Thor needs neither. Then open the Steam menu, Decky, **Ratatoskr**. Full steps, requirements and uninstall: [docs/installation.md](docs/installation.md).
 
 ## Documentation
 | Page | What is in it |
@@ -55,4 +56,4 @@ Then open the Steam menu, Decky, **Ratatoskr**. Full steps, requirements and uni
 The full registry is `debug_codes.py`.
 
 ## Credits and licence
-Ratatoskr builds on the work of Project Barry (Barry Launcher), the Armada team and the Decky community; see [CREDITS.md](CREDITS.md). MIT licence, see [LICENSE](LICENSE).
+Ratatoskr builds on the work of Project Barry (Barry Launcher), the Armada team and the Decky community; see [CREDITS.md](CREDITS.md). MIT licence, see [LICENSE](LICENSE); the panel's build setup comes from the [Decky plugin template](https://github.com/SteamDeckHomebrew/decky-plugin-template), whose BSD 3-Clause notice is kept in the same file.

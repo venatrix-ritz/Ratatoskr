@@ -71,15 +71,17 @@ With none set it prints an error and exits 2. It uses `set -euo pipefail`. It ru
 
 ### `scripts/deploy-decky-panel.sh [host]`
 
-Same host resolution. Copies only `plugin.json`, `package.json`, `debug_codes.py`, `main.py` and `dist/index.js`, moves
-them into the plugin folder with `sudo`, and restarts `plugin_loader.service` (`scripts/deploy-decky-panel.sh:18-31`).
+Same host resolution. Copies only `plugin.json`, `package.json`, `debug_codes.py`, `main.py` and the built `dist/index.js` (it stops if that
+is missing), moves
+them into the plugin folder with `sudo`, and restarts `plugin_loader.service` (`scripts/deploy-decky-panel.sh:19-32`).
 It does not touch the driver.
 
 ### `scripts/build-release.py [OUT.zip]`
 
-Builds the Armada Store archive. Default output `release/Ratatoskr.zip` (`scripts/build-release.py:33`). The archive has
-one top-level folder, `thor-input/`. Files are read from `HEAD`, not the working tree (`scripts/build-release.py:45`). It
-exits with an error if a mapped file is not tracked by git (`:40-42`).
+Builds the Armada Store archive. Default output `release/Ratatoskr.zip` (`scripts/build-release.py:53`). The archive has
+one top-level folder, `thor-input/`. Files are read from `HEAD`, not the working tree (`scripts/build-release.py:63`), except
+`dist/index.js`: it checks that the panel sources match `HEAD`, then builds it with `pnpm install --frozen-lockfile`
+and `pnpm run build` (`:40-49`). It exits with an error if a mapped file is not tracked by git (`:60-62`).
 
 ### `bin/thor_app.py`
 
@@ -146,7 +148,7 @@ and by `keyboard_settings.clamp` (`bin/keyboard_settings.py:18-24`).
 
 ### Decky backend methods
 
-`main.py` `Plugin` exposes these to the panel (`dist/index.js` calls them through `call`):
+`main.py` `Plugin` exposes these to the panel (`src/index.tsx:65-73` wraps each one with `callable` from `@decky/api`):
 
 | Method | Arguments | Behaviour | Source |
 |---|---|---|---|
@@ -160,5 +162,5 @@ and by `keyboard_settings.clamp` (`bin/keyboard_settings.py:18-24`).
 | `set_pen_mode` | `mode` | sends `set_pen_mode` if running | `main.py` `set_pen_mode` |
 | `run_diagnostics` | none | returns `run_self_diagnostics()` | `main.py` `run_diagnostics` |
 
-The panel polls `get_status` every 2 s (`dist/index.js:141`). It merges the reply so that a value the user just changed
-is held for 3 s (`dist/index.js:28`, `:33-48`).
+The panel polls `get_status` every 2 s (`src/index.tsx:130`). It merges the reply so that a value the user just changed
+is held for 3 s (`src/panelLogic.ts:4`, `:11-28`).

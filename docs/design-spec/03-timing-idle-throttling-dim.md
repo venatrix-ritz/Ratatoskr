@@ -40,10 +40,10 @@
 | Dim restore-failure log | at most every 30 s | `bin/dim_mirror.py:305`, `:321` | keeps the log quiet |
 | Slider input guard | 5 s | `bin/dim_mirror.py:35`, `:42` | a falling top with recent input is a slider drag |
 | Dim restore on input | input within 1 s | `bin/dim_mirror.py:402` | the bottom comes back when the user touches anything |
-| Panel poll | 2 s | `dist/index.js:141` | `get_status` |
-| Panel hold after an edit | 3 s | `dist/index.js:28` | the value the user set wins over the poll |
-| Panel slider throttle | first at once, then at most every 120 ms | `dist/index.js:124` | backend call rate during a drag |
-| Panel refresh after a setting | 700 ms | `dist/index.js:183` | picks up the other right-click setting |
+| Panel poll | 2 s | `src/index.tsx:130` | `get_status` |
+| Panel hold after an edit | 3 s | `src/panelLogic.ts:4` | the value the user set wins over the poll |
+| Panel slider throttle | first at once, then at most every 120 ms | `src/index.tsx:110` | backend call rate during a drag |
+| Panel refresh after a setting | 700 ms | `src/index.tsx:172` | picks up the other right-click setting |
 | Enable wait | up to 3.0 s, 0.1 s steps | `main.py` `set_enabled` | waits for the socket to agree |
 | Decky `systemctl` timeout | 5 s | `main.py` `_run_systemctl` | |
 | Manager refresh | 1 s, on a worker thread | `bin/touch_master_manager.py:281`, `:291-309` | window status |
@@ -173,9 +173,9 @@ that is unreadable, out of range or corrupt is deleted.
 ## Throttles and merges in the panel
 
 - **Slider writes.** `makeThrottle(setTimer, 120)` sends the first value at once, then at most one more per 120 ms with
-  the latest value, and `flush()` sends what is waiting when the panel unmounts (`dist/index.js:50-86`, `:124`, `:143-145`).
+  the latest value, and `flush()` sends what is waiting when the panel unmounts (`src/panelLogic.ts:44-78`, `src/index.tsx:110`, `:132-134`).
 - **Status merge.** `mergeStatus` keeps the value the user set for 3 s after the edit, for each key that was edited
-  (`dist/index.js:28`, `:33-48`). The hardware keys inside `hardware_stats` get the same treatment.
+  (`src/panelLogic.ts:4`, `:11-28`). The hardware keys inside `hardware_stats` get the same treatment.
 
 ## Driver-side throttles
 

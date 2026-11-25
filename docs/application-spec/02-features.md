@@ -129,7 +129,7 @@ The Open button in hidden mode is outline only and is dimmed by the same veil (`
 
 The script is searched at `/var/local/bin/gleipnir`, `/usr/local/bin/gleipnir`, then `PATH`
 (`bin/gleipnir_view.py:15`, `:23-27`). The panel offers the toggle only when Gleipnir is found or the setting is on
-(`dist/index.js:496`).
+(`src/index.tsx:484`).
 
 ## PS mode (Chiaki-NG)
 
@@ -141,7 +141,7 @@ The script is searched at `/var/local/bin/gleipnir`, `/usr/local/bin/gleipnir`, 
 | F-123 | Buttons: Create (F), PS (Esc), Options (O) held while touched; Mic taps Ctrl+M | none | `bin/ps_pad.py` `HOLD_KEYS`, `MIC_CHORD` |
 | F-126 | Pad click: a still tap (under 0.25 s and 12 px) sends T for 50 ms with the touch still down, then lifts both; a press held for the long-press delay within 24 px holds T until the lift; the outline lights up while it is held | `tap_to_click`, `long_press_delay_ms` | `PsPad.touch_up` `bin/ps_pad.py:240-257`, `_on_long_press` `:188-194`, `_finish_tap` `:180-186` |
 | F-124 | Without focus nothing is sent and the pad shows "Waiting for Chiaki-NG to have focus"; losing focus, a mode change, Hide, `SYN_DROPPED` and shutdown lift the touch and release the keys | none | `PsPad.set_active`, `release_all` `bin/ps_pad.py:138`, `:259`; `bin/thor_app.py:371-372`, `:392`, `:566`, `:676` |
-| F-125 | Decky toggle "PS touchpad while Chiaki-NG has focus" and the mode list entry | `ps_mode_auto` | `dist/index.js` |
+| F-125 | Decky toggle "PS touchpad while Chiaki-NG has focus" and the mode list entry | `ps_mode_auto` | `src/index.tsx` |
 | F-127 | While Chiaki-NG has focus the header shows a **PS** button (after Keyboard, lit in PS mode) that enters PS mode in one tap; the mode buttons narrow to fit, Left Click, Right Click, Pen and Hide keep their places, and the return mode recorded at focus is not changed | none | `HEADER_TABLE` `bin/thor_app.py:91-94`, `header_layout` `:98-106`, `_header_buttons` `:885-886`, `_handle_header_touch` `:888-893`, `_on_chiaki_focus` `:337-340` |
 
 Not yet tried in a live PS5 stream: the axis mapping of a virtual touchscreen with no connector, and whether gamescope's
@@ -154,7 +154,7 @@ edge gestures react to it, are unverified; `ps_touch_rotation` exists for the fi
 | F-130 | A 15 ms buzz from `qcom-hv-haptics` for every gesture click (taps, pen double tap, long press) | `haptics` | `UInputBridge.tap_button` `bin/engine.py`; `bin/haptics.py:124-145` |
 | F-131 | The same buzz for keyboard keys, header buttons, the ribbon, the Open button, Quick Controls buttons, PS buttons and PS pad clicks; not for moves, scrolls, slider drags or key repeat | `haptics` | `_haptic` `bin/thor_app.py:319`; `PsPad._buzz` `bin/ps_pad.py` |
 | F-132 | Each pulse uploads, plays and erases its effect (one effect slot); a busy slot skips the pulse; no device means no buzz and one `DBG-630` line | none | `bin/haptics.py:85-97`, `:124-152` |
-| F-133 | Decky toggle **Haptic feedback** | `haptics` | `dist/index.js` |
+| F-133 | Decky toggle **Haptic feedback** | `haptics` | `src/index.tsx` |
 
 Not yet felt on the Thor: the strength (`STRENGTH`, a quarter of full rumble) and length are first guesses. The driver (Armada's kernel patches for `qcom-hv-haptics`) uploads only constant and periodic effects; a rumble reaches it through the kernel's rumble emulation (`drivers/input/ff-core.c` `compat_effect`: a sine at strong/3 + weak/6), which the driver plays as a constant level, so `STRENGTH` 0x4000 drives the motor at about 17 % of its direct-play maximum. Game rumble from the controller (RSInput) drives the same motor, so a buzz during game rumble can briefly change or end it.
 

@@ -6,7 +6,7 @@
 |---|---|---|---|---|
 | Driver `bin/thor_app.py` | `touch-master.service` (user unit), `ExecStart=/usr/bin/armada-run-bottom -- /usr/bin/python3 .../bin/thor_app.py` | user `armada` | long-running; `Restart=always`, `RestartSec=2` | `systemd/touch-master.service:8-14` |
 | Decky backend `main.py` | Decky Loader, which calls `_main` on load | root (Decky) | as long as the plugin is loaded | `main.py:196-217`; `scripts/deploy.sh:15` (root-owned folder) |
-| Decky panel `dist/index.js` | Decky Loader, when the Steam Quick Access panel is open | Steam UI | while the panel is shown | `dist/index.js:89`, `:608-629` |
+| Decky panel `src/index.tsx` | Decky Loader, when the Steam Quick Access panel is open | Steam UI | while the panel is shown | `src/index.tsx:75`, `:597-617` |
 | Standalone manager `bin/touch_master_manager.py` | the user, a desktop entry, or the driver's tray menu | user | while its window is open, or for one CLI command | `bin/touch_master_manager.py:408-448` |
 | Tray stop helper | `systemd-run --user --collect --quiet <python> touch_master_manager.py --stop` | user, transient unit | one command | `bin/tray_actions.py:11-12`, `bin/thor_app.py:459-470` |
 | Short-lived subprocesses | the driver and the backend | user, or root for `sudo` | per call | see the table below |
@@ -51,7 +51,7 @@ Short-lived subprocesses and their timeouts:
 | `bin/touch_master_manager.py` | standalone GTK window and CLI | `atomic_json`, `ipc_util` | `bin/touch_master_manager.py` |
 | `debug_codes.py` | the code registry, logger, and self-test | none | `debug_codes.py` |
 | `main.py` | Decky backend: driver install from the release zip, systemd control, IPC client, config | `debug_codes` | `main.py` |
-| `dist/index.js` | Decky panel: a plain-JavaScript file with no build step | Decky globals `DFL`, `SP_REACT`, `SP_JSX` | `dist/index.js:1-16` |
+| `src/index.tsx`, `src/panelLogic.ts` | Decky panel: TypeScript and React, built into `dist/index.js` with the Decky plugin template's rollup setup | `@decky/ui`, `@decky/api` (`panelLogic` imports nothing) | `src/index.tsx:1-4`, `rollup.config.js` |
 
 `main.py` carries its own copies of the atomic write and the IPC read loop, because only `main.py` and `debug_codes.py`
 are installed in the plugin folder (`main.py:151` and `:35-57`; `bin/atomic_json.py` header). Tests check the two
@@ -91,7 +91,7 @@ flowchart LR
     GV -- "gleipnir status" --> GL[gleipnir CLI]
     IPC --> UI
   end
-  Panel["Decky panel dist/index.js"] -- call --> Backend["main.py backend (root)"]
+  Panel["Decky panel src/index.tsx"] -- call --> Backend["main.py backend (root)"]
   Backend -- "UNIX socket JSON" --> IPC
   Backend -- "systemctl --user" --> SVC[[touch-master.service]]
   MGR["touch_master_manager.py"] -- "UNIX socket JSON" --> IPC

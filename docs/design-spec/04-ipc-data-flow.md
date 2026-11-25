@@ -164,7 +164,7 @@ on each save (`:270-280`).
 
 Two settings exclude each other in the engine: turning on `long_press_right_click` turns off `two_finger_right_click`,
 and the reverse (`bin/engine.py:540-548`). The panel refreshes 700 ms after a setting so that the other one is shown
-(`dist/index.js:183`).
+(`src/index.tsx:172`).
 
 ## Data flow end to end
 

@@ -24,7 +24,7 @@ The companion [design spec](../design-spec/README.md) explains how each part wor
 Ratatoskr (formerly Touch Master, renamed 2026-10-07) turns the lower 3.92-inch AMOLED screen of an AYN Thor into a
 trackpad, a keyboard, a split of both, or a quick-settings and hardware panel, for a game running on the top screen.
 It has three parts: a GTK driver app (`bin/thor_app.py`) that grabs the bottom touchscreen and creates two virtual
-uinput devices; a Decky Loader plugin (`main.py` and `dist/index.js`) that starts, stops and configures the driver; and a
+uinput devices; a Decky Loader plugin (`main.py` and the panel `src/index.tsx`) that starts, stops and configures the driver; and a
 standalone manager (`bin/touch_master_manager.py`) that does the same without Decky.
 
 ## Status of this spec

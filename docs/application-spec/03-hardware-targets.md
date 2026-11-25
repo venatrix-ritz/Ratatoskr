@@ -81,7 +81,7 @@ Both are created through `/dev/uinput` and need write access to it (`scripts/dep
 | `armada-bottom-screen.service` | Ratatoskr conflicts with it and the stop path starts it again | `systemd/touch-master.service:5`, `main.py` `_stop_service`, `bin/touch_master_manager.py:99-116` |
 | `/run/user/<uid>/armada-bottom-env` | existence checked by self-test as the bottom display environment | `debug_codes.py:193-195` |
 | `gamescope-session-plus` | reads `~/.config/environment.d/*.conf` and passes `--hide-cursor-delay` | `bin/session_cursor.py:1-10` (author's read on 2026-10-08, **unverified** here) |
-| `plugin_loader.service` | restarted by the install scripts to reload Decky | `scripts/deploy.sh:67`, `scripts/deploy-decky-panel.sh:30` |
+| `plugin_loader.service` | restarted by the install scripts to reload Decky | `scripts/deploy.sh:68`, `scripts/deploy-decky-panel.sh:31` |
 | Decky plugin folder | `/home/armada/homebrew/plugins/thor-input` (root-owned) | `scripts/deploy.sh:15`, `scripts/deploy-decky-panel.sh:16` |
 | Steam | the top panel's idle dim is the thing mirrored; Ratatoskr does not call Steam | `bin/dim_mirror.py:1-12` |
 | Gleipnir | optional read-only status (`gleipnir --status --json`, `systemctl is-active gleipnir`, journal tag `gleipnir`) | `bin/gleipnir_view.py:4-6`, `:43`, `:79` |
