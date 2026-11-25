@@ -11,6 +11,7 @@
       "trackpad",
       "keyboard"
     ],
-    "description": "Turns the AYN Thor's bottom screen into a trackpad, keyboard and quick-settings panel. Armada OS only."
+    "description": "Turns the AYN Thor's bottom screen into a trackpad, keyboard and quick-settings panel. Armada OS only.",
+    "image": "https://raw.githubusercontent.com/venatrix-ritz/Ratatoskr/main/docs/images/store-split-preview.png"
   }
 }

@@ -34,9 +34,9 @@ The Python tests use fake hardware, pipes and socket pairs and run on any OS (ex
 ```bash
 python -m py_compile main.py debug_codes.py bin/*.py
 bash -n scripts/deploy.sh
-pnpm exec tsc --noEmit
+pnpm exec tsc --noEmit --skipLibCheck
 ```
-The type check needs `pnpm install` first.
+The type check needs `pnpm install` first. `--skipLibCheck` is there because the types shipped with `@decky/api` 1.1.3 import `react-router`, which the template does not install; the panel's own files are still checked in full.
 
 ## Building the panel
 The panel follows the [Decky plugin template](https://github.com/SteamDeckHomebrew/decky-plugin-template): `src/index.tsx` uses `@decky/ui` components and `@decky/api` calls, and `pnpm run build` (rollup with `@decky/rollup`) writes `dist/index.js`. Decky supplies React and `@decky/ui` at runtime, so the bundle refers to them instead of including them. `dist/` is git-ignored: `deploy.sh` and `deploy-decky-panel.sh` stop if it is missing, and `build-release.py` builds it with `pnpm install --frozen-lockfile`. Keep `pnpm-lock.yaml` on `lockfileVersion: '9.0'` (Decky's review checks it) and the `name` in `plugin.json` as `Ratatoskr` (the bundle's manifest name is taken from it). Logic that needs neither Decky nor React goes in `src/panelLogic.ts`, so the Node test can import it.

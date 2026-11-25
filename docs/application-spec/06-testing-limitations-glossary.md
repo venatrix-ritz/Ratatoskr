@@ -39,7 +39,7 @@ for t in tests/test_*.py; do python "$t" || break; done
 node tests/test_panel_logic.mjs
 python -m py_compile main.py debug_codes.py bin/*.py
 bash -n scripts/deploy.sh
-pnpm exec tsc --noEmit
+pnpm exec tsc --noEmit --skipLibCheck
 ```
 
 `docs/development.md` also says the deploy routine runs the Python tests on the Thor. `scripts/deploy.sh` does not
